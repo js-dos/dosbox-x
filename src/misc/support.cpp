@@ -27,7 +27,9 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
-  
+
+#include <jsdos-support.h>
+
 #include "dosbox.h"
 #include "debug.h"
 #include "logging.h"
@@ -115,7 +117,7 @@ char *strtok_dbcs(char *s, const char *d) {
     return result;
 }
 
-/* 
+/*
 	Ripped some source from freedos for this one.
 
 */
@@ -141,7 +143,7 @@ void strreplace(char * str,char o,char n) {
 		str++;
 	}
 }
-char *ltrim(char *str) { 
+char *ltrim(char *str) {
 	while (*str && isspace(*reinterpret_cast<unsigned char*>(str))) str++;
 	return str;
 }
@@ -208,7 +210,7 @@ char * ScanCMDRemain(char * cmd) {
 		while ( *scan && !isspace(*reinterpret_cast<unsigned char*>(scan)) ) scan++;
 		*scan=0;
 		return found;
-	} else return 0; 
+	} else return 0;
 }
 
 char * StripWord(char *&line) {
@@ -481,6 +483,11 @@ void E_Exit(const char * format,...) {
 	buf[sizeof(buf) - 1] = '\0';
 	strcat(buf,"\n");
 	LOG_MSG("E_Exit: %s\n",buf);
+#if defined(JSDOS_X)
+        jsdos::requestExit();
+        return;
+#endif
+
 #if defined(WIN32)
 	/* Most Windows users DON'T run DOSBox-X from the command line! */
 	MessageBox(GetHWND(), buf, "E_Exit", MB_OK | MB_ICONEXCLAMATION);

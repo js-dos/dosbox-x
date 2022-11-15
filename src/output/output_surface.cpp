@@ -162,22 +162,37 @@ Bitu OUTPUT_SURFACE_SetSize()
                 (unsigned int)final_height);
         }
 
-        sdl.window = GFX_SetSDLWindowMode(final_width, final_height, SCREEN_SURFACE);
+#ifdef JSDOS_X
+        sdl.window = nullptr;
+        sdl.surface = reinterpret_cast<SDL_Surface*>(GFX_SetSDLWindowMode(final_width, final_height, SCREEN_SURFACE));
+        if (sdl.surface == nullptr)
+          E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
+#else
         if (sdl.window == NULL)
             E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
 
         sdl.surface = SDL_GetWindowSurface(sdl.window);
+#endif
         if (sdl.surface->w < (sdl.clip.x+sdl.clip.w) ||
             sdl.surface->h < (sdl.clip.y+sdl.clip.h)) {
             /* the window surface must not be smaller than the size we want!
              * This is a way to prevent that! */
+#ifdef JSDOS_X
+          sdl.window = nullptr;
+          sdl.surface = reinterpret_cast<SDL_Surface*>(GFX_SetSDLWindowMode(sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h, SCREEN_SURFACE));
+          if (sdl.surface == NULL)
+            E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
+#else
             SDL_SetWindowMinimumSize(sdl.window, sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h);
             sdl.window = GFX_SetSDLWindowMode(sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h, SCREEN_SURFACE);
             if (sdl.window == NULL)
                 E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
+#endif
         }
     }
+#ifndef JSDOS_X
     sdl.surface = SDL_GetWindowSurface(sdl.window);
+#endif
     if (sdl.surface == NULL)
         E_Exit("Could not retrieve window surface: %s", SDL_GetError());
     switch (sdl.surface->format->BitsPerPixel) {
@@ -435,7 +450,7 @@ retry:
             if (render.aspect) aspectCorrectFitClip(sdl.clip.w, sdl.clip.h, sdl.clip.x, sdl.clip.y, final_width, final_height);
         }
         else
-#endif 
+#endif
         /* center the screen in the window */
         {
 
@@ -662,7 +677,7 @@ void OUTPUT_SURFACE_EndUpdate(const uint16_t *changedLines)
             {
                 uint32_t* clipTrg = reinterpret_cast<uint32_t*>(static_cast<char*>(sdl.surface->pixels) + clipY * sdl.surface->pitch + (unsigned int)clipX * sizeof(uint32_t));
                 xBRZ_PostScale(&xbrzBuf[0], (int)xbrzWidth, (int)xbrzHeight, (int)(xbrzWidth * sizeof(uint32_t)),
-                    &clipTrg[0], clipWidth, clipHeight, sdl.surface->pitch, 
+                    &clipTrg[0], clipWidth, clipHeight, sdl.surface->pitch,
                     sdl_xbrz.postscale_bilinear, sdl_xbrz.task_granularity);
             }
 
