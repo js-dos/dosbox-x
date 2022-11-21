@@ -84,6 +84,11 @@
 # include <emscripten.h>
 #endif
 
+#ifdef JSDOS_X
+#include <jsdos-asyncify.h>
+#include <jsdos-support.h>
+#endif
+
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -321,9 +326,36 @@ extern bool DOSBox_Paused(), isDBCSCP(), InitCodePage();
 //#define DEBUG_CYCLE_OVERRUN_CALLBACK
 
 //For trying other delays
+
+#ifdef JSDOS_X
+#define wrap_delay(a) asyncify_sleep(a)
+constexpr auto LOOP_EXECUTION_TIME = 1000 / 60;
+#ifdef EMSCRIPTEN
+EM_JS(bool, isNormalState, (), {
+  return Asyncify.state === 0 ? 1 : 0;
+});
+#else
+extern void client_tick();
+
+bool isNormalState() {
+  return true;
+}
+#endif
+#else
 #define wrap_delay(a) SDL_Delay(a)
+#endif
 
 static Bitu Normal_Loop(void) {
+#ifdef JSDOS_X
+#ifndef EMSCRIPTEN
+	client_tick();
+#endif
+    static mstime lastSleepTime = GetTicks();
+    if (GetTicks() - lastSleepTime > LOOP_EXECUTION_TIME) {
+        asyncify_sleep(0);
+        lastSleepTime = GetTicks();
+    }
+#endif
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;
     Bits ret;
 
@@ -629,6 +661,11 @@ void DOSBOX_RunMachine(void){
 #endif
 
     do {
+#ifdef JSDOS_X
+        if (isNormalState() && (jsdos::isExitRequested())) {
+            break;
+        }
+#endif
         ret=(*loop)();
     } while (!ret);
 

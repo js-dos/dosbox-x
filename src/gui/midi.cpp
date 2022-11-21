@@ -22,6 +22,10 @@
 #include <string>
 #include <algorithm>
 
+#ifdef JSDOS_X
+#include <jsdos-asyncify.h>
+#endif
+
 #include "SDL.h"
 
 #include "dosbox.h"
@@ -217,7 +221,7 @@ void MIDI_State_SaveMessage()
 					Set Pedals (#64, #65, #66, #67) to 0
 					Set Registered and Non-registered parameter number LSB and MSB (#98-#101) to null value (127)
 					Set pitch bender to center (64/0)
-					Reset channel pressure to 0 
+					Reset channel pressure to 0
 					Reset polyphonic pressure for all notes to 0.
 					*/
 					memset( midi_state[channel].code_a0, 0xff, sizeof(midi_state[channel].code_a0) );
@@ -511,7 +515,12 @@ void MIDI_State_LoadMessage()
 void MIDI_RawOutByte(uint8_t data) {
 	if (midi.sysex.start) {
 		uint32_t passed_ticks = GetTicks() - midi.sysex.start;
-		if (passed_ticks < midi.sysex.delay) SDL_Delay((Uint32)(midi.sysex.delay - passed_ticks));
+		if (passed_ticks < midi.sysex.delay)
+#ifdef JSDOS_X
+			asyncify_sleep((Uint32)(midi.sysex.delay - passed_ticks));
+#else
+			SDL_Delay((Uint32)(midi.sysex.delay - passed_ticks));
+#endif
 	}
 
 	/* Test for a realtime MIDI message */
@@ -519,10 +528,10 @@ void MIDI_RawOutByte(uint8_t data) {
 		midi.rt_buf[0]=data;
 		midi.handler->PlayMsg(midi.rt_buf);
 		return;
-	}	 
+	}
 	/* Test for a active sysex transfer */
 	if (midi.status==0xf0) {
-		if (!(data&0x80)) { 
+		if (!(data&0x80)) {
 			if (midi.sysex.used<(SYSEX_SIZE-1)) midi.sysex.buf[midi.sysex.used++] = data;
 			return;
 		} else {
@@ -733,7 +742,7 @@ private:
 				if(0) {
 				}
 
-				// external MIDI 
+				// external MIDI
 				else if( midi.available ) {
 					const char pod_name[32] = "External";
 
