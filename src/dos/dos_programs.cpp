@@ -8396,8 +8396,10 @@ void Add_VFiles(bool usecp) {
     PROGRAMS_MakeFile("COUNTRY.COM",COUNTRY_ProgramStart,"/SYSTEM/");
 	PROGRAMS_MakeFile("COMMAND.COM",SHELL_ProgramStart);
     internal_program = true;
+#ifndef JSDOS
     if (usecp && prepared) VFILE_Register("AUTOEXEC.BAT",(uint8_t *)autoexec_data,(uint32_t)strlen(autoexec_data));
     if (prepared) VFILE_Register("CONFIG.SYS",(uint8_t *)config_data,(uint32_t)strlen(config_data));
+#endif
     internal_program = false;
     PROGRAMS_MakeFile("RE-DOS.COM",REDOS_ProgramStart,"/SYSTEM/");
     PROGRAMS_MakeFile("RESCAN.COM",RESCAN_ProgramStart,"/SYSTEM/");
@@ -8463,7 +8465,7 @@ void Add_VFiles(bool usecp) {
     PROGRAMS_MakeFile("PARALLEL.COM", PARALLEL_ProgramStart,"/SYSTEM/");
     if (IS_DOSV)
         PROGRAMS_MakeFile("VTEXT.COM", VTEXT_ProgramStart,"/TEXTUTIL/");
-
+#ifndef JSDOS
 	VFILE_RegisterBuiltinFileBlob(bfb_EDLIN_EXE, "/DOS/");
 	VFILE_RegisterBuiltinFileBlob(bfb_DEBUG_EXE, "/DOS/");
 	VFILE_RegisterBuiltinFileBlob(bfb_MOVE_EXE, "/DOS/");
@@ -8480,12 +8482,16 @@ void Add_VFiles(bool usecp) {
 	VFILE_RegisterBuiltinFileBlob(bfb_CHKDSK_EXE, "/DOS/");
 	VFILE_RegisterBuiltinFileBlob(bfb_COMP_COM, "/DOS/");
 	VFILE_RegisterBuiltinFileBlob(bfb_FC_EXE, "/DOS/");
+#endif
 #if C_IPX
 	if (addipx) PROGRAMS_MakeFile("IPXNET.COM",IPXNET_ProgramStart,"/SYSTEM/");
 #endif
+#ifndef JSDOS
 	if (addne2k) VFILE_RegisterBuiltinFileBlob(bfb_NE2000_COM, "/SYSTEM/");
 	if (addovl) VFILE_RegisterBuiltinFileBlob(bfb_GLIDE2X_OVL, "/SYSTEM/");
+#endif
 
+#ifndef JSDOS
 	/* These are IBM PC/XT/AT ONLY. They will not work in PC-98 mode. */
 	if (!IS_PC98_ARCH) {
 		VFILE_RegisterBuiltinFileBlob(bfb_SYS_COM, "/DOS/"); /* may rely on INT 13h or IBM PC specific functions and layout */
@@ -8577,6 +8583,7 @@ void Add_VFiles(bool usecp) {
 	VFILE_RegisterBuiltinFileBlob(bfb_EGA3_CPX, "/CPI/");
 	VFILE_RegisterBuiltinFileBlob(bfb_EGA2_CPX, "/CPI/");
 	VFILE_RegisterBuiltinFileBlob(bfb_EGA_CPX, "/CPI/");
+#endif
 }
 
 void DOS_SetupPrograms(void) {

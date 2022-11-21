@@ -1,4 +1,4 @@
-
+#ifndef JSDOS
 #include "dos_inc.h"
 #include "../src/builtin/zip.h"
 #include "../src/builtin/eval.h"
@@ -99,3 +99,4 @@ extern struct BuiltinFileBlob bfb_KEYBOARD_SYS;
 extern struct BuiltinFileBlob bfb_KEYBRD2_SYS;
 extern struct BuiltinFileBlob bfb_KEYBRD3_SYS;
 extern struct BuiltinFileBlob bfb_KEYBRD4_SYS;
+#endif

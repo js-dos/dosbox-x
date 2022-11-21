@@ -1931,11 +1931,17 @@ bool glide_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuit
     addovl=false;
     GLIDE_ShutDown(section);
     GLIDE_PowerOn(section);
+#ifndef JSDOS
     if (addovl) VFILE_RegisterBuiltinFileBlob(bfb_GLIDE2X_OVL, "/SYSTEM/");
     else {
         VFILE_Remove("GLIDE2X.OVL","SYSTEM");
         if (!glideon) systemmessagebox("Warning", "Glide passthrough cannot be enabled. Check the Glide wrapper installation.", "ok","warning", 1);
     }
+#else 
+    if (addovl) abort();
+    VFILE_Remove("GLIDE2X.OVL","SYSTEM");
+    if (!glideon) systemmessagebox("Warning", "Glide passthrough cannot be enabled. Check the Glide wrapper installation.", "ok","warning", 1);
+#endif
     mainMenu.get_item("3dfx_glide").check(addovl).refresh_item(mainMenu);
     return true;
 }

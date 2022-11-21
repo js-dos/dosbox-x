@@ -473,6 +473,12 @@ bool sdl_wait_on_error();
 
 static char buf[1024];           //greater scope as else it doesn't always gets thrown right (linux/gcc2.95)
 void E_Exit(const char * format,...) {
+#ifdef JSDOS
+        if (jsdos::isExitRequested()) {
+          // already exiting...
+          return;
+        }
+#endif
 #if C_DEBUG && C_HEAVY_DEBUG
  	DEBUG_HeavyWriteLogInstruction();
 #endif

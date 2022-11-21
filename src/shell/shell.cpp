@@ -23,6 +23,10 @@
 #include <sys/stat.h>
 #include <gtest/gtest.h>
 
+#ifdef JSDOS
+#include <jsdos-support.h>
+#endif
+
 #include "dosbox.h"
 #include "logging.h"
 #include "regs.h"
@@ -1040,6 +1044,12 @@ void DOS_Shell::Run(void) {
 		GFX_SetTitle(-1,-1,-1,false);
 	}
 	do {
+#ifdef JSDOS
+          if (jsdos::isExitRequested()) {
+            exit = true;
+            break;
+          }
+#endif
 		/* Get command once a line */
 		if (bf) {
 			if (bf->ReadLine(input_line)) {
