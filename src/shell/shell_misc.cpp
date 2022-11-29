@@ -23,6 +23,10 @@
 #include <iterator>  //std::front_inserter
 #include <regex>
 
+#ifdef JSDOS
+#include <jsdos-support.h>
+#endif
+
 #include "logging.h"
 #include "shell.h"
 #include "timer.h"
@@ -482,6 +486,11 @@ void DOS_Shell::InputCommand(char * line) {
 	std::list<std::string>::iterator it_history = l_history.begin(), it_completion = l_completion.begin();
 
 	while (size) {
+#ifdef JSDOS
+          if (jsdos::isExitRequested()) {
+            break;
+          }
+#endif
 		dos.echo=false;
 		if (!DOS_ReadFile(input_handle,&c,&n)) {
             LOG(LOG_MISC,LOG_ERROR)("SHELL: Lost the input handle, dropping shell input loop");

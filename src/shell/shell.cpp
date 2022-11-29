@@ -1488,7 +1488,11 @@ void SHELL_Init() {
 // "\xBA To activate the keymapper \033[31mhost+M\033[37m. Host key is F12.                 \xBA\n"
     }
 
+#ifdef JSDOS
+    MSG_Add("SHELL_STARTUP_TITLE", "Welcome to js-dos/DOSBox-X !");
+#else
     MSG_Add("SHELL_STARTUP_TITLE", "Welcome to DOSBox-X !");
+#endif
     MSG_Add("SHELL_STARTUP_HEAD1_PC98", "\033[36mGetting Started with DOSBox-X:\033[37m                                    ");
     MSG_Add("SHELL_STARTUP_TEXT1_PC98", "Type \033[32mHELP\033[37m for shell commands, and \033[32mINTRO\033[37m for a short introduction. \nYou could also complete various tasks through the \033[33mdrop-down menus\033[37m.");
     MSG_Add("SHELL_STARTUP_EXAMPLE_PC98", "\033[32mExample\033[37m: Try select \033[33mTrueType font\033[37m or \033[33mOpenGL perfect\033[37m output option.");
@@ -1507,9 +1511,15 @@ void SHELL_Init() {
     MSG_Add("SHELL_STARTUP_CGA", "Composite CGA mode is supported. Use \033[31mCtrl+F8\033[37m to set composite output ON/OFF.\nUse \033[31mCtrl+Shift+[F7/F8]\033[37m to change hue; \033[31mCtrl+F7\033[37m selects early/late CGA model. ");
     MSG_Add("SHELL_STARTUP_CGA_MONO","Use \033[31mCtrl+F7\033[37m to cycle through green, amber, and white monochrome color,      \nand \033[31mCtrl+F8\033[37m to change contrast/brightness settings.                         ");
     MSG_Add("SHELL_STARTUP_HERC","Use \033[31mCtrl+F7\033[37m to cycle through white, amber, and green monochrome color.      \nUse \033[31mCtrl+F8\033[37m to toggle horizontal blending (only in graphics mode).          ");
+#ifdef JSDOS
+    MSG_Add("SHELL_STARTUP_HEAD3", "\033[36mjs-dos/DOSBox-X project on the web:                                         \033[37m");
+    MSG_Add("SHELL_STARTUP_TEXT3", "\033[32mHomepage of project\033[37m: \033[33mhttps://jsdos.com/              \033[36mComplete DOS emulations\033[37m\n\033[32mDOSBox-X guides\033[37m: \033[33mhttps://dosbox-x.com/wiki\033[32m           \033[36mDOS, Windows 3.x and 9x\033[37m\n\033[32mIssue or suggestion\033[37m: \033[33mhttps://github.com/caiiiycuk/js-dos/issues             \033[37m");
+    MSG_Add("SHELL_STARTUP_LAST", "HAVE FUN WITH js-dos/DOSBox-X !");
+#else
     MSG_Add("SHELL_STARTUP_HEAD3", "\033[36mDOSBox-X project on the web:                                                \033[37m");
-    MSG_Add("SHELL_STARTUP_TEXT3", "\033[32mHomepage of project\033[37m: \033[33mhttps://dosbox-x.com/           \033[36mComplete DOS emulations\033[37m\n\033[32mUser guides on Wiki\033[37m: \033[33mhttps://dosbox-x.com/wiki\033[32m       \033[36mDOS, Windows 3.x and 9x\033[37m\n\033[32mIssue or suggestion\033[37m: \033[33mhttps://github.com/joncampbell123/dosbox-x/issues      \033[37m");
+    MSG_Add("SHELL_STARTUP_TEXT3", "\033[32mHomepage of project\033[37m: \033[33mhttps://dosbox-x.com/        \033[36mComplete DOS emulations\033[37m\n\033[32mUser guides    \033[37m: \033[33mhttps://dosbox-x.com/wiki\033[32m       \033[36mDOS, Windows 3.x and 9x\033[37m\n\033[32mIssue or suggestion\033[37m: \033[33mhttps://github.com/joncampbell123/dosbox-x/issues      \033[37m");
     MSG_Add("SHELL_STARTUP_LAST", "HAVE FUN WITH DOSBox-X !");
+#endif 
 
 	MSG_Add("SHELL_CMD_BREAK_HELP","Sets or clears extended CTRL+C checking.\n");
 	MSG_Add("SHELL_CMD_BREAK_HELP_LONG","BREAK [ON | OFF]\n\nType BREAK without a parameter to display the current BREAK setting.\n");
