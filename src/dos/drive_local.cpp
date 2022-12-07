@@ -2820,8 +2820,10 @@ bool localFile::Close() {
         // change file time by file handle (while we still have it open)
         // so that we do not have to duplicate guest to host filename conversion here.
         // This should help Yksoft1 with file date/time, PC-98, and Shift-JIS Japanese filenames as well on Windows.
-
-#if defined(WIN32) /* TODO: What about MinGW? */
+#if defined(JSDOS_X)
+        // if we change the time it will break changes dump
+        // so do not do it
+#elif defined(WIN32) /* TODO: What about MinGW? */
         struct _utimbuf ftim;
         ftim.actime = ftim.modtime = mktime(&tim);
 
