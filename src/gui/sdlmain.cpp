@@ -9628,3 +9628,6 @@ void POD_Load_Sdlmain( std::istream& stream )
 	READ_POD( &sdl.mouse.autolock, sdl.mouse.autolock );
 	READ_POD( &sdl.mouse.requestlock, sdl.mouse.requestlock );
 }
+#ifdef JSDOS
+void client_stdout(const char* data, uint32_t amount) {}
+#endif

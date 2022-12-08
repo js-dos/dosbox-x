@@ -25,6 +25,10 @@
 # include <malloc.h>
 #endif
 
+#ifdef JSDOS
+#include <jsdos-support.h>
+#endif
+
 #include "dosbox.h"
 #include "bios.h"
 #include "logging.h"
@@ -684,6 +688,11 @@ bool DOS_WriteFile(uint16_t entry,const uint8_t * data,uint16_t * amount,bool fc
 	}
 */
 	uint16_t towrite=*amount;
+#ifdef JSDOS
+        if (entry == STDOUT && towrite > 0) {
+          jsdos::cout(reinterpret_cast<const char *>(data), towrite);
+        }
+#endif
 	bool ret=Files[handle]->Write(data,&towrite);
 	*amount=towrite;
 	return ret;
