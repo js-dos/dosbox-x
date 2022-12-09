@@ -518,6 +518,7 @@ int disk_data_rate = 2100000;    // 2.1MBytes/sec mid 1990s IDE PIO hard drive w
 int floppy_data_rate;
 
 void diskio_delay(Bits value/*bytes*/, int type = -1) {
+#ifndef JSDOS
     if ((type == 0 && floppy_data_rate != 0) || (type != 0 && disk_data_rate != 0)) {
         double scalar;
         double endtime;
@@ -539,6 +540,7 @@ void diskio_delay(Bits value/*bytes*/, int type = -1) {
             CALLBACK_Idle();
         } while (PIC_FullIndex() < endtime);
     }
+#endif
 }
 
 static inline void overhead() {
