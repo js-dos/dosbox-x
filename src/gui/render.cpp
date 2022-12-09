@@ -286,7 +286,7 @@ static void RENDER_StartLineHandler(const void * s) {
     }
 }
 
-static void RENDER_FinishLineHandler(const void * s) {
+void RENDER_FinishLineHandler(const void * s) {
     if (s) {
         const Bitu *src = (Bitu*)s;
         Bitu *cache = (Bitu*)(render.scale.cacheRead);
@@ -429,7 +429,7 @@ void RENDER_EndUpdate( bool abort ) {
     }
 }
 
-static Bitu MakeAspectTable(Bitu skip,Bitu height,double scaley,Bitu miny) {
+Bitu MakeAspectTable(Bitu skip,Bitu height,double scaley,Bitu miny) {
     Bitu i;
     double lines=0;
     Bitu linesadded=0;
@@ -457,6 +457,9 @@ std::string RENDER_GetScaler(void) {
     return prop->GetSection()->Get_string("type");
 }
 
+#ifdef JSDOS
+extern void RENDER_Reset( void );
+#else
 void RENDER_Reset( void ) {
     Bitu width=render.src.width;
     Bitu height=render.src.height;
@@ -842,6 +845,7 @@ forcenormal:
 	SetWindowTransparency(-1);
 #endif
 }
+#endif
 
 void RENDER_CallBack( GFX_CallBackFunctions_t function ) {
     if (function == GFX_CallBackStop) {
