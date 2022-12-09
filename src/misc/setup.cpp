@@ -55,7 +55,7 @@ void Value::destroy() {
 
 Value& Value::copy(Value const& in) {
     if (this != &in) { //Selfassigment!
-        if (type != V_NONE && type != in.type) throw WrongType();
+        if (type != V_NONE && type != in.type) jsthrow("throw WrongType();");
         destroy();
         plaincopy(in);
     }
@@ -72,27 +72,27 @@ void Value::plaincopy(Value const& in) {
 }
 
 Value::operator bool () const {
-    if (type != V_BOOL) throw WrongType();
+    if (type != V_BOOL) jsthrow("throw WrongType();");
     return _bool;
 }
 
 Value::operator Hex () const {
-    if (type != V_HEX) throw WrongType();
+    if (type != V_HEX) jsthrow("throw WrongType();");
     return _hex;
 }
 
 Value::operator int () const {
-    if (type != V_INT) throw WrongType();
+    if (type != V_INT) jsthrow("throw WrongType();");
     return _int;
 }
 
 Value::operator double () const {
-    if (type != V_DOUBLE) throw WrongType();
+    if (type != V_DOUBLE) jsthrow("throw WrongType();");
     return _double;
 }
 
 Value::operator char const* () const {
-    if (type != V_STRING) throw WrongType();
+    if (type != V_STRING) jsthrow("throw WrongType();");
     return _string->c_str();
 }
 
@@ -125,9 +125,9 @@ bool Value::SetValue(string const& in,Etype _type) {
     /* Throw exception if the current type isn't the wanted type 
      * Unless the wanted type is current.
      */
-    if (_type == V_CURRENT && type == V_NONE) throw WrongType();
+    if (_type == V_CURRENT && type == V_NONE) jsthrow("throw WrongType();");
     if (_type != V_CURRENT) { 
-        if (type != V_NONE && type != _type) throw WrongType();
+        if (type != V_NONE && type != _type) jsthrow("throw WrongType();");
         type = _type;
     }
     bool retval = true;
@@ -152,7 +152,7 @@ bool Value::SetValue(string const& in,Etype _type) {
         case V_CURRENT:
         default:
             /* Shouldn't happen!/Unhandled */
-            throw WrongType();
+            jsthrow("throw WrongType();");
             break;
     }
     return retval;
@@ -1129,7 +1129,7 @@ bool Config::ParseConfigFile(char const * const configfilename) {
         case '%':
             if (strcasecmp(currentsection->GetName(), "autoexec")) continue;
         default:
-            try {
+//            try {
                 if (currentsection) {
 					bool savedata=!strcasecmp(currentsection->GetName(), "pc98")||!strcasecmp(currentsection->GetName(), "ttf")||!strcasecmp(currentsection->GetName(), "4dos")||!strcasecmp(currentsection->GetName(), "config");
 					if (!currentsection->HandleInputline(gegevens)&&strcasecmp(currentsection->GetName(), "autoexec")) savedata=true;
@@ -1141,10 +1141,10 @@ bool Config::ParseConfigFile(char const * const configfilename) {
 						}
 					}
 				}
-            } catch(const char* message) {
-                message=0;
-                //EXIT with message
-            }
+//            } catch(const char* message) {
+//                message=0;
+//                EXIT with message
+//            }
             break;
         }
     }

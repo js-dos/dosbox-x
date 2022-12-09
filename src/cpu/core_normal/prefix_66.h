@@ -149,31 +149,31 @@
 	CASE_D(0x60)												/* PUSHAD */
 		{
 			uint32_t old_esp = reg_esp;
-			try {
+//			try {
 				uint32_t tmpesp = reg_esp;
 				Push_32(reg_eax);Push_32(reg_ecx);Push_32(reg_edx);Push_32(reg_ebx);
 				Push_32(tmpesp);Push_32(reg_ebp);Push_32(reg_esi);Push_32(reg_edi);
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				LOG_MSG("PUSHAD interrupted by page fault");
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				LOG_MSG("PUSHAD interrupted by page fault");
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} break;
 	CASE_D(0x61)												/* POPAD */
 		{
 			uint32_t old_esp = reg_esp;
-			try {
+//			try {
 				reg_edi=Pop_32();reg_esi=Pop_32();reg_ebp=Pop_32();Pop_32();//Don't save ESP
 				reg_ebx=Pop_32();reg_edx=Pop_32();reg_ecx=Pop_32();reg_eax=Pop_32();
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				LOG_MSG("POPAD interrupted by page fault");
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				LOG_MSG("POPAD interrupted by page fault");
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} break;
 	CASE_D(0x62)												/* BOUND Ed */
 		{
@@ -374,17 +374,17 @@
 		{
 			uint32_t old_esp = reg_esp;
 
-			try {
+//			try {
 				uint32_t val=Pop_32();
 				GetRM;
 				if (rm >= 0xc0 ) {GetEArd;*eard=val;}
 				else {GetEAa;SaveMd(eaa,val);}
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} break;
 	CASE_D(0x91)												/* XCHG ECX,EAX */
 		{ uint32_t temp=reg_eax;reg_eax=reg_ecx;reg_ecx=temp;break;}
@@ -487,17 +487,17 @@
 		{
 			uint32_t old_esp = reg_esp;
 
-			try {
+//			try {
 				/* this is structured either to complete RET or leave registers unmodified if interrupted by page fault */
 				uint32_t new_eip = Pop_32();
 				reg_esp += Fetchw();
 				reg_eip = new_eip;
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				reg_esp = old_esp; /* restore stack pointer */
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				reg_esp = old_esp; /* restore stack pointer */
+//				jsthrow("throw;");
+//			}
 		} continue;
 	CASE_D(0xc3)												/* RETN */
 		reg_eip=Pop_32();
@@ -540,14 +540,14 @@
 
 			reg_esp &= cpu.stack.notmask;
 			reg_esp |= reg_ebp&cpu.stack.mask;
-			try {
+//			try {
 				reg_ebp = Pop_32();
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} break;
 	CASE_D(0xca)												/* RETF Iw */
 		{ 

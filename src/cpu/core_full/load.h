@@ -349,58 +349,58 @@ l_M_Ed:
 	case D_PUSHAw:
 		if (CPU_ArchitectureType<CPU_ARCHTYPE_80186) goto illegalopcode;
 		{
-			try {
+//			try {
 				uint16_t old_sp = (CPU_ArchitectureType >= CPU_ARCHTYPE_286 ? reg_sp : (reg_sp-10));
 				Push_16(reg_ax);Push_16(reg_cx);Push_16(reg_dx);Push_16(reg_bx);
 				Push_16(old_sp);Push_16(reg_bp);Push_16(reg_si);Push_16(reg_di);
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				LOG_MSG("PUSHA interrupted by page fault");
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				LOG_MSG("PUSHA interrupted by page fault");
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} goto nextopcode;
 	case D_PUSHAd:
 		{
-			try {
+//			try {
 				uint32_t tmpesp = reg_esp;
 				Push_32(reg_eax);Push_32(reg_ecx);Push_32(reg_edx);Push_32(reg_ebx);
 				Push_32(tmpesp);Push_32(reg_ebp);Push_32(reg_esi);Push_32(reg_edi);
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				LOG_MSG("PUSHAD interrupted by page fault");
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				LOG_MSG("PUSHAD interrupted by page fault");
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} goto nextopcode;
 	case D_POPAw:
 		if (CPU_ArchitectureType<CPU_ARCHTYPE_80186) goto illegalopcode;
 		{
-			try {
+//			try {
 				reg_di=Pop_16();reg_si=Pop_16();reg_bp=Pop_16();Pop_16();//Don't save SP
 				reg_bx=Pop_16();reg_dx=Pop_16();reg_cx=Pop_16();reg_ax=Pop_16();
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				LOG_MSG("POPA interrupted by page fault");
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				LOG_MSG("POPA interrupted by page fault");
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} goto nextopcode;
 	case D_POPAd:
 		{
-			try {
+//			try {
 				reg_edi=Pop_32();reg_esi=Pop_32();reg_ebp=Pop_32();Pop_32();//Don't save ESP
 				reg_ebx=Pop_32();reg_edx=Pop_32();reg_ecx=Pop_32();reg_eax=Pop_32();
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				LOG_MSG("POPAD interrupted by page fault");
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				LOG_MSG("POPAD interrupted by page fault");
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} goto nextopcode;
 	case D_POPSEGw:
 		if (CPU_PopSeg((SegNames)inst.code.extra,false)) RunException();
@@ -507,27 +507,27 @@ l_M_Ed:
 		{
 			reg_esp &= cpu.stack.notmask;
 			reg_esp |= reg_ebp&cpu.stack.mask;
-			try {
+//			try {
 				reg_bp = Pop_16();
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} goto nextopcode;
 	case D_LEAVEd:
 		{
 			reg_esp &= cpu.stack.notmask;
 			reg_esp |= reg_ebp&cpu.stack.mask;
-			try {
+//			try {
 				reg_ebp = Pop_32();
-			}
-			catch (GuestPageFaultException &pf) {
-				(void)pf;
-				reg_esp = old_esp;
-				throw;
-			}
+//			}
+//			catch (GuestPageFaultException &pf) {
+//				(void)pf;
+//				reg_esp = old_esp;
+//				jsthrow("throw;");
+//			}
 		} goto nextopcode;
 	case D_DAA:
 		DAA();

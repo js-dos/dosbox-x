@@ -379,7 +379,7 @@ static Bitu Normal_Loop(void) {
         }
     }
 
-    try {
+//    try {
         while (1) {
             if (PIC_RunQueue()) {
                 /* now is the time to check for the NMI (Non-maskable interrupt) */
@@ -437,44 +437,44 @@ static Bitu Normal_Loop(void) {
                 }
             }
         }
-    }
-    catch (const GuestPageFaultException& pf) {
-        Bitu FillFlags(void);
-
+//    }
+//    catch (const GuestPageFaultException& pf) {
+//        Bitu FillFlags(void);
+//
 //      LOG_MSG("Guest page fault %08x code %08x",(unsigned int)pf.lin_addr,(unsigned int)pf.faultcode);
-
-        /* Clear TLB because the guest OS is likely going to update the page tables to resolve the fault.
-         * This is REQUIRED for the normal core to run the Linux kernel properly, or else things just get "stuck"
-         * when you run commands. */
-        PAGING_ClearTLB();
-
-        ret = 0;
-        FillFlags();
-        paging.cr2=pf.lin_addr;
-        dosbox_allow_nonrecursive_page_fault = false;
-        CPU_Exception(EXCEPTION_PF, pf.faultcode);
-        dosbox_allow_nonrecursive_page_fault = saved_allow;
-	}
-	catch (const GuestGenFaultException& gpf) {
-        (void)gpf;//UNUSED
-		Bitu FillFlags(void);
-
-		ret = 0;
-		FillFlags();
-		dosbox_allow_nonrecursive_page_fault = false;
-		CPU_Exception(EXCEPTION_GP, 0);
-		dosbox_allow_nonrecursive_page_fault = saved_allow;
-	}
-	catch (int x) {
-		dosbox_allow_nonrecursive_page_fault = saved_allow;
-		if (x == 4/*CMOS shutdown*/) {
-			ret = 0;
+//
+//        /* Clear TLB because the guest OS is likely going to update the page tables to resolve the fault.
+//         * This is REQUIRED for the normal core to run the Linux kernel properly, or else things just get "stuck"
+//         * when you run commands. */
+//        PAGING_ClearTLB();
+//
+//        ret = 0;
+//        FillFlags();
+//        paging.cr2=pf.lin_addr;
+//        dosbox_allow_nonrecursive_page_fault = false;
+//        CPU_Exception(EXCEPTION_PF, pf.faultcode);
+//        dosbox_allow_nonrecursive_page_fault = saved_allow;
+//	}
+//	catch (const GuestGenFaultException& gpf) {
+//        (void)gpf;//UNUSED
+//		Bitu FillFlags(void);
+//
+//		ret = 0;
+//		FillFlags();
+//		dosbox_allow_nonrecursive_page_fault = false;
+//		CPU_Exception(EXCEPTION_GP, 0);
+//		dosbox_allow_nonrecursive_page_fault = saved_allow;
+//	}
+//	catch (int x) {
+//		dosbox_allow_nonrecursive_page_fault = saved_allow;
+//		if (x == 4/*CMOS shutdown*/) {
+//			ret = 0;
 //          LOG_MSG("CMOS shutdown reset acknowledged");
-		}
-		else {
-			throw;
-		}
-	}
+//		}
+//		else {
+//			jsthrow("throw;");
+//		}
+//	}
 	return 0;
 }
 

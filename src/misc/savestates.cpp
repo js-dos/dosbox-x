@@ -162,19 +162,19 @@ void SetGameState(int value) {
 void SaveGameState(bool pressed) {
     if (!pressed) return;
 
-    try
-    {
+//    try
+//    {
         LOG_MSG("Saving state to slot: %d", (int)currentSlot + 1);
         SaveState::instance().save(currentSlot);
         if (page!=GetGameState()/SaveState::SLOT_COUNT)
             SetGameState((int)currentSlot);
         else
             refresh_slots();
-    }
-    catch (const SaveState::Error& err)
-    {
-        notifyError(err);
-    }
+//    }
+//    catch (const SaveState::Error& err)
+//    {
+//        notifyError(err);
+//    }
 }
 
 
@@ -187,18 +187,18 @@ void LoadGameState(bool pressed) {
 //        return;
 //    }
     if (!GFX_IsFullscreen()&&render.aspect) GFX_LosingFocus();
-    try
-    {
+//    try
+//    {
         LOG_MSG("Loading state from slot: %d", (int)currentSlot + 1);
         SaveState::instance().load(currentSlot);
 #if defined(USE_TTF)
         if (ttf.inUse) resetFontSize();
 #endif
-    }
-    catch (const SaveState::Error& err)
-    {
-        notifyError(err);
-    }
+//    }
+//    catch (const SaveState::Error& err)
+//    {
+//        notifyError(err);
+//    }
 }
 
 void NextSaveSlot(bool pressed) {
@@ -367,7 +367,7 @@ std::string compress(const std::string& input) { //throw (SaveState::Error)
 	uLongf actualSize = bufferSize;
 	if (::compress2(reinterpret_cast<Bytef*>(&output[0]), &actualSize,
 					reinterpret_cast<const Bytef*>(input.c_str()), (uLong)input.size(), Z_BEST_SPEED) != Z_OK)
-		throw SaveState::Error("Compression failed!");
+		jsthrow("throw SaveState::Error(\"Compression failed!\");");
 
 	output.resize(actualSize);
 
@@ -393,7 +393,7 @@ std::string decompress(const std::string& input) { //throw (SaveState::Error)
 	uLongf actualSize = (uLongf)uncompressedSize;
 	if (::uncompress(reinterpret_cast<Bytef*>(&output[0]), &actualSize,
 					 reinterpret_cast<const Bytef*>(input.c_str()), (uLong)(input.size() - sizeof(uncompressedSize))) != Z_OK)
-		throw SaveState::Error("Decompression failed!");
+		jsthrow("throw SaveState::Error(\"Decompression failed!\");");
 
 	output.resize(actualSize); //should be superfluous!
 
@@ -1183,7 +1183,7 @@ void SaveState::save(size_t slot) { //throw (Error)
 	std::ofstream file (save.c_str());
 	file << "";
 	file.close();
-	try {
+//	try {
 		for (CompEntry::iterator i = components.begin(); i != components.end(); ++i) {
 			std::ostringstream ss;
 			i->second.comp.getBytes(ss);
@@ -1257,13 +1257,13 @@ void SaveState::save(size_t slot) { //throw (Error)
 				goto delete_all;
 			}
 		}
-	}
-	catch (const std::bad_alloc&) {
-		LOG_MSG("Save failed! Out of Memory!");
-		save_err=true;
-		remove(save.c_str());
-		goto delete_all;
-	}
+//	}
+//	catch (const std::bad_alloc&) {
+//		LOG_MSG("Save failed! Out of Memory!");
+//		save_err=true;
+//		remove(save.c_str());
+//		goto delete_all;
+//	}
 
 	for (CompEntry::iterator i = components.begin(); i != components.end(); ++i) {
 		save2=temp+i->first;

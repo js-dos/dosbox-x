@@ -607,14 +607,14 @@ struct fatFromDOSDrive
 						ffdd.files.push_back(f);
 
 						uint32_t numSects = (dta_size + bytesPerCluster - 1) / bytesPerCluster * sectorsPerCluster;
-                        try {
+//                        try {
                             ffdd.fileAtSector.resize(ffdd.fileAtSector.size() + numSects, fileIdx);
-                        } catch (...) {
-                            LOG_MSG("Too many sectors needed, will discard remaining files (from %s)", lname);
-                            ffdd.tomany = ffdd.readOnly = true;
-                            var_write((uint32_t *const)&ffdd.fsinfosec[488], (const uint32_t)0x0);
-                            break;
-                        }
+//                        } catch (...) {
+//                            LOG_MSG("Too many sectors needed, will discard remaining files (from %s)", lname);
+//                            ffdd.tomany = ffdd.readOnly = true;
+//                            var_write((uint32_t *const)&ffdd.fsinfosec[488], (const uint32_t)0x0);
+//                            break;
+//                        }
 					}
 				}
 				skipintprog = false;

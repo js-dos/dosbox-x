@@ -60,7 +60,7 @@
 	}
 
 	if (count != 0) {
-		try {
+//		try {
 			switch (inst.code.op) {
 				case R_OUTSB:
 					do {
@@ -337,27 +337,27 @@
 					}
 				}
 			}
-		}
-		catch (GuestPageFaultException &pf) {
-			(void)pf;
-			/* Clean up after certain amount of instructions */
-			reg_esi&=(~add_mask);
-			reg_esi|=(si_index & add_mask);
-			reg_edi&=(~add_mask);
-			reg_edi|=(di_index & add_mask);
-			if (inst.prefix & PREFIX_REP) {
-				count+=count_left;
-				reg_ecx&=(~add_mask);
-				reg_ecx|=(count & add_mask);
-			}
-
-			/* rethrow the exception.
-			 * NOTE: this means the normal core has no chance to execute SAVEIP, therefore
-			 *       when the guest OS has finished handling the page fault the instruction
-			 *       pointer will come right back to the string op that caused the fault
-			 *       and the string op will restart where it left off. */
-			throw;
-		}
+//		}
+//		catch (GuestPageFaultException &pf) {
+//			(void)pf;
+//			/* Clean up after certain amount of instructions */
+//			reg_esi&=(~add_mask);
+//			reg_esi|=(si_index & add_mask);
+//			reg_edi&=(~add_mask);
+//			reg_edi|=(di_index & add_mask);
+//			if (inst.prefix & PREFIX_REP) {
+//				count+=count_left;
+//				reg_ecx&=(~add_mask);
+//				reg_ecx|=(count & add_mask);
+//			}
+//
+//			/* rethrow the exception.
+//			 * NOTE: this means the normal core has no chance to execute SAVEIP, therefore
+//			 *       when the guest OS has finished handling the page fault the instruction
+//			 *       pointer will come right back to the string op that caused the fault
+//			 *       and the string op will restart where it left off. */
+//			jsthrow("throw;");
+//		}
 	}
 }
 

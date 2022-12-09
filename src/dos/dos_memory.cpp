@@ -68,7 +68,7 @@ static void DOS_Mem_E_Exit(const char *msg) {
 
 #if C_DEBUG
     LOG_MSG("DOS fatal memory error: %s",msg);
-    throw int(7); // DOS non-fatal error (restart when debugger runs again)
+    jsthrow("throw int(7);"); // DOS non-fatal error (restart when debugger runs again)
 #else
 	E_Exit("%s",msg);
 #endif

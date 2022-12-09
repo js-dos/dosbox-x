@@ -158,14 +158,14 @@ static Bitu PROGRAMS_Handler(void) {
 	PROGRAMS_Main * handler = internal_progs[index]->main;
 	(*handler)(&new_program);
 
-	try { /* "BOOT" can throw an exception (int(2)) */
+//	try { /* "BOOT" can throw an exception (int(2)) */
 		new_program->Run();
 		delete new_program;
-	}
-	catch (...) { /* well if it happened, free the program anyway to avert memory leaks */
-		delete new_program;
-		throw; /* pass it on */
-	}
+//	}
+//	catch (...) { /* well if it happened, free the program anyway to avert memory leaks */
+//		delete new_program;
+//		jsthrow("throw;"); /* pass it on */
+//	}
 
 	return CBRET_NONE;
 }

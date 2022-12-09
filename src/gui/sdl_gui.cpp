@@ -159,7 +159,7 @@ void RebootConfig(std::string filename, bool confirm=false) {
 #else
         system((exepath+" "+para+ " &").c_str());
 #endif
-        throw(0);
+        jsthrow("throw(0);");
     }
 }
 
@@ -177,7 +177,7 @@ void RebootLanguage(std::string filename, bool confirm=false) {
 #else
         system((exepath+" "+para+ " &").c_str());
 #endif
-        throw(0);
+        jsthrow("throw(0);");
     }
 }
 
@@ -675,7 +675,7 @@ public: BadConversion(const std::string& s) : std::runtime_error(s) { }
 template<typename T> inline std::string stringify(const T& x, std::ios_base& ( *pf )(std::ios_base&) = NULL) {
     std::ostringstream o;
     if (pf) o << pf;
-    if (!(o << x)) throw BadConversion(std::string("stringify(") + typeid(x).name() + ")");
+    if (!(o << x)) jsthrow("throw BadConversion(std::string(\"stringify(\") + typeid(x).name() + \")\");");
     return o.str();
 }
 
@@ -683,7 +683,7 @@ template<typename T> inline void convert(const std::string& s, T& x, bool failIf
     std::istringstream i(s);
     if (pf) i >> pf;
     char c;
-    if (!(i >> x) || (failIfLeftoverChars && i.get(c))) throw BadConversion(s);
+    if (!(i >> x) || (failIfLeftoverChars && i.get(c))) jsthrow("throw BadConversion(s);");
 }
 
 /*****************************************************************************************************************************************/

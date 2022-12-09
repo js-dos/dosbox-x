@@ -3262,7 +3262,7 @@ void DOS_Shell::CMD_SUBST(char * args) {
  * E.g. make basedir member dos_drive instead of localdrive
  */
 	HELP("SUBST");
-	try {
+//	try {
 		char mountstring[DOS_PATHLENGTH+CROSS_LEN+20];
 		strcpy(mountstring,"MOUNT ");
 		StripSpaces(args);
@@ -3307,21 +3307,21 @@ void DOS_Shell::CMD_SUBST(char * args) {
 			return;
 		}
 
-		if (command.GetCount() != 2) throw 0 ;
+		if (command.GetCount() != 2) jsthrow("throw 0 ;");
   
 		command.FindCommand(1,arg);
-		if( (arg.size()>1) && arg[1] !=':')  throw(0);
+		if( (arg.size()>1) && arg[1] !=':')  jsthrow("throw(0);");
 		char temp_str[2] = { 0,0 };
 		temp_str[0]=(char)toupper(args[0]);
 		command.FindCommand(2,arg);
 		if((arg=="/D") || (arg=="/d")) {
-			if(!Drives[temp_str[0]-'A'] ) throw 1; //targetdrive not in use
+			if(!Drives[temp_str[0]-'A'] ) jsthrow("throw 1;"); //targetdrive not in use
 			strcat(mountstring,"-u ");
 			strcat(mountstring,temp_str);
 			this->ParseLine(mountstring);
 			return;
 		}
-		if(Drives[temp_str[0]-'A'] ) throw 2; //targetdrive in use
+		if(Drives[temp_str[0]-'A'] ) jsthrow("throw 2;"); //targetdrive in use
 		strcat(mountstring,temp_str);
 		strcat(mountstring," ");
 
@@ -3329,10 +3329,10 @@ void DOS_Shell::CMD_SUBST(char * args) {
         if (strchr(arg.c_str(),'\"')==NULL)
             sprintf(dir,"\"%s\"",arg.c_str());
         else strcpy(dir,arg.c_str());
-        if (!DOS_MakeName(dir,fulldir,&drive)) throw 3;
+        if (!DOS_MakeName(dir,fulldir,&drive)) jsthrow("throw 3;");
 	
 		localDrive* ldp=0;
-		if( ( ldp=dynamic_cast<localDrive*>(Drives[drive])) == 0 ) throw 4;
+		if( ( ldp=dynamic_cast<localDrive*>(Drives[drive])) == 0 ) jsthrow("throw 4;");
 		char newname[CROSS_LEN];   
 		strcpy(newname, ldp->basedir);	   
 		strcat(newname,fulldir);
@@ -3342,30 +3342,30 @@ void DOS_Shell::CMD_SUBST(char * args) {
 		strcat(mountstring, newname);
 		strcat(mountstring,"\"");	   
 		this->ParseLine(mountstring);
-	}
-	catch(int a){
-		switch (a) {
-			case 1:
-		       	WriteOut(MSG_Get("SHELL_CMD_SUBST_NO_REMOVE"));
-				break;
-			case 2:
-				WriteOut(MSG_Get("SHELL_CMD_SUBST_IN_USE"));
-				break;
-			case 3:
-				WriteOut(MSG_Get("SHELL_CMD_SUBST_INVALID_PATH"));
-				break;
-			case 4:
-				WriteOut(MSG_Get("SHELL_CMD_SUBST_NOT_LOCAL"));
-				break;
-			default:
-				WriteOut(MSG_Get("SHELL_CMD_SUBST_FAILURE"));
-		}
-		return;
-	}
-	catch(...) {		//dynamic cast failed =>so no localdrive
-		WriteOut(MSG_Get("SHELL_CMD_SUBST_FAILURE"));
-		return;
-	}
+//	}
+//	catch(int a){
+//		switch (a) {
+//			case 1:
+//		       	WriteOut(MSG_Get("SHELL_CMD_SUBST_NO_REMOVE"));
+//				break;
+//			case 2:
+//				WriteOut(MSG_Get("SHELL_CMD_SUBST_IN_USE"));
+//				break;
+//			case 3:
+//				WriteOut(MSG_Get("SHELL_CMD_SUBST_INVALID_PATH"));
+//				break;
+//			case 4:
+//				WriteOut(MSG_Get("SHELL_CMD_SUBST_NOT_LOCAL"));
+//				break;
+//			default:
+//				WriteOut(MSG_Get("SHELL_CMD_SUBST_FAILURE"));
+//		}
+//		return;
+//	}
+//	catch(...) {		//dynamic cast failed =>so no localdrive
+//		WriteOut(MSG_Get("SHELL_CMD_SUBST_FAILURE"));
+//		return;
+//	}
    
 	return;
 }

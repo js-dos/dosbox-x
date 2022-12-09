@@ -137,7 +137,7 @@ static bool MakeCodePage(Bitu lin_addr,CodePageHandler * &cph) {
 
 static uint8_t decode_fetchb(void) {
 	if (decoder_pagefault.had_pagefault) return 0;
-	try {
+//	try {
 		if (GCC_UNLIKELY(decode.page.index>=4096)) {
 			/* Advance to the next page */
 			decode.active_block->page.end=4095;
@@ -160,14 +160,14 @@ static uint8_t decode_fetchb(void) {
 		decode.page.index++;
 		decode.code+=1;
 		return mem_readb(decode.code-1);
-	} catch (const GuestPageFaultException& pf) {
-		decoder_pagefault = { true, pf.lin_addr, pf.page_addr, pf.faultcode };
-		return 0;
-	}
+//	} catch (const GuestPageFaultException& pf) {
+//		decoder_pagefault = { true, pf.lin_addr, pf.page_addr, pf.faultcode };
+//		return 0;
+//	}
 }
 static uint16_t decode_fetchw(void) {
 	if (decoder_pagefault.had_pagefault) return 0;
-	try {
+//	try {
 		if (GCC_UNLIKELY(decode.page.index>=4095)) {
 			uint16_t val=decode_fetchb();
 			val|=decode_fetchb() << 8;
@@ -176,14 +176,14 @@ static uint16_t decode_fetchw(void) {
 		*(uint16_t *)&decode.page.wmap[decode.page.index]+=0x0101;
 		decode.code+=2;decode.page.index+=2;
 		return mem_readw(decode.code-2);
-	} catch (const GuestPageFaultException& pf) {
-		decoder_pagefault = { true, pf.lin_addr, pf.page_addr, pf.faultcode };
-		return 0;
-	}
+//	} catch (const GuestPageFaultException& pf) {
+//		decoder_pagefault = { true, pf.lin_addr, pf.page_addr, pf.faultcode };
+//		return 0;
+//	}
 }
 static uint32_t decode_fetchd(void) {
 	if (decoder_pagefault.had_pagefault) return 0;
-	try {
+//	try {
 		if (GCC_UNLIKELY(decode.page.index>=4093)) {
 			uint32_t val=decode_fetchb();
 			val|=decode_fetchb() << 8;
@@ -195,10 +195,10 @@ static uint32_t decode_fetchd(void) {
 		*(uint32_t *)&decode.page.wmap[decode.page.index]+=0x01010101;
 		decode.code+=4;decode.page.index+=4;
 		return mem_readd(decode.code-4);
-	} catch (const GuestPageFaultException& pf) {
-		decoder_pagefault = { true, pf.lin_addr, pf.page_addr, pf.faultcode };
-		return 0;
-	}
+//	} catch (const GuestPageFaultException& pf) {
+//		decoder_pagefault = { true, pf.lin_addr, pf.page_addr, pf.faultcode };
+//		return 0;
+//	}
 }
 
 #define START_WMMEM 64
