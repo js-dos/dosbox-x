@@ -308,8 +308,10 @@ static void PAGING_NewPageFault(PhysPt lin_addr, Bitu page_addr, bool prepare_on
 	if (prepare_only) {
 		cpu.exception.which = EXCEPTION_PF;
 		cpu.exception.error = faultcode;
+#ifndef JSDOS
 	} else if (dosbox_allow_nonrecursive_page_fault) {
 		jsthrow("throw GuestPageFaultException(lin_addr,page_addr,faultcode);");
+#endif
 	} else {
 		// Save the state of the cpu cores
 		LazyFlags old_lflags;
