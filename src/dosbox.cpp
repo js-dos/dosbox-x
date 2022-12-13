@@ -649,7 +649,7 @@ void DOSBOX_RunMachine(void){
 
     do {
 #ifdef JSDOS_X
-        if (jsdos::asyncifyNormalRun() && jsdos::isExitRequested()) {
+        if (jsdos::isExitRequested()) {
             break;
         }
 #endif
