@@ -329,17 +329,8 @@ extern bool DOSBox_Paused(), isDBCSCP(), InitCodePage();
 
 #ifdef JSDOS_X
 #define wrap_delay(a) asyncify_sleep(a)
-constexpr auto LOOP_EXECUTION_TIME = 1000 / 60;
-#ifdef EMSCRIPTEN
-EM_JS(bool, isNormalState, (), {
-  return Asyncify.state === 0 ? 1 : 0;
-});
-#else
+#ifndef EMSCRIPTEN
 extern void client_tick();
-
-bool isNormalState() {
-  return true;
-}
 #endif
 #else
 #define wrap_delay(a) SDL_Delay(a)
@@ -350,11 +341,7 @@ static Bitu Normal_Loop(void) {
 #ifndef EMSCRIPTEN
 	client_tick();
 #endif
-    static mstime lastSleepTime = GetTicks();
-    if (GetTicks() - lastSleepTime > LOOP_EXECUTION_TIME) {
-        asyncify_sleep(0);
-        lastSleepTime = GetTicks();
-    }
+    asyncify_sleep(0);
 #endif
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;
     Bits ret;
@@ -662,7 +649,7 @@ void DOSBOX_RunMachine(void){
 
     do {
 #ifdef JSDOS_X
-        if (isNormalState() && (jsdos::isExitRequested())) {
+        if (jsdos::asyncifyNormalRun() && jsdos::isExitRequested()) {
             break;
         }
 #endif

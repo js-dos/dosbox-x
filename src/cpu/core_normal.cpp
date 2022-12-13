@@ -24,6 +24,10 @@
 #include "paging.h"
 #include "mmx.h"
 
+#ifdef JSDOS
+#include <jsdos-asyncify.h>
+#endif
+
 bool CPU_RDMSR();
 bool CPU_WRMSR();
 bool CPU_SYSENTER();
@@ -153,7 +157,19 @@ static INLINE uint32_t Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
+#ifdef JSDOS
+Bits CPU_Core_Normal_Run_Impl(void);
 Bits CPU_Core_Normal_Run(void) {
+  jsdos::asyncifyLock();
+  Bits result = CPU_Core_Normal_Run_Impl();
+  jsdos::asyncifyUnlock();
+  return result;
+}
+
+Bits CPU_Core_Normal_Run_Impl(void) {
+#else
+Bits CPU_Core_Normal_Run(void) {
+#endif
     if (CPU_Cycles <= 0)
 	    return CBRET_NONE;
 
