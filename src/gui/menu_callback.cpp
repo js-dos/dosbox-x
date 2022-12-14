@@ -1496,7 +1496,11 @@ bool vid_select_glsl_shader_menu_callback(DOSBoxMenu* const menu, DOSBoxMenu::it
     if (stat(cwd.c_str(),&st) != 0)
         cwd = std::string(Temp_CurrentDir);
 
+#ifdef JSDOS
+    char const * lTheOpenFileName = nullptr;
+#else
     char const * lTheOpenFileName = tinyfd_openFileDialog("Select OpenGL shader",cwd.c_str(),nFilterPatterns,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         /* Windows will fill lpstrFile with the FULL PATH.
@@ -1572,7 +1576,12 @@ bool vid_select_ttf_font_menu_callback(DOSBoxMenu* const menu, DOSBoxMenu::item*
     std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
     const char *lFilterPatterns[] = {"*.ttf","*.TTF","*.ttc","*.TTC","*.otf","*.OTF","*.fon","*.FON"};
     const char *lFilterDescription = "TrueType font files (*.ttf, *.ttc, *.otf, *.fon)";
+
+#ifdef JSDOS
+    char const * lTheOpenFileName = nullptr;
+#else
     char const * lTheOpenFileName = tinyfd_openFileDialog("Select TrueType font",cwd.c_str(),8,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         /* Windows will fill lpstrFile with the FULL PATH.
@@ -1759,7 +1768,12 @@ void Load_mapper_file() {
     std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
     const char *lFilterPatterns[] = {"*.map","*.MAP"};
     const char *lFilterDescription = "Mapper files (*.map)";
+
+#ifdef JSDOS
+    char const * lTheOpenFileName = "mapper";
+#else
     char const * lTheOpenFileName = tinyfd_openFileDialog("Select mapper file",cwd.c_str(),2,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         /* Windows will fill lpstrFile with the FULL PATH.
@@ -1812,7 +1826,12 @@ void Restart_config_file() {
     std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
     const char *lFilterPatterns[] = {"*.conf","*.CONF","*.cfg","*.CFG"};
     const char *lFilterDescription = "DOSBox-X config files (*.conf, *.cfg)";
+
+#ifdef JSDOS
+    char const * lTheOpenFileName = nullptr;
+#else
     char const * lTheOpenFileName = tinyfd_openFileDialog("Select config file",cwd.c_str(),4,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         /* Windows will fill lpstrFile with the FULL PATH.
@@ -1862,7 +1881,12 @@ void Load_language_file() {
         cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
     const char *lFilterPatterns[] = {"*.lng","*.LNG","*.txt","*.TXT"};
     const char *lFilterDescription = "DOSBox-X language files (*.lng, *.txt)";
+
+#ifdef JSDOS
+    char const * lTheOpenFileName = "language";
+#else
     char const * lTheOpenFileName = tinyfd_openFileDialog("Select language file",cwd.c_str(),4,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         /* Windows will fill lpstrFile with the FULL PATH.

@@ -87,6 +87,7 @@
 #ifdef JSDOS_X
 #include <jsdos-asyncify.h>
 #include <jsdos-support.h>
+#include <protocol.h>
 #endif
 
 #ifdef WIN32
@@ -329,18 +330,13 @@ extern bool DOSBox_Paused(), isDBCSCP(), InitCodePage();
 
 #ifdef JSDOS_X
 #define wrap_delay(a) asyncify_sleep(a)
-#ifndef EMSCRIPTEN
-extern void client_tick();
-#endif
 #else
 #define wrap_delay(a) SDL_Delay(a)
 #endif
 
 static Bitu Normal_Loop(void) {
 #ifdef JSDOS_X
-#ifndef EMSCRIPTEN
 	client_tick();
-#endif
     asyncify_sleep(0);
 #endif
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;

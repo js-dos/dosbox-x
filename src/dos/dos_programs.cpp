@@ -60,7 +60,7 @@
 #include "mouse.h"
 #include "../ints/int10.h"
 #include "../output/output_opengl.h"
-#if !defined(HX_DOS)
+#if !defined(HX_DOS) && !defined(JSDOS)
 #include "../libs/tinyfiledialogs/tinyfiledialogs.c"
 #endif
 #if defined(WIN32)
@@ -537,7 +537,11 @@ void MenuBrowseCDImage(char drive, int num) {
     std::string files="", fname="";
     const char *lFilterPatterns[] = {"*.iso","*.cue","*.bin","*.chd","*.mdf","*.gog","*.ins","*.ISO","*.CUE","*.BIN","*.CHD","*.MDF","*.GOG","*.INS"};
     const char *lFilterDescription = "CD image files (*.iso, *.cue, *.bin, *.chd, *.mdf, *.gog, *.ins)";
+#ifdef JSDOS
+    lTheOpenFileName = "cd_image";
+#else
     lTheOpenFileName = tinyfd_openFileDialog("Select a CD image file","",14,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         isoDrive *cdrom = dynamic_cast<isoDrive*>(Drives[drive-'A']);
@@ -583,7 +587,11 @@ void MenuBrowseFDImage(char drive, int num, int type) {
     std::string files="", fname="";
     const char *lFilterPatterns[] = {"*.ima","*.img","*.IMA","*.IMG"};
     const char *lFilterDescription = "Floppy image files (*.ima, *.img)";
+#ifdef JSDOS
+    lTheOpenFileName = "floppy_image";
+#else
     lTheOpenFileName = tinyfd_openFileDialog("Select a floppy image file","",4,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         //uint8_t mediaid = 0xF0; UNUSED
@@ -640,12 +648,20 @@ void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple) {
     if (arc) {
         const char *lFilterPatterns[] = {"*.zip","*.7z","*.ZIP","*.7Z"};
         const char *lFilterDescription = "Archive files (*.zip, *.7z)";
+#ifdef JSDOS
+        lTheOpenFileName = "archive";
+#else
         lTheOpenFileName = tinyfd_openFileDialog(("Select an archive file for Drive "+str+":").c_str(),"",4,lFilterPatterns,lFilterDescription,0);
+#endif
         if (lTheOpenFileName) fname = GetNewStr(lTheOpenFileName);
     } else {
         const char *lFilterPatterns[] = {"*.ima","*.img","*.vhd","*.hdi","*.iso","*.cue","*.bin","*.chd","*.mdf","*.gog","*.ins","*.IMA","*.IMG","*.VHD","*.HDI","*.ISO","*.CUE","*.BIN","*.CHD","*.MDF","*.GOG","*.INS"};
         const char *lFilterDescription = "Disk/CD image files (*.ima, *.img, *.vhd, *.hdi, *.iso, *.cue, *.bin, *.chd, *.mdf, *.gog, *.ins)";
+#ifdef JSDOS
+        lTheOpenFileName = "image";
+#else
         lTheOpenFileName = tinyfd_openFileDialog(((multiple?"Select image file(s) for Drive ":"Select an image file for Drive ")+str+":").c_str(),"",22,lFilterPatterns,lFilterDescription,multiple?1:0);
+#endif
         if (lTheOpenFileName) fname = GetNewStr(lTheOpenFileName);
         if (multiple&&fname.size()) {
             files += "\"";
@@ -654,7 +670,11 @@ void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple) {
             files += "\" ";
         }
         while (multiple&&lTheOpenFileName&&systemmessagebox("Mount image files","Do you want to mount more image file(s)?","yesno", "question", 1)) {
+#ifdef JSDOS
+            lTheOpenFileName = "image_2";
+#else
             lTheOpenFileName = tinyfd_openFileDialog(("Select image file(s) for Drive "+str+":").c_str(),"",20,lFilterPatterns,lFilterDescription,multiple?1:0);
+#endif
             if (lTheOpenFileName) {
                 fname = GetNewStr(lTheOpenFileName);
                 files += "\"";
@@ -734,7 +754,7 @@ void MenuBrowseFolder(char drive, std::string drive_type) {
 		systemmessagebox("Error",MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"),"ok","error", 1);
 		return;
 	}
-#if !defined(HX_DOS)
+#if !defined(HX_DOS) && !defined(JSDOS)
     std::string title = "Select a drive/directory to mount for Drive "+str+":";
     if(drive_type=="CDROM")
         title += " CD-ROM\nMounting a directory as CD-ROM gives an limited support";
@@ -816,7 +836,12 @@ void MenuBrowseProgramFile() {
     getcwd(Temp_CurrentDir, 512);
     const char *lFilterPatterns[] = {"*.com","*.exe","*.bat","*.COM","*.EXE","*.BAT"};
     const char *lFilterDescription = "Executable files (*.com, *.exe, *.bat)";
-    char const * lTheOpenFileName = tinyfd_openFileDialog("Select an executable file to launch","",6,lFilterPatterns,lFilterDescription,0);
+    char const * lTheOpenFileName;
+#ifdef JSDOS
+    lTheOpenFileName = "bin";
+#else
+    lTheOpenFileName = tinyfd_openFileDialog("Select an executable file to launch","",6,lFilterPatterns,lFilterDescription,0);
+#endif
 
     if (lTheOpenFileName) {
         const char *ext = strrchr(lTheOpenFileName,'.');
