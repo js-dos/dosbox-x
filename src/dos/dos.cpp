@@ -620,21 +620,21 @@ bool DOS_BreakTest(bool print=true) {
 			 *      This fixes: PC Mix compiler PCL.EXE
 			 *
 			 *      FIXME: This is an ugly hack! */
-//			try {
+			try {
 				DOS_BreakINT23InProgress = true;
 				CALLBACK_RunRealInt(0x23);
 				DOS_BreakINT23InProgress = false;
-//			}
-//			catch (int x) {
-//				if (x == 0) {
-//					DOS_BreakINT23InProgress = false;
-//					terminint23 = true;
-//				}
-//				else {
-//					LOG_MSG("Unexpected code in INT 23h termination exception\n");
-//					abort();
-//				}
-//			}
+			}
+			catch (int x) {
+				if (x == 0) {
+					DOS_BreakINT23InProgress = false;
+					terminint23 = true;
+				}
+				else {
+					LOG_MSG("Unexpected code in INT 23h termination exception\n");
+					abort();
+				}
+			}
 
 			/* if the INT 23h handler did not already terminate itself... */
 			if (!terminint23) {
@@ -1014,7 +1014,7 @@ static Bitu DOS_21Handler(void) {
 			else
                 DOS_Terminate(real_readw(SegValue(ss),reg_sp+2),false,0);
 
-            if (DOS_BreakINT23InProgress) jsthrow("throw int(0);"); /* HACK: Ick */
+            if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
             dos_program_running = false;
             *appname=0;
             *appargs=0;
@@ -1681,7 +1681,7 @@ static Bitu DOS_21Handler(void) {
 
             DOS_ResizeMemory(dos.psp(),&reg_dx);
             DOS_Terminate(dos.psp(),true,reg_al);
-            if (DOS_BreakINT23InProgress) jsthrow("throw int(0);"); /* HACK: Ick */
+            if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
             dos_program_running = false;
             *appname=0;
             *appargs=0;
@@ -2302,7 +2302,7 @@ static Bitu DOS_21Handler(void) {
                 dos.return_code = result_errorcode;
                 result_errorcode = 0;
             }
-            if (DOS_BreakINT23InProgress) jsthrow("throw int(0);"); /* HACK: Ick */
+            if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
 #if defined (WIN32) && !defined(HX_DOS)
             if (winautorun&&reqwin&&*appname&&!control->SecureMode())
                 HostAppRun();
@@ -3145,7 +3145,7 @@ static Bitu DOS_27Handler(void) {
 	uint16_t psp = dos.psp(); //mem_readw(SegPhys(ss)+reg_sp+2);
 	if (DOS_ResizeMemory(psp,&para)) {
 		DOS_Terminate(psp,true,0);
-		if (DOS_BreakINT23InProgress) jsthrow("throw int(0);"); /* HACK: Ick */
+		if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
 	}
 	return CBRET_NONE;
 }

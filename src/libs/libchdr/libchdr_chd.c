@@ -2268,7 +2268,7 @@ static chd_error hunk_read_into_memory(chd_file *chd, UINT32 hunknum, UINT8 *des
 				core_fread(chd->file, dest, chd->header.hunkbytes);
 			/* TODO
 			else if (m_parent_missing)
-				jsthrow("throw CHDERR_REQUIRES_PARENT;"); */
+				throw CHDERR_REQUIRES_PARENT; */
 			} else if (chd->parent) {
 				err = hunk_read_into_memory(chd->parent, hunknum, dest);
 				if (err != CHDERR_NONE)

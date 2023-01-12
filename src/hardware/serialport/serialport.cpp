@@ -1492,10 +1492,10 @@ void SERIAL::Run()
 	if (cmd->GetCount() == 1) {
 		int port = -1;
 		cmd->FindCommand(1, temp_line);
-//		try {
+		try {
 			port = stoi(temp_line);
-//		} catch (...) {
-//		}
+		} catch (...) {
+		}
 		if (port >= 1 && port <= 9) {
 			showPort(port-1);
 			return;
@@ -1508,10 +1508,10 @@ void SERIAL::Run()
 		// Which COM did they want to change?
 		int port = -1;
 		cmd->FindCommand(1, temp_line);
-//		try {
+		try {
 			port = stoi(temp_line);
-//		} catch (...) {
-//		}
+		} catch (...) {
+		}
 		if (port < 1 || port > 9) {
 			WriteOut(MSG_Get("PROGRAM_PORT_INVALID_NUMBER"));
 			return;

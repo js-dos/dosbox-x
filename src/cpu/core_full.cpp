@@ -109,17 +109,17 @@ restartopcode:
 		inst.code=OpCodeTable[inst.entry];
         Bitu old_flags = reg_flags;
 		uint32_t old_esp = reg_esp; // always restore stack pointer on page fault
-//		try {
+		try {
 			#include "core_full/load.h"
 			#include "core_full/op.h"
 			#include "core_full/save.h"
-//		}
-//		catch (const GuestPageFaultException &pf) {
-//			(void)pf;
-//			reg_flags = old_flags; /* core_full/op.h may have modified flags */
-//			reg_esp = old_esp;
-//			jsthrow("throw;");
-//		}
+		}
+		catch (const GuestPageFaultException &pf) {
+			(void)pf;
+			reg_flags = old_flags; /* core_full/op.h may have modified flags */
+			reg_esp = old_esp;
+			throw;
+		}
 nextopcode:;
 		SaveIP();
 		continue;

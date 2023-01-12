@@ -96,7 +96,7 @@ void DoString(STRING_OP_NORMAL type) {
 #endif
 
 	if (count != 0) {
-//		try {
+		try {
 			switch (type) {
 				case R_OUTSB:
 					do {
@@ -167,7 +167,7 @@ void DoString(STRING_OP_NORMAL type) {
 									if (di_index <= SegLimit(es)) {
 										LOG_MSG("Limit check %x <= %x (E) ES:DI",(unsigned int)di_index,(unsigned int)SegLimit(es));
 										LOG_MSG("Segment limit violation");
-                                                                                jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 								else {
@@ -176,7 +176,7 @@ void DoString(STRING_OP_NORMAL type) {
 											LOG_MSG("Limit check %x+%x-1 = %x > %x ES:DI",(unsigned int)di_index,(unsigned int)1U,
 													(unsigned int)(di_index+1U-1U),(unsigned int)SegLimit(es));
 											LOG_MSG("Segment limit violation");
-											jsthrow("throw GuestGenFaultException();");
+											throw GuestGenFaultException();
 										}
 									}
 								}
@@ -197,7 +197,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (di_index <= SegLimit(es)) {
 									LOG_MSG("Limit check %x <= %x (E) ES:DI",(unsigned int)di_index,(unsigned int)SegLimit(es));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();")
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -206,7 +206,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x ES:DI",(unsigned int)di_index,(unsigned int)2U,
 												(unsigned int)(di_index+2U-1U),(unsigned int)SegLimit(es));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -226,7 +226,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (di_index <= SegLimit(es)) {
 									LOG_MSG("Limit check %x <= %x (E) ES:DI",(unsigned int)di_index,(unsigned int)SegLimit(es));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -235,7 +235,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x ES:DI",(unsigned int)di_index,(unsigned int)4U,
 												(unsigned int)(di_index+4U-1U),(unsigned int)SegLimit(es));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -255,7 +255,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (si_index <= SegLimit(core.base_val_ds)) {
 									LOG_MSG("Limit check %x <= %x (E) DS:SI",(unsigned int)si_index,(unsigned int)SegLimit(core.base_val_ds));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -264,7 +264,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x DS:SI",(unsigned int)si_index,(unsigned int)1U,
 												(unsigned int)(si_index+1U-1U),(unsigned int)SegLimit(core.base_val_ds));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -273,7 +273,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (di_index <= SegLimit(es)) {
 									LOG_MSG("Limit check %x <= %x (E) ES:DI",(unsigned int)di_index,(unsigned int)SegLimit(es));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -282,7 +282,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x ES:DI",(unsigned int)di_index,(unsigned int)1U,
 												(unsigned int)(di_index+1U-1U),(unsigned int)SegLimit(es));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -303,7 +303,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (si_index <= SegLimit(core.base_val_ds)) {
 									LOG_MSG("Limit check %x <= %x (E) DS:SI",(unsigned int)si_index,(unsigned int)SegLimit(core.base_val_ds));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -312,7 +312,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x DS:SI",(unsigned int)si_index,(unsigned int)2U,
 												(unsigned int)(si_index+2U-1U),(unsigned int)SegLimit(core.base_val_ds));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -321,7 +321,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (di_index <= SegLimit(es)) {
 									LOG_MSG("Limit check %x <= %x (E) ES:DI",(unsigned int)di_index,(unsigned int)SegLimit(es));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -330,7 +330,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x ES:DI",(unsigned int)di_index,(unsigned int)2U,
 												(unsigned int)(di_index+2U-1U),(unsigned int)SegLimit(es));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -364,7 +364,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (si_index <= SegLimit(core.base_val_ds)) {
 									LOG_MSG("Limit check %x <= %x (E) DS:SI",(unsigned int)si_index,(unsigned int)SegLimit(core.base_val_ds));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -373,7 +373,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x DS:SI",(unsigned int)si_index,(unsigned int)4U,
 												(unsigned int)(si_index+4U-1U),(unsigned int)SegLimit(core.base_val_ds));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -382,7 +382,7 @@ void DoString(STRING_OP_NORMAL type) {
 								if (di_index <= SegLimit(es)) {
 									LOG_MSG("Limit check %x <= %x (E) ES:DI",(unsigned int)di_index,(unsigned int)SegLimit(es));
 									LOG_MSG("Segment limit violation");
-									jsthrow("throw GuestGenFaultException();");
+									throw GuestGenFaultException();
 								}
 							}
 							else {
@@ -391,7 +391,7 @@ void DoString(STRING_OP_NORMAL type) {
 										LOG_MSG("Limit check %x+%x-1 = %x > %x ES:DI",(unsigned int)di_index,(unsigned int)4U,
 												(unsigned int)(di_index+4U-1U),(unsigned int)SegLimit(es));
 										LOG_MSG("Segment limit violation");
-										jsthrow("throw GuestGenFaultException();");
+										throw GuestGenFaultException();
 									}
 								}
 							}
@@ -560,47 +560,47 @@ void DoString(STRING_OP_NORMAL type) {
 					}
 				}
 			}
-//		}
-//		catch (GuestPageFaultException &pf) {
-//			(void)pf;
-//			/* Clean up after certain amount of instructions */
-//			reg_esi&=(~add_mask);
-//			reg_esi|=(si_index & add_mask);
-//			reg_edi&=(~add_mask);
-//			reg_edi|=(di_index & add_mask);
-//			if (TEST_PREFIX_REP) {
-//				count+=count_left;
-//				reg_ecx&=(~add_mask);
-//				reg_ecx|=(count & add_mask);
-//			}
-//
-//			/* rethrow the exception.
-//			 * NOTE: this means the normal core has no chance to execute SAVEIP, therefore
-//			 *       when the guest OS has finished handling the page fault the instruction
-//			 *       pointer will come right back to the string op that caused the fault
-//			 *       and the string op will restart where it left off. */
-//			jsthrow("throw;");
-//		}
-//		catch (GuestGenFaultException &pf) {
-//			(void)pf;
-//			/* Clean up after certain amount of instructions */
-//			reg_esi&=(~add_mask);
-//			reg_esi|=(si_index & add_mask);
-//			reg_edi&=(~add_mask);
-//			reg_edi|=(di_index & add_mask);
-//			if (TEST_PREFIX_REP) {
-//				count+=count_left;
-//				reg_ecx&=(~add_mask);
-//				reg_ecx|=(count & add_mask);
-//			}
-//
-//			/* rethrow the exception.
-//			 * NOTE: this means the normal core has no chance to execute SAVEIP, therefore
-//			 *       when the guest OS has finished handling the page fault the instruction
-//			 *       pointer will come right back to the string op that caused the fault
-//			 *       and the string op will restart where it left off. */
-//			jsthrow("throw;");
-//		}
+		}
+		catch (GuestPageFaultException &pf) {
+			(void)pf;
+			/* Clean up after certain amount of instructions */
+			reg_esi&=(~add_mask);
+			reg_esi|=(si_index & add_mask);
+			reg_edi&=(~add_mask);
+			reg_edi|=(di_index & add_mask);
+			if (TEST_PREFIX_REP) {
+				count+=count_left;
+				reg_ecx&=(~add_mask);
+				reg_ecx|=(count & add_mask);
+			}
+
+			/* rethrow the exception.
+			 * NOTE: this means the normal core has no chance to execute SAVEIP, therefore
+			 *       when the guest OS has finished handling the page fault the instruction
+			 *       pointer will come right back to the string op that caused the fault
+			 *       and the string op will restart where it left off. */
+			throw;
+		}
+		catch (GuestGenFaultException &pf) {
+			(void)pf;
+			/* Clean up after certain amount of instructions */
+			reg_esi&=(~add_mask);
+			reg_esi|=(si_index & add_mask);
+			reg_edi&=(~add_mask);
+			reg_edi|=(di_index & add_mask);
+			if (TEST_PREFIX_REP) {
+				count+=count_left;
+				reg_ecx&=(~add_mask);
+				reg_ecx|=(count & add_mask);
+			}
+
+			/* rethrow the exception.
+			 * NOTE: this means the normal core has no chance to execute SAVEIP, therefore
+			 *       when the guest OS has finished handling the page fault the instruction
+			 *       pointer will come right back to the string op that caused the fault
+			 *       and the string op will restart where it left off. */
+			throw;
+		}
 	}
 }
 

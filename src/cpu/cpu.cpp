@@ -1302,7 +1302,7 @@ void CPU_Interrupt(Bitu num,Bitu type,uint32_t oldeip) {
 		old_ss = SegValue(ss);
 		old_cpl = cpu.cpl;
 
-//		try {
+		try {
 		switch (gate.Type()) {
 		case DESC_286_INT_GATE:		case DESC_386_INT_GATE:
 		case DESC_286_TRAP_GATE:	case DESC_386_TRAP_GATE:
@@ -1462,15 +1462,15 @@ do_interrupt:
 		default:
 			E_Exit("Illegal descriptor type %X for int %X",(int)gate.Type(),(int)num);
 		}
-//		}
-//		catch (const GuestPageFaultException &pf) {
-//            (void)pf;//UNUSED
-//			LOG_MSG("CPU_Interrupt() interrupted");
-//			CPU_SetSegGeneral(ss,old_ss);
-//			reg_esp = old_esp;
-//			CPU_SetCPL(old_cpl);
-//			throw;
-//		}
+		}
+		catch (const GuestPageFaultException &pf) {
+            (void)pf;//UNUSED
+			LOG_MSG("CPU_Interrupt() interrupted");
+			CPU_SetSegGeneral(ss,old_ss);
+			reg_esp = old_esp;
+			CPU_SetCPL(old_cpl);
+			throw;
+		}
 	}
 	assert(1);
 	return ; // make compiler happy
@@ -1519,7 +1519,7 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 				CPU_Exception(EXCEPTION_GP,0);
 				return;
 			} else {
-//				try {
+				try {
 				if (use32) {
 					uint32_t new_eip=mem_readd(SegPhys(ss) + (reg_esp & cpu.stack.mask));
 					uint32_t tempesp=(reg_esp&cpu.stack.notmask)|((reg_esp+4)&cpu.stack.mask);
@@ -1545,13 +1545,13 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 					/* IOPL can not be modified in v86 mode by IRET */
 					CPU_SetFlags(new_flags,FMASK_NORMAL|FLAG_NT);
 				}
-//				}
-//				catch (const GuestPageFaultException &pf) {
-//                    (void)pf;//UNUSED
-//                    LOG_MSG("CPU_IRET() interrupted prot vm86");
-//					reg_esp = orig_esp;
-//					jsthrow("throw;");
-//				}
+				}
+				catch (const GuestPageFaultException &pf) {
+                    (void)pf;//UNUSED
+                    LOG_MSG("CPU_IRET() interrupted prot vm86");
+					reg_esp = orig_esp;
+					throw;
+				}
 				cpu.code.big=false;
 				DestroyConditionFlags();
 				return;
@@ -1581,7 +1581,7 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 
 			if ((n_flags & FLAG_VM) && (cpu.cpl==0)) {
 				// commit point
-//				try {
+				try {
 				reg_esp=tempesp;
 				reg_eip=n_eip & 0xffff;
 				uint16_t n_ss,n_es,n_ds,n_fs,n_gs;
@@ -1607,13 +1607,13 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 				SegSet16(cs,(uint16_t)n_cs_sel);
 				LOG(LOG_CPU,LOG_NORMAL)("IRET:Back to V86: CS:%X IP %X SS:%X SP %X FLAGS:%X",SegValue(cs),reg_eip,SegValue(ss),reg_esp,reg_flags);	
 				return;
-//				}
-//				catch (const GuestPageFaultException &pf) {
-//                    (void)pf;//UNUSED
-//                    LOG_MSG("CPU_IRET() interrupted prot use32");
-//					reg_esp = orig_esp;
-//					throw;
-//				}
+				}
+				catch (const GuestPageFaultException &pf) {
+                    (void)pf;//UNUSED
+                    LOG_MSG("CPU_IRET() interrupted prot use32");
+					reg_esp = orig_esp;
+					throw;
+				}
 			}
 			if (n_flags & FLAG_VM) E_Exit("IRET from pmode to v86 with CPL!=0");
 		} else {
@@ -1885,7 +1885,7 @@ void CPU_CALL(bool use32,Bitu selector,Bitu offset,uint32_t oldeip) {
 	uint32_t old_eip = reg_eip;
 
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
-//		try {
+		try {
 		if (!use32) {
 			CPU_Push16(SegValue(cs));
 			CPU_Push16(oldeip);
@@ -1895,13 +1895,13 @@ void CPU_CALL(bool use32,Bitu selector,Bitu offset,uint32_t oldeip) {
 			CPU_Push32(oldeip);
 			reg_eip=(uint32_t)offset;
 		}
-//		}
-//		catch (const GuestPageFaultException &pf) {
-//            (void)pf;//UNUSED
-//			reg_esp = old_esp;
-//			reg_eip = old_eip;
-//			throw;
-//		}
+		}
+		catch (const GuestPageFaultException &pf) {
+            (void)pf;//UNUSED
+			reg_esp = old_esp;
+			reg_eip = old_eip;
+			throw;
+		}
 		if (!cpu_allow_big16) cpu.code.big=false;
 		SegSet16(cs,(uint16_t)selector);
 		return;
@@ -1939,7 +1939,7 @@ call_code:
 				return;
 			}
 			// commit point
-//			try {
+			try {
 			if (!use32) {
 				CPU_Push16(SegValue(cs));
 				CPU_Push16(oldeip);
@@ -1949,13 +1949,13 @@ call_code:
 				CPU_Push32(oldeip);
 				reg_eip=(uint32_t)offset;
 			}
-//			}
-//			catch (const GuestPageFaultException &pf) {
-//                (void)pf;//UNUSED
-//                reg_esp = old_esp;
-//				reg_eip = old_eip;
-//				throw;
-//			}
+			}
+			catch (const GuestPageFaultException &pf) {
+                (void)pf;//UNUSED
+                reg_esp = old_esp;
+				reg_eip = old_eip;
+				throw;
+			}
 
 			Segs.expanddown[cs]=call.GetExpandDown();
 			Segs.limit[cs]=do_seg_limits? (PhysPt)call.GetLimit():((PhysPt)(~0UL));
@@ -2102,7 +2102,7 @@ call_code:
 				case DESC_CODE_R_C_A:case DESC_CODE_R_C_NA:
 					// zrdx extender
 
-//					try {
+					try {
 					if (call.Type()==DESC_386_CALL_GATE) {
 						CPU_Push32(SegValue(cs));
 						CPU_Push32(oldeip);
@@ -2110,13 +2110,13 @@ call_code:
 						CPU_Push16(SegValue(cs));
 						CPU_Push16(oldeip);
 					}
-//					}
-//					catch (const GuestPageFaultException &pf) {
-//                        (void)pf;//UNUSED
-//                        reg_esp = old_esp;
-//						reg_eip = old_eip;
-//						throw;
-//					}
+					}
+					catch (const GuestPageFaultException &pf) {
+                        (void)pf;//UNUSED
+                        reg_esp = old_esp;
+						reg_eip = old_eip;
+						throw;
+					}
 
 					/* Switch to new CS:EIP */
 					Segs.expanddown[cs]=n_cs_desc.GetExpandDown();
@@ -2165,7 +2165,7 @@ void CPU_RET(bool use32,Bitu bytes,uint32_t oldeip) {
 	uint32_t orig_esp = reg_esp;
 
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
-//		try {
+		try {
 			uint32_t new_ip;
 			uint16_t new_cs;
 			if (!use32) {
@@ -2186,13 +2186,13 @@ void CPU_RET(bool use32,Bitu bytes,uint32_t oldeip) {
 			reg_eip=new_ip;
 			if (!cpu_allow_big16) cpu.code.big=false;
 			return;
-//		}
-//		catch (const GuestPageFaultException &pf) {
-//			(void)pf;//UNUSED
-//			LOG_MSG("CPU_RET() interrupted real/vm86");
-//			reg_esp = orig_esp;
-//			throw;
-//		}
+		}
+		catch (const GuestPageFaultException &pf) {
+			(void)pf;//UNUSED
+			LOG_MSG("CPU_RET() interrupted real/vm86");
+			reg_esp = orig_esp;
+			throw;
+		}
 	} else {
 		uint32_t offset,selector;
 		if (!use32) selector	= mem_readw(SegPhys(ss) + (reg_esp & cpu.stack.mask) + 2);
@@ -2241,7 +2241,7 @@ RET_same_level:
 			}
 
 			// commit point
-//			try {
+			try {
 			if (!use32) {
 				offset=CPU_Pop16();
 				selector=CPU_Pop16();
@@ -2249,13 +2249,13 @@ RET_same_level:
 				offset=CPU_Pop32();
 				selector=CPU_Pop32() & 0xffff;
 			}
-//			}
-//			catch (const GuestPageFaultException &pf) {
-//                (void)pf;//UNUSED
-//                LOG_MSG("CPU_RET() interrupted prot rpl==cpl");
-//				reg_esp = orig_esp;
-//				throw;
-//			}
+			}
+			catch (const GuestPageFaultException &pf) {
+                (void)pf;//UNUSED
+                LOG_MSG("CPU_RET() interrupted prot rpl==cpl");
+				reg_esp = orig_esp;
+				throw;
+			}
 
 			Segs.expanddown[cs]=desc.GetExpandDown();
 			Segs.limit[cs]=do_seg_limits? (PhysPt)desc.GetLimit():((PhysPt)(~0UL));
@@ -2297,7 +2297,7 @@ RET_same_level:
 
 			// commit point
 			uint32_t n_esp,n_ss;
-//			try {
+			try {
 			if (use32) {
 				offset=CPU_Pop32();
 				selector=CPU_Pop32() & 0xffff;
@@ -2311,13 +2311,13 @@ RET_same_level:
 				n_esp = CPU_Pop16();
 				n_ss = CPU_Pop16();
 			}
-//			}
-//			catch (const GuestPageFaultException &pf) {
-//                (void)pf;//UNUSED
-//                LOG_MSG("CPU_RET() interrupted prot #2");
-//				reg_esp = orig_esp;
-//				throw;
-//			}
+			}
+			catch (const GuestPageFaultException &pf) {
+                (void)pf;//UNUSED
+                LOG_MSG("CPU_RET() interrupted prot #2");
+				reg_esp = orig_esp;
+				throw;
+			}
 
 			CPU_CHECK_COND((n_ss & 0xfffc)==0,
 				"RET to outer level with SS selector zero",
@@ -4020,7 +4020,7 @@ public:
  
         if (reboot_now) {
             LOG_MSG("CPU change requires guest system reboot");
-            jsthrow("throw int(3);");
+            throw int(3);
         }
 
 		const char *mask_stack_ptr_enter_leave = section->Get_string("mask stack pointer for enter leave instructions");

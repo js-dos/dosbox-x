@@ -841,7 +841,7 @@ void TIMER_AddTick(void) {
 
     /* timeout */
     if (time_limit_ms != 0 && PIC_Ticks >= time_limit_ms)
-        jsthrow("throw int(1);");
+        throw int(1);
 
     /* Go through the list of scheduled events and lower their index with 1000 */
     PICEntry * entry=pic_queue.next_entry;

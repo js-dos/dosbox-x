@@ -182,7 +182,7 @@ WINDOW* &DBGBlock::get_win_ref(int idx) {
         case WINI_OUT:  return win_out;
     }
 
-    jsthrow("throw domain_error("get_win_ref");");
+    throw domain_error("get_win_ref");
 }
 
 WINDOW* DBGBlock::get_win(int idx) {

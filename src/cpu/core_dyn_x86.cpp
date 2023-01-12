@@ -199,18 +199,16 @@ static struct dyn_dh_fpu_struct {
 
 extern bool use_dynamic_core_with_paging;
 
-//#define DYN_PAGEFAULT_CHECK(x) { \
-//	try { \
-//		x; \
-//	} catch (const guestpagefaultexception &pf) { \
-//		core_dyn.pagefault_faultcode = pf.faultcode; \
-//		core_dyn.pagefault = true; \
-//		dyn_pf_log_msg("caught pagefault at %s:%d (%s)", __file__, __line__, __function__); \
-//	} \
-//	return 0; \
-//}
-
-#define DYN_PAGEFAULT_CHECK(x) { x; return 0; }
+#define DYN_PAGEFAULT_CHECK(x) { \
+	try { \
+		x; \
+	} catch (const GuestPageFaultException &pf) { \
+		core_dyn.pagefault_faultcode = pf.faultcode; \
+		core_dyn.pagefault = true; \
+		DYN_PF_LOG_MSG("Caught pagefault at %s:%d (%s)", __FILE__, __LINE__, __FUNCTION__); \
+	} \
+	return 0; \
+}
 
 static INLINE bool mem_writeb_checked_pagefault(const PhysPt address,const uint8_t val) {
 	DYN_PAGEFAULT_CHECK({
@@ -341,7 +339,7 @@ restart_core:
 				// If the page fault is in the current instruction, throw exception
 				block->Clear();
 				if (cache_size == 1)
-					jsthrow("throw GuestPageFaultException(decoder_pagefault.lin_addr, decoder_pagefault.page_addr, decoder_pagefault.faultcode);");
+					throw GuestPageFaultException(decoder_pagefault.lin_addr, decoder_pagefault.page_addr, decoder_pagefault.faultcode);
 				cache_size /= 2;
 				decoder_pagefault.had_pagefault = false;
 				block = CreateCacheBlock(chandler,ip_point,cache_size);

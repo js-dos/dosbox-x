@@ -219,7 +219,7 @@ class Archive
         Archive& operator&(type& v) \
         { \
             m_stream.read((char*)&v, sizeof(type)); \
-            if(!m_stream) { jsthrow("throw std::runtime_error(\"malformed data\");"); } \
+            if(!m_stream) { throw std::runtime_error("malformed data"); } \
             v = Swap(v); \
             return *this; \
         } \
@@ -333,7 +333,7 @@ class Archive
 #endif
                 m_stream.read(buffer, l);
                 if(!m_stream)
-                    jsthrow("throw std::runtime_error(\"malformed data\");");
+                    throw std::runtime_error("malformed data");
                 v += std::string(buffer, l);
                 toRead -= l;
             }

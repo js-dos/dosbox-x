@@ -86,7 +86,7 @@ public:
 
     void set_dest(dstT * const dst,dstT * const dst_fence) {
         if (dst == NULL || dst_fence == NULL || dst > dst_fence)
-            jsthrow("throw std::invalid_argument(\"Iconv set_dest pointer out of range\");");
+            throw std::invalid_argument("Iconv set_dest pointer out of range");
 
         dst_adv = 0;
         dst_ptr = dst;
@@ -99,7 +99,7 @@ public:
 
     void set_src(const srcT * const src,const srcT * const src_fence) {
         if (src == NULL || src_fence == NULL || src > src_fence)
-            jsthrow("throw std::invalid_argument(\"Iconv set_src pointer out of range\");");
+            throw std::invalid_argument("Iconv set_src pointer out of range");
 
         src_adv = 0;
         src_ptr = src;

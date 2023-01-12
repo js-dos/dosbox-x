@@ -2246,7 +2246,7 @@ static Bitu ISAPNP_Handler(bool protmode /* called from protected mode interface
                 case 0x41:  /* POWER_OFF */
                     LOG_MSG("Plug & Play OS requested power off.\n");
                     reg_ax = 0;
-                    jsthrow("throw 1;");    /* NTS: Based on the Reboot handler code, causes DOSBox-X to cleanly shutdown and exit */
+                    throw 1;    /* NTS: Based on the Reboot handler code, causes DOSBox-X to cleanly shutdown and exit */
                     break;
                 case 0x42:  /* PNP_OS_ACTIVE */
                     LOG_MSG("Plug & Play OS reports itself active\n");
@@ -6725,7 +6725,7 @@ static Bitu INT15_Handler(void) {
                             APM_ResumeNotificationFromSuspend = true;
                             break;
                         case 0x3: // power off
-                            jsthrow("throw(0);");
+                            throw(0);
                         case 0x4: // last request processing notification (used by Windows ME)
                             LOG(LOG_MISC,LOG_DEBUG)("Guest is considering whether to accept the last returned APM event");
                             reg_ah = 0x00;
@@ -7908,7 +7908,7 @@ private:
          * likes to restart the program by JMPing to F000:FFF0 */
         if (!dos_kernel_disabled && first_shell != NULL) {
 		LOG(LOG_MISC,LOG_DEBUG)("BIOS POST: JMP to F000:FFF0 detected, initiating proper reset");
-		jsthrow("throw int(9);");
+		throw int(9);
         }
 
         {
@@ -9807,7 +9807,7 @@ startfunction:
             void IDE_CDROM_DetachAll();
             IDE_CDROM_DetachAll();
         }
-		if ((use_quick_reboot||IS_DOSV)&&!bootvm&&!bootfast&&bootdrive<0&&first_shell != NULL) jsthrow("throw int(6);");
+		if ((use_quick_reboot||IS_DOSV)&&!bootvm&&!bootfast&&bootdrive<0&&first_shell != NULL) throw int(6);
 
 		bootvm=false;
 		bootfast=false;

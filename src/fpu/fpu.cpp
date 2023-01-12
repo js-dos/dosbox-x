@@ -136,15 +136,15 @@ void FPU_ESC1_EA(Bitu rm,PhysPt addr, bool op16) {
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FLD_F32(addr,TOP);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x01: /* UNKNOWN */
@@ -366,15 +366,15 @@ void FPU_ESC3_EA(Bitu rm,PhysPt addr) {
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FLD_I32(addr,TOP);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x01:	/* FISTTP */
@@ -397,15 +397,15 @@ void FPU_ESC3_EA(Bitu rm,PhysPt addr) {
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FLD_F80(addr);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x07:	/* FSTP 80 Bits Real */
@@ -525,15 +525,15 @@ void FPU_ESC5_EA(Bitu rm,PhysPt addr, bool op16) {
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FLD_F64(addr,TOP);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x01:  /* FISTTP longint*/
@@ -653,15 +653,15 @@ void FPU_ESC7_EA(Bitu rm,PhysPt addr) {
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FLD_I16(addr,TOP);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x01:  /* FISTTP int16_t */
@@ -684,30 +684,30 @@ void FPU_ESC7_EA(Bitu rm,PhysPt addr) {
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FBLD(addr,TOP);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x05:  /* FILD int64_t */
 		{
 			unsigned char old_TOP = TOP;
 
-//			try {
+			try {
 				FPU_PREP_PUSH();
 				FPU_FLD_I64(addr,TOP);
-//			}
-//            catch (const GuestPageFaultException& pf) {
-//				(void)pf;
-//				TOP = old_TOP;
-//				jsthrow("throw;");
-//			}
+			}
+            catch (const GuestPageFaultException& pf) {
+				(void)pf;
+				TOP = old_TOP;
+				throw;
+			}
 		}
 		break;
 	case 0x06:	/* FBSTP packed BCD */

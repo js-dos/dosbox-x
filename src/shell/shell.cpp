@@ -1964,7 +1964,7 @@ void SHELL_Run() {
 		first_shell->Execute(name, tmp);
 		return;
 	}
-//	try {
+	try {
 		first_shell->Run();
 		delete first_shell;
 		first_shell = 0;//Make clear that it shouldn't be used anymore
@@ -1973,15 +1973,15 @@ void SHELL_Run() {
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
 		Reflect_Menu();
 #endif
-//	}
-//	catch (...) {
-//		delete first_shell;
-//		first_shell = 0;//Make clear that it shouldn't be used anymore
-//		prepared = false;
-//		dos_shell_running_program = false;
-//#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
-//		Reflect_Menu();
-//#endif
-//		jsthrow("throw;");
-//	}
+	}
+	catch (...) {
+		delete first_shell;
+		first_shell = 0;//Make clear that it shouldn't be used anymore
+		prepared = false;
+		dos_shell_running_program = false;
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
+		Reflect_Menu();
+#endif
+		throw;
+	}
 }

@@ -1273,7 +1273,7 @@ void On_Software_286_int15_block_move_return(unsigned char code) {
     CPU_IRET(false,0);
 
     /* force execution change (FIXME: Is there a better way to do this?) */
-    jsthrow("throw int(4);");
+    throw int(4);
     /* does not return */
 }
 
@@ -1319,7 +1319,7 @@ void On_Software_286_reset_vector(unsigned char code) {
     reg_eip = vec_off;
 
     /* force execution change (FIXME: Is there a better way to do this?) */
-    jsthrow("throw int(4);");
+    throw int(4);
     /* does not return */
 }
 
@@ -1402,7 +1402,7 @@ void On_Software_CPU_Reset() {
   //          DEBUG_EnableDebugger();
 
             /* force execution change (FIXME: Is there a better way to do this?) */
-            jsthrow("throw int(4);");
+            throw int(4);
             /* does not return */
         }
     }
@@ -1429,7 +1429,7 @@ void On_Software_CPU_Reset() {
     }
 #endif
 
-    jsthrow("throw int(3);");
+    throw int(3);
     /* does not return */
 }
 
@@ -1617,7 +1617,7 @@ public:
 			WriteOut("Reboots the kernel of DOSBox-X's emulated DOS.\n\nRE-DOS\n");
 			return;
 		}
-        jsthrow("throw int(6);");
+        throw int(6);
     }
 };
 
