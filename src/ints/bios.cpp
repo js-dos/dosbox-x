@@ -9501,7 +9501,7 @@ startfunction:
         //       a "BIOS setup" screen where all DOSBox-X configuration options can be
         //       modified, with the same look and feel of an old BIOS.
 
-#if C_EMSCRIPTEN
+#if C_EMSCRIPTEN && !defined(JSDOS)
         uint32_t lasttick=GetTicks();
         while ((GetTicks()-lasttick)<1000) {
             void CALLBACK_Idle(void);
