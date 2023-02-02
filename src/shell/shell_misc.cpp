@@ -488,7 +488,7 @@ void DOS_Shell::InputCommand(char * line) {
 	while (size) {
 #ifdef JSDOS
           if (jsdos::isExitRequested()) {
-            break;
+            throw int(-1);
           }
 #endif
 		dos.echo=false;

@@ -646,7 +646,7 @@ void DOSBOX_RunMachine(void){
     do {
 #ifdef JSDOS_X
         if (jsdos::isExitRequested()) {
-            break;
+            throw int(-1);
         }
 #endif
         ret=(*loop)();

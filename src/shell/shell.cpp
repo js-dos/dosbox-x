@@ -1046,8 +1046,7 @@ void DOS_Shell::Run(void) {
 	do {
 #ifdef JSDOS
           if (jsdos::isExitRequested()) {
-            exit = true;
-            break;
+            throw int(-1);
           }
 #endif
 		/* Get command once a line */
