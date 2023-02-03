@@ -157,7 +157,7 @@ static INLINE uint32_t Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
-#ifdef JSDOS
+#ifdef JSDOS_NO_RECURSION
 Bits CPU_Core_Normal_Run_Impl(void);
 Bits CPU_Core_Normal_Run(void) {
   jsdos::asyncifyLock();
@@ -174,6 +174,7 @@ Bits CPU_Core_Normal_Run(void) {
 	    return CBRET_NONE;
 
 	while (CPU_Cycles-->0) {
+        jsdos::incCycles();
 		LOADIP;
 		last_prefix=MP_NONE;
 		core.opcode_index=cpu.code.big*(Bitu)0x200u;
