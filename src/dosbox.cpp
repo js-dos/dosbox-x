@@ -329,7 +329,6 @@ extern bool DOSBox_Paused(), isDBCSCP(), InitCodePage();
 //For trying other delays
 
 #ifdef JSDOS_X
-#define wrap_delay(a) asyncify_sleep(a)
 #else
 #define wrap_delay(a) SDL_Delay(a)
 #endif
@@ -479,7 +478,10 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
 
     if (ticksNew <= ticksLast) { //lower should not be possible, only equal.
         ticksAdded = 0;
-
+#ifdef JSDOS_X
+		asyncify_sleep(1, true);
+        int32_t timeslept = std::max((int32_t)(GetTicks() - ticksNew), int32_t(1));
+#else
         if (!CPU_CycleAutoAdjust || CPU_SkipCycleAutoAdjust || sleep1count < 3) {
             wrap_delay(1);
         }
@@ -494,10 +496,12 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
             wrap_delay(sleeppattern[sleepindex++]);
             sleepindex %= sizeof(sleeppattern) / sizeof(sleeppattern[0]);
         }
+
         int32_t timeslept = (int32_t)(GetTicks() - ticksNew);
         // Count how many times in the current block (of 250 ms) the time slept was 1 ms
         if (CPU_CycleAutoAdjust && !CPU_SkipCycleAutoAdjust && timeslept == 1) sleep1count++;
         lastsleepDone = ticksDone;
+#endif
 
         // Update ticksDone with the time spent sleeping
         ticksDone -= timeslept;
