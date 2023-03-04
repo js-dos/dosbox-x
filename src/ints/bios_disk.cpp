@@ -1866,7 +1866,7 @@ static Bitu INT13_DiskHandler(void) {
             CALLBACK_SCF(true);
             return CBRET_NONE;
         }
-        if (drivenum >= MAX_DISK_IMAGES && imageDiskList[drivenum] == NULL) {
+        if (drivenum >= MAX_DISK_IMAGES || imageDiskList[drivenum] == NULL) {
             if (drivenum >= DOS_DRIVES || !Drives[drivenum] || Drives[drivenum]->isRemovable()) {
                 reg_ah = 0x01;
                 CALLBACK_SCF(true);
@@ -2265,6 +2265,16 @@ static Bitu INT13_DiskHandler(void) {
                 return CBRET_NONE;
             }
         }
+        reg_ah = 0x00;
+        CALLBACK_SCF(false);
+        break;
+    case 0x44: /* Extended Verify Sectors [http://www.ctyme.com/intr/rb-0711.htm] */
+        if(driveInactive(drivenum)) {
+            reg_ah = 0xff;
+            CALLBACK_SCF(true);
+            return CBRET_NONE;
+        }
+        /* Just signal success, we don't actually verify anything */
         reg_ah = 0x00;
         CALLBACK_SCF(false);
         break;

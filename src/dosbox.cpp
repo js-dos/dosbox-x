@@ -965,7 +965,7 @@ void SetCyclesCount_mapper_shortcut(bool pressed) {
 }
 
 void SetIME() {
-#if (defined(WIN32) && !defined(HX_DOS) || defined(LINUX) && C_X11) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
+#if (defined(WIN32) && !defined(HX_DOS) || defined(LINUX) && C_X11 || defined(MACOSX)) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
     if (enableime && !control->opt_silent) {
         dos.im_enable_flag = true;
         SDL_SetIMValues(SDL_IM_ENABLE, 1, NULL);
@@ -1328,6 +1328,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* aspectmodes[] = { "false", "true", "0", "1", "yes", "no", "nearest", "bilinear", 0};
     const char *vga_ac_mapping_settings[] = { "", "auto", "4x4", "4low", "first16", 0 };
     const char* fpu_settings[] = { "true", "false", "1", "0", "auto", "8087", "287", "387", 0};
+    const char* sb_recording_sources[] = { "silence", "hiss", "1khz tone", 0};
 
     const char* hostkeys[] = {
         "ctrlalt", "ctrlshift", "altshift", "mapper", 0 };
@@ -1556,6 +1557,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring = secprop->Add_path("savefile", Property::Changeable::WhenIdle,"");
     Pstring->Set_help("Select the default save file to save/load states. If specified it will be used instead of the save slot.");
     Pstring->SetBasic(true);
+
+    Pbool = secprop->Add_bool("video debug at startup", Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, have video debug displays on by default");
 
     Pbool = secprop->Add_bool("saveremark", Property::Changeable::WhenIdle,true);
     Pbool->Set_help("If set, the save state feature will ask users to enter remarks when saving a state.");
@@ -1894,7 +1898,8 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("allow more than 640kb base memory",Property::Changeable::Always,false);
     Pbool->Set_help("If set, and space is available, allow conventional memory to extend past 640KB.\n"
             "For example, if machine=cga, conventional memory can extend out to 0xB800 and provide up to 736KB of RAM.\n"
-            "This allows you to emulate PC/XT style memory extensions.");
+            "This allows you to emulate PC/XT style memory extensions.\n"
+            "For machine=tandy, this enables up to 768KB of memory which is then provided as 640KB to DOS to emulate the Tandy 768KB configuration with no overlap between DOS and video memory");
 
     Pbool = secprop->Add_bool("enable pci bus",Property::Changeable::OnlyAtStart,true);
     Pbool->Set_help("Enable PCI bus emulation");
@@ -1904,9 +1909,6 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->SetMinMax(0,10);
     Pint->Set_help("How many frames DOSBox-X skips before drawing one.");
     Pint->SetBasic(true);
-
-    Pbool = secprop->Add_bool("alt render",Property::Changeable::Always,false);
-    Pbool->Set_help("If set, use a new experimental rendering engine");
 
     Pstring = secprop->Add_string("aspect", Property::Changeable::Always, "false");
     Pstring->Set_values(aspectmodes);
@@ -2629,6 +2631,17 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("If set, ignore attempts to blank the display using the EGA/VGA sequencer registers.\n"
 		    "This should not be set except for DOS games with bugs in their display handling code.");
 
+    Pbool = secprop->Add_bool("memory io optimization 1",Property::Changeable::Always,true);
+    Pbool->Set_help("Enable one class of EGA/VGA memory I/O optimizations. Default ON (true).\n"
+		    "If graphical artifacts or errors occur, try turning this off first. May provide a performance benefit.");
+    Pbool->SetBasic(true);
+
+    Pbool = secprop->Add_bool("scanline render on demand",Property::Changeable::Always,false);
+    Pbool->Set_help("Render video output at vsync or when something is changed mid frame, instead of stopping to render every scanline.\n"
+		    "May provide a performance benefit to most DOS games. However this may also break timing-dependent game or Demoscene effects.\n"
+		    "Default OFF (false)");
+    Pbool->SetBasic(true);
+
     secprop=control->AddSection_prop("vsync",&Null_Init,true);//done
 
     Pstring = secprop->Add_string("vsyncmode",Property::Changeable::WhenIdle,"off");
@@ -3059,7 +3072,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("Swaps the left and right stereo channels.");
     Pbool->SetBasic(true);
 
-    Pint = secprop->Add_int("rate",Property::Changeable::OnlyAtStart,44100);
+    Pint = secprop->Add_int("rate",Property::Changeable::OnlyAtStart,48000);
     Pint->SetMinMax(8000,192000);
     Pint->Set_help("Mixer sample rate, setting any device's rate higher than this will probably lower their sound quality.");
     Pint->SetBasic(true);
@@ -3341,6 +3354,15 @@ void DOSBOX_SetupConfigSections(void) {
             "There are some DOS games/demos that use single-cycle DSP playback in their music tracker and they micromanage\n"
             "the DMA transfer per block poorly in a way that causes popping and artifacts. Setting this option to 0 for\n"
             "such DOS applications may reduce audible popping and artifacts.");
+
+    Pbool = secprop->Add_bool("listen to recording source",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("When the guest records audio from the Sound Blaster card, send the input source to the speakers as well so it can be heard.");
+    Pbool->SetBasic(true);
+
+    Pstring = secprop->Add_string("recording source",Property::Changeable::WhenIdle,"silence");
+    Pstring->Set_values(sb_recording_sources);
+    Pstring->Set_help("Audio source to use when guest is recording audio. At this time only generated audio sources are available.");
+    Pstring->SetBasic(true);
 
     /* Sound Blaster IRQ hacks.
      *
@@ -4124,6 +4146,10 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("Allow TSR and application (anything other than the DOS kernel) to request control of the HMA.\n"
             "They will not be able to request control however if the DOS kernel is configured to occupy the HMA (DOS=HIGH)");
 
+    Pbool = secprop->Add_bool("command shell flush keyboard buffer",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("If set, the DOS shell (COMMAND.COM) will flush the keyboard buffer before executing a command, and will flush the keyboard buffer again when the command returns.\n"
+            "The purpose of this option is to prevent the program from immediately acting on the Enter key you pressed to run it.");
+
     Pint = secprop->Add_int("hard drive data rate limit",Property::Changeable::WhenIdle,-1);
     Pint->Set_help("Slow down (limit) hard disk throughput. This setting controls the limit in bytes/second.\n"
                    "Set to 0 to disable the limit, or -1 (default) to use a reasonable limit.\n"
@@ -4339,7 +4365,7 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pstring = secprop->Add_string("ver",Property::Changeable::WhenIdle,"");
     Pstring->Set_help("Set DOS version. Specify as major.minor format. A single number is treated as the major version (compatible with LFN support). Common settings are:\n"
-            "auto (or unset)                  Pick a DOS kernel version automatically\n"
+            "auto (or unset)                  Pick DOS kernel version 5.0 (DOSBox default)\n"
             "3.3                              MS-DOS 3.3 emulation (not tested!)\n"
             "5.0                              MS-DOS 5.0 emulation (recommended for DOS gaming)\n"
             "6.22                             MS-DOS 6.22 emulation\n"
@@ -4426,6 +4452,13 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("int33",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Enable INT 33H for mouse support.");
     Pbool->SetBasic(true);
+
+    Pint = secprop->Add_int("mouse report rate",Property::Changeable::WhenIdle,0);
+    Pint->Set_help("Mouse reporting rate, or 0 for auto. This affects how often mouse events are reported to the guest through the mouse interrupt.\n"
+		    "Some games including CyClone need a lower reporting rate to function correctly. Auto mode allows the guest to change the report rate through the PS/2 mouse emulation.\n"
+		    "This option does not affect any DOS game that uses polling through INT 33h to detect mouse movement.");
+    Pint->SetMinMax(0,10000);
+    Pint->SetBasic(true);
 
     Pbool = secprop->Add_bool("int33 hide host cursor if interrupt subroutine",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("If set, the cursor on the host will be hidden if the DOS application provides it's own\n"
@@ -4517,6 +4550,10 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("dos clipboard api",Property::Changeable::WhenIdle, true);
     Pbool->Set_help("If set, DOS APIs for communications with the Windows clipboard will be enabled for shared clipboard communications.");
+    Pbool->SetBasic(true);
+
+    Pbool = secprop->Add_bool("dos idle api",Property::Changeable::OnlyAtStart,true);
+    Pbool->Set_help("If set, DOSBox-X can lower the host system's CPU load when a supported guest program is idle.");
     Pbool->SetBasic(true);
 
     secprop=control->AddSection_prop("ipx",&Null_Init,true);

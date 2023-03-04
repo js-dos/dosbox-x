@@ -3839,10 +3839,10 @@ public:
 			if (s != NULL && *s != 0) {
 				const char *os = s;
 
-				while (*s != NULL && o < 12) cpu_custom_cpuid[o++] = *s++;
+				while (*s != 0 && o < 12) cpu_custom_cpuid[o++] = *s++;
 				while (o < 12) cpu_custom_cpuid[o++] = ' ';
 
-				if (*s != NULL && o == 12)
+				if (*s != 0 && o == 12)
 					LOG_MSG("WARNING: CPUID string '%s' truncated. Maximum 12 characters",os);
 			}
 		}
@@ -4444,10 +4444,10 @@ bool CPU_RDMSR() {
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: Faking IA32 platform ID");
 			return true;
 		case 0x0000001b: /* Local APIC */
-			/* NTS: Windows ME assumes this MSR is present if we report ourself as a Pentium II,
+			/* NTS: Windows ME assumes this MSR is present if we report ourself as a Pentium II or Pentium Pro,
 			 *      instead of, you know, using CPUID */
 			/* NTS: Apparently the Linux kernel also assumes this register is present. */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			reg_edx = reg_eax = 0;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: Faking Local APIC");
 			return true;
@@ -4457,7 +4457,8 @@ bool CPU_RDMSR() {
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: MSR_IA32_EBL_CR_POWERON");
 			return true;
 		case 0x0000008b: /* Intel microcode revision... Windows ME insists on reading this at startup if Pentium II and stepping 3 */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			/* NTS: Windows 98 will also read this register on boot up if emulating a Pentium Pro */
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: Guest is reading Intel microcode revision");
 			if (CPU_ArchitectureType >= CPU_ARCHTYPE_PENTIUMIII) {
 				// Taken from an actual Pentium III system. Windows ME will try to update microcode if major version is too low, this value stops that.
@@ -4548,7 +4549,7 @@ bool CPU_WRMSR() {
 			 *      this register was 0x00000000 when it booted. Fortunately, Windows ME still
 			 *      runs properly if we silently ignore the write and leave it 0x00000000. */
 			/* NTS: Apparently the Linux kernel also assumes this register is present. */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("WRMSR: Faking Local APIC");
 			if (reg_eax & 0x800) UNBLOCKED_LOG(LOG_CPU,LOG_WARN)("Guest OS is attempting to enable the Local APIC which we do not emulate yet");
 			return true;
@@ -4558,7 +4559,8 @@ bool CPU_WRMSR() {
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("WRMSR: Guest is attempting to update microcode (is that you Windows ME?) EDX:EAX=%08x:%08x",reg_edx,reg_eax);
 			return true;
 		case 0x0000008b: /* Intel microcode revision... why is Windows ME writing this register before reading it? */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			/* NTS: Windows 98 will also write this register on boot up if emulating a Pentium Pro */
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("WRMSR: Attempt to write Intel microcode revision (is that you Windows ME?) EDX:EAX=%08x:%08x",reg_edx,reg_eax);
 			return true;
 		case 0x000000ce: /* MSR_PLATFORM_INFO? */

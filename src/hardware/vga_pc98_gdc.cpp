@@ -43,6 +43,9 @@
 
 using namespace std;
 
+extern bool vga_render_on_demand;
+void VGA_RenderOnDemandUpTo(void);
+
 extern bool                 gdc_5mhz_mode;
 extern bool                 gdc_5mhz_mode_initial;
 extern bool                 GDC_vsync_interrupt;
@@ -649,8 +652,16 @@ uint8_t PC98_GDC_state::read_status(void) {
     if (rfifo_has_content())
         ret |= 0x01; // data ready
     else if (fifo_read == fifo_write) {
+#if 0 // THIS IS CAUSING SEVERE PERFORMANCE ISSUES, DISABLED!
+	// According to
+	// [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20NEC%20PC%2d98/Collections/Undocumented%209801%2c%209821%20Volume%202%20%28webtech.co.jp%29/io%5fdisp%2etxt]
+	// bit 3 (0x08) is supposed to indicate when the GDC is drawing. Perhaps the contributer who's
+	// pull request added this found a PC-98 game that failed to run without it. Re-enable when a
+	// higher performance implementation is possible. Also, recent commits in 2022 added actual
+	// GDC drawing functionality, so perhaps this should mirror that too?
         initRand();
         if (rand()%20<1) ret |= 0x08;
+#endif
     }
 
     return ret;
@@ -766,6 +777,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                  *      change until vsync to try to alleviate tearlines. */
                 GDC_display_plane_pending = (val&1);
                 if (!GDC_display_plane_wait_for_vsync) {
+                    if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                     GDC_display_plane = GDC_display_plane_pending;
                     pc98_update_display_page_ptr();
                 }
@@ -788,6 +800,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                         /* 0x68: A command */
                         /* NTS: Sadly, "undocumented PC-98" reference does not mention the analog 16-color palette. */
             if (port == 0xA8) {
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     pc98_16col_analog_rgb_palette_index = (uint8_t)val; /* it takes all 8 bits I assume because of 256-color mode */
                 }
@@ -804,6 +817,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                            16-color: 4-bit green intensity. Color index is low 4 bits of palette index.
                            256-color: 4-bit green intensity. Color index is 8-bit palette index. */
             if (port == 0xAA) { /* TODO: If 8-color... else if 16-color... else if 256-color... */
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     if (pc98_gdc_vramop & (1 << VOPBIT_VGA)) {
                         pc98_pal_vga[(3*pc98_16col_analog_rgb_palette_index) + 0] = (uint8_t)val;
@@ -829,6 +843,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                            16-color: 4-bit red intensity. Color index is low 4 bits of palette index.
                            256-color: 4-bit red intensity. Color index is 8-bit palette index. */
             if (port == 0xAC) { /* TODO: If 8-color... else if 16-color... else if 256-color... */
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     if (pc98_gdc_vramop & (1 << VOPBIT_VGA)) {
                         pc98_pal_vga[(3*pc98_16col_analog_rgb_palette_index) + 1] = (uint8_t)val;
@@ -854,6 +869,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                            16-color: 4-bit blue intensity. Color index is low 4 bits of palette index.
                            256-color: 4-bit blue intensity. Color index is 8-bit palette index. */
             if (port == 0xAE) { /* TODO: If 8-color... else if 16-color... else if 256-color... */
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     if (pc98_gdc_vramop & (1 << VOPBIT_VGA)) {
                         pc98_pal_vga[(3*pc98_16col_analog_rgb_palette_index) + 2] = (uint8_t)val;
@@ -892,6 +908,8 @@ Bitu pc98_gdc_read(Bitu port,Bitu iolen) {
 
     switch (port&0xE) {
         case 0x00:      /* 0x60/0xA0 read status */
+            /* If a game is polling this port a lot, it might be waiting for vertical retrace or doing raster effects */
+            if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
             return gdc->read_status();
         case 0x02:      /* 0x62/0xA2 read fifo */
             if (!gdc->rfifo_has_content())

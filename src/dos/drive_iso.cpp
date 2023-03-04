@@ -1032,7 +1032,7 @@ isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int&
 			if (!MSCDEX_GetVolumeName(subUnit, buffer)) strcpy(buffer, "");
 			Set_Label(buffer,discLabel,true);
 
-		} else if (CDROM_Interface_Image::images[subUnit]->HasDataTrack() == false) { //Audio only cdrom
+		} else if (CDROM_Interface_Image::images[subUnit]->HasDataTrack() == false && CDROM_Interface_Image::images[subUnit]->HasAudioTrack() == true) { //Audio only cdrom
 			strcpy(info, "isoDrive ");
 			strcat(info, fileName);
 			this->driveLetter = driveLetter;
@@ -2329,12 +2329,12 @@ void isoDrive :: EmptyCache(void) {
 	enable_rock_ridge = dos.version.major >= 7 || uselfn;
 	enable_joliet = dos.version.major >= 7 || uselfn;
 	is_joliet = false;
-	this->fileName[0]  = '\0';
-	this->discLabel[0] = '\0';
+	//this->fileName[0]  = '\0'; /* deleted to fix issue #3848. Revert this if there are any flaws */
+	//this->discLabel[0] = '\0'; /* deleted to fix issue #3848. Revert this if there are any flaws */
 	nextFreeDirIterator = 0;
 	memset(dirIterators, 0, sizeof(dirIterators));
 	memset(sectorHashEntries, 0, sizeof(sectorHashEntries));
 	memset(&rootEntry, 0, sizeof(isoDirEntry));
-	safe_strncpy(this->fileName, fileName, CROSS_LEN);
+	//safe_strncpy(this->fileName, fileName, CROSS_LEN); /* deleted to fix issue #3848. Revert this if there are any flaws */
 	loadImage();
 }

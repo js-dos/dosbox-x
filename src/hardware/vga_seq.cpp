@@ -23,6 +23,11 @@
 #include "vga.h"
 
 extern bool ignore_sequencer_blanking;
+extern bool non_cga_ignore_oddeven_engage;
+extern bool vga_ignore_extended_memory_bit;
+
+extern bool vga_render_on_demand;
+void VGA_RenderOnDemandUpTo(void);
 
 #define seq(blah) vga.seq.blah
 
@@ -86,14 +91,18 @@ void VGA_SequReset(bool reset);
 void VGA_Screenstate(bool enabled);
 
 void write_p3c5(Bitu /*port*/,Bitu val,Bitu iolen) {
+	unsigned int cmplx = 0;
+
 //	LOG_MSG("SEQ WRITE reg %X val %X",seq(index),val);
 	switch(seq(index)) {
 	case 0:		/* Reset */
+		if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
 		if((seq(reset)^val)&0x3) VGA_SequReset((val&0x3)!=0x3);
 		seq(reset)=(uint8_t)val;
 		break;
 	case 1:		/* Clocking Mode */
 		if (val!=seq(clocking_mode)) {
+			if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
 			if((seq(clocking_mode)^val)&0x20) VGA_Screenstate((val&0x20)==0);
 			// don't resize if only the screen off bit was changed
 			if ((val&(~0x20u))!=(seq(clocking_mode)&(~0x20u))) {
@@ -122,6 +131,8 @@ void write_p3c5(Bitu /*port*/,Bitu val,Bitu iolen) {
 		seq(map_mask)=val & 15;
 		vga.config.full_map_mask=FillTable[val & 15];
 		vga.config.full_not_map_mask=~vga.config.full_map_mask;
+		cmplx |= vga.complexity.setf(VGACMPLX_MAP_MASK,(vga.seq.map_mask & 0xF) != 0xF && vga.config.chained); // if any bitplane is masked off and chained mode
+		if (cmplx != 0) VGA_SetupHandlers();
 		/*
 			0  Enable writes to plane 0 if set
 			1  Enable writes to plane 1 if set
@@ -131,6 +142,7 @@ void write_p3c5(Bitu /*port*/,Bitu val,Bitu iolen) {
 		break;
 	case 3:		/* Character Map Select */
 		{
+			if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
 			seq(character_map_select)=(uint8_t)val;
 			uint8_t font1=(val & 0x3) << 1;
 			if (IS_VGA_ARCH) font1|=(val & 0x10) >> 4;
@@ -158,10 +170,18 @@ void write_p3c5(Bitu /*port*/,Bitu val,Bitu iolen) {
 				rather than the Map Mask and Read Map Select Registers.
 		*/
 		seq(memory_mode)=(uint8_t)val;
+		cmplx |= vga.complexity.setf(VGACMPLX_NON_EXTENDED,(val & 2) == 0 && !vga_ignore_extended_memory_bit); // only 64kb on the adapter?
+		cmplx |= vga.complexity.setf(VGACMPLX_ODDEVEN,
+			((val & 1) != 0 && (val & 4) != 0) /* Alphanumeric mode without Odd/Even mode */ ||
+			((val & 1) == 0 && (val & 4) == 0 && !non_cga_ignore_oddeven_engage) /* Graphics mode with Odd/Even mode */); // NTS: Odd/Even mode is set by CLEARING the bit!
 		if (IS_VGA_ARCH) {
 			/* Changing this means changing the VGA Memory Read/Write Handler */
 			if (val&0x08) vga.config.chained=true;
 			else vga.config.chained=false;
+			cmplx |= vga.complexity.setf(VGACMPLX_MAP_MASK,(vga.seq.map_mask & 0xF) != 0xF && vga.config.chained); // if any bitplane is masked off and chained mode
+			VGA_SetupHandlers();
+		}
+		else if (cmplx != 0) {
 			VGA_SetupHandlers();
 		}
 		break;

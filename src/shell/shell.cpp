@@ -54,6 +54,7 @@
 #endif
 #include "build_timestamp.h"
 
+extern bool shell_keyboard_flush;
 extern bool dos_shell_running_program, mountwarning, winautorun;
 extern bool startcmd, startwait, startquiet, internal_program;
 extern bool addovl, addipx, addne2k, enableime, showdbcs;
@@ -996,7 +997,7 @@ void DOS_Shell::Prepare(void) {
         initcodepagefont();
         dos.loaded_codepage=cp;
     }
-#if (defined(WIN32) && !defined(HX_DOS) || defined(LINUX) && C_X11 || defined(MACOSX) && defined(SDL_DOSBOX_X_IME)) && (defined(C_SDL2) || defined(SDL_DOSBOX_X_SPECIAL))
+#if (defined(WIN32) && !defined(HX_DOS) || defined(LINUX) && C_X11 || defined(MACOSX)) && (defined(C_SDL2) || defined(SDL_DOSBOX_X_SPECIAL))
     if (enableime) SetIMPosition();
 #endif
 }
@@ -1074,8 +1075,10 @@ void DOS_Shell::Run(void) {
 
 		/* do it */
 		if(strlen(input_line)!=0) {
+			if (bf == NULL/*not running a batch file*/ && shell_keyboard_flush) DOS_FlushSTDIN();
 			ParseLine(input_line);
 			if (echo && !bf) WriteOut_NoParsing("\n");
+			if (bf == NULL/*not running a batch file*/ && shell_keyboard_flush) DOS_FlushSTDIN();
 		}
 	} while (perm||!exit);
 	shellrun=false;

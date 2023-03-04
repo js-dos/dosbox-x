@@ -1,0 +1,216 @@
+name: Visual Studio builds for WinXP
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  MSBuild_XP_CI_build:
+    permissions:
+      actions: write  # for styfle/cancel-workflow-action to cancel/stop running workflows
+      contents: write # for actions/checkout to fetch code and softprops/action-gh-release
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Cancel previous runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ github.token }}
+      - uses: actions/checkout@v3
+      - uses: microsoft/setup-msbuild@v1.3
+      - name: Prepare Visual Studio build for WinXP
+        shell: bash
+        run: |
+          echo "timestamp=`date +%F-%T | sed -e 's/:/-/g' | sed -e 's/-//g'`" >> $GITHUB_ENV
+          ls -1 vs/dosbox-x.vcxproj vs/freetype/builds/windows/vc2010/freetype.vcxproj vs/libpdcurses/libpdcurses.vcxproj vs/libpng/projects/vstudio/libpng/libpng.vcxproj vs/libpng/projects/vstudio/libpng/libpng.vcxproj vs/sdl/VisualC/SDL/SDL.vcxproj vs/sdl/VisualC/SDLmain/SDLmain.vcxproj vs/sdl2/VisualC/SDL/SDL.vcxproj vs/sdl2/VisualC/SDLmain/SDLmain.vcxproj vs/sdlnet/VisualC/SDL_net_VS2008.vcxproj vs/sdlnet/VisualC/SDL_net_VS2008.vcxproj vs/zlib/zlib/zlib.vcxproj | xargs sed -b -i 's/v14[2-9]/v141/g;s/>10.0</>10.0.22000.0</g'
+      - name: Build Visual Studio Win32 SDL1
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=Win32
+          if (-not(Test-Path -Path bin\Win32\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
+          contrib\windows\installer\PatchPE.exe bin\Win32\Release\dosbox-x.exe
+      - name: Build Visual Studio Win32 SDL2
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=Win32
+          if (-not(Test-Path -Path bin\Win32\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
+          contrib\windows\installer\PatchPE.exe bin\Win32\"Release SDL2"\dosbox-x.exe
+      - name: Build Visual Studio Win64 SDL1
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=x64
+          if (-not(Test-Path -Path bin\x64\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
+          contrib\windows\installer\PatchPE.exe bin\x64\Release\dosbox-x.exe
+      - name: Build Visual Studio Win64 SDL2
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=x64
+          if (-not(Test-Path -Path bin\x64\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
+          contrib\windows\installer\PatchPE.exe bin\x64\"Release SDL2"\dosbox-x.exe
+      - name: Package Visual Studio build for WinXP
+        shell: bash
+        run: |
+          top=`pwd`
+          #$top/bin/Win32/Release/dosbox-x.exe -tests -set waitonerror=false -set logfile=tests.log || (echo Unit test completed: failure && exit 1)
+          #cat tests.log
+          mkdir -p $top/package/drivez
+          mkdir -p $top/package/scripts
+          mkdir -p $top/package/shaders
+          mkdir -p $top/package/glshaders
+          mkdir -p $top/package/languages
+          mkdir -p $top/vs-bin
+          cp $top/bin/Win32/Release/dosbox-x.exe $top/package/dosbox-x_XPx86_SDL1.exe
+          cp $top/bin/Win32/"Release SDL2"/dosbox-x.exe $top/package/dosbox-x_XPx86_SDL2.exe
+          cp $top/bin/x64/Release/dosbox-x.exe $top/package/dosbox-x_XPx64_SDL1.exe
+          cp $top/bin/x64/"Release SDL2"/dosbox-x.exe $top/package/dosbox-x_XPx64_SDL2.exe
+          cp $top/bin/Win32/Release/dosbox-x.exe $top/vs-bin/dosbox-x_XPx86_SDL1.exe
+          cp $top/bin/Win32/"Release SDL2"/dosbox-x.exe $top/vs-bin/dosbox-x_XPx86_SDL2.exe
+          cp $top/bin/x64/Release/dosbox-x.exe $top/vs-bin/dosbox-x_XPx64_SDL1.exe
+          cp $top/bin/x64/"Release SDL2"/dosbox-x.exe $top/vs-bin/dosbox-x_XPx64_SDL2.exe
+          sed -e 's/^\(output[ ]*=[ ]*\)default$/\1ttf/;s/^\(windowposition[ ]*=\)[ ]*-/\1 /;s/^\(file access tries[ ]*=[ ]*\)0$/\13/;s/^\(printoutput[ ]*=[ ]*\)png$/\1printer/;s/\(drive data rate limit[ ]*=[ ]*\)-1$/\10/' $top/dosbox-x.reference.conf>$top/package/dosbox-x.conf
+          cp $top/CHANGELOG $top/package/CHANGELOG.txt
+          cp $top/dosbox-x.reference.conf $top/package/dosbox-x.reference.conf
+          cp $top/dosbox-x.reference.full.conf $top/package/dosbox-x.reference.full.conf
+          cp $top/contrib/windows/installer/readme.txt $top/package/README.txt
+          cp $top/contrib/windows/installer/inpout32.dll $top/package/inpout32.dll
+          cp $top/contrib/fonts/FREECG98.BMP $top/package/FREECG98.BMP
+          cp $top/contrib/fonts/wqy_1?pt.bdf $top/package/
+          cp $top/contrib/fonts/Nouveau_IBM.ttf $top/package/Nouveau_IBM.ttf
+          cp $top/contrib/fonts/SarasaGothicFixed.ttf $top/package/SarasaGothicFixed.ttf
+          cp $top/contrib/windows/installer/drivez_readme.txt $top/package/drivez/readme.txt
+          cp $top/contrib/windows/installer/windows_explorer_context_menu*.bat $top/package/scripts/
+          cp $top/contrib/windows/shaders/* $top/package/shaders/
+          cp $top/contrib/glshaders/* $top/package/glshaders/
+          cp $top/contrib/translations/*/*.lng $top/package/languages/
+          cp $top/COPYING $top/package/COPYING
+          '${{ github.workspace }}/vs/tool/zip.exe' -r -9 '${{ github.workspace }}/dosbox-x-vsbuild-XP-${{ env.timestamp }}.zip' '${{ github.workspace }}/package/*'
+      - name: Upload preview package
+        uses: actions/upload-artifact@v3.1.2
+        with:
+          name: dosbox-x-vsbuild-XP-${{ env.timestamp }}
+          path: ${{ github.workspace }}/package/
+      - name: Upload release package
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dosbox-x-vsbuild-XP-${{ env.timestamp }}.zip
+      - name: Cache Visual Studio builds
+        uses: actions/cache/save@v3
+        with:
+          path: ${{ github.workspace }}/vs-bin
+          key: vs-bin-${{ github.sha }}
+  MinGW32_lowend_CI_build:
+    permissions:
+      actions: write  # for styfle/cancel-workflow-action to cancel/stop running workflows
+      contents: write # for actions/checkout to fetch code and softprops/action-gh-release
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v3
+      - name: Prepare MinGW32 lowend
+        run: |
+          echo "timestamp=`date +%F-%T | sed -e 's/:/-/g' | sed -e 's/-//g'`" >> $GITHUB_ENV
+          top=`pwd`
+          pwd>pwd.txt
+          mkdir mingw-get
+          vs/tool/unzip.exe $top/build-scripts/mingw/lowend-bin/mingw-get-0.6.2-mingw32-beta-20131004-1-bin.zip -d mingw-get
+          mingw-get/bin/mingw-get.exe install msys-base gcc g++ autoconf automake libiconv libpdcurses libz
+          mv pwd.txt mingw-get/msys/1.0
+          cp build-scripts/mingw/lowend-bin/msys.bat mingw-get/msys/1.0
+          cp build-scripts/mingw/lowend-bin/runbuild.sh mingw-get/msys/1.0
+          cp build-scripts/mingw/lowend-bin/gawk.exe mingw-get/msys/1.0/bin
+          vs/tool/unzip.exe $top/build-scripts/mingw/lowend-bin/d3d9.zip -d d3d9
+          cp d3d9/*.inl mingw-get/include
+          cp d3d9/*.h mingw-get/include
+          cp d3d9/*.a mingw-get/lib
+      - name: Build MinGW32 lowend SDL2
+        shell: pwsh
+        run: |
+          mingw-get\msys\1.0\msys.bat /mingw/msys/1.0/runbuild.sh build-mingw-lowend-sdl2 nodup
+          if (-not(Test-Path -Path src\dosbox-x.exe -PathType Leaf)) {exit 1}
+          #top=`pwd`
+          strip -s src/dosbox-x.exe
+          mkdir -p mingw-bin
+          cp src/dosbox-x.exe mingw-bin/dosbox-x_mingw_lowend_SDL2.exe
+      - name: Build MinGW32 lowend SDL1
+        shell: pwsh
+        run: |
+          make clean
+          mingw-get\msys\1.0\msys.bat /mingw/msys/1.0/runbuild.sh build-mingw-lowend
+          if (-not(Test-Path -Path src\dosbox-x.exe -PathType Leaf)) {exit 1}
+          #top=`pwd`
+          strip -s src/dosbox-x.exe
+          cp src/dosbox-x.exe mingw-bin/dosbox-x_mingw_lowend_SDL1.exe
+      - name: Cache MinGW32 lowend builds
+        uses: actions/cache/save@v3
+        with:
+          path: ${{ github.workspace }}/mingw-bin
+          key: mingw-bin-${{ github.sha }}
+  build-XP-installer:
+    permissions:
+      actions: write  # for styfle/cancel-workflow-action to cancel/stop running workflows
+      contents: write # for actions/checkout to fetch code and softprops/action-gh-release
+    runs-on: windows-latest
+    needs: [MSBuild_XP_CI_build, MinGW32_lowend_CI_build]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v3
+      - name: Restore Visual Studio builds
+        uses: actions/cache/restore@v3
+        with:
+          path: ${{ github.workspace }}/vs-bin
+          key: vs-bin-${{ github.sha }}
+      - name: Restore MinGW builds
+        uses: actions/cache/restore@v3
+        with:
+          path: ${{ github.workspace }}/mingw-bin
+          key: mingw-bin-${{ github.sha }}
+      - name: Prepare files
+        shell: bash
+        run: |
+          #DOSBOX_X_RELEASE=`gh release list -L1 | grep -o "....-..-.." | head -n 1 | sed -e "s/-/./g"`
+          #echo "DOSBOX_X_RELEASE=$DOSBOX_X_RELEASE" >> $GITHUB_ENV
+          echo "timestamp=`date +%F-%T | sed -e 's/:/-/g' | sed -e 's/-//g'`" >> $GITHUB_ENV
+          cp dosbox-*.conf contrib/windows/installer/
+          #ls -lg vs-bin
+          #ls -lg mingw-bin
+          mkdir -p contrib/windows/installer/WinXP
+          cp vs-bin/*.exe contrib/windows/installer/WinXP
+          cp mingw-bin/*.exe contrib/windows/installer/WinXP
+          #ls -lg contrib/windows/installer/WinXP
+          cd contrib/windows/installer/
+          ./ISCC.exe ./DOSBox-X-setupXP.iss
+      - name: Upload preview installer
+        uses: actions/upload-artifact@v3.1.2
+        with:
+          name: dosbox-x-winXP-${{ env.timestamp }}-setup.exe
+          path: contrib/windows/installer/dosbox-x-winXP-*.exe
+      - name: Upload XP build installer release version
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            contrib/windows/installer/dosbox-x-winXP-*.exe
+      - name: Clean cache
+        run: |
+          gh extension install actions/gh-actions-cache
+          ## need permission? disabled the following lines if error occurs when deleting cache
+          set +e
+          gh actions-cache delete mingw-bin-${{ github.sha }} --confirm
+          gh actions-cache delete vs-bin-${{ github.sha }} --confirm
+          gh actions-cache list
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          

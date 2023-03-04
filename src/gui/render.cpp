@@ -45,6 +45,8 @@
 #include <emmintrin.h>
 #endif
 
+extern bool video_debug_overlay;
+
 Render_t                                render;
 int                                     eurAscii = -1;
 int                                     aspect_ratio_x = 0;
@@ -379,9 +381,14 @@ void AspectRatio_mapper_shortcut(bool pressed) {
     }
 }
 
+void VGA_DebugOverlay();
+
 void RENDER_EndUpdate( bool abort ) {
     if (GCC_UNLIKELY(!render.updating))
         return;
+
+    if (video_debug_overlay && !abort && render.active)
+        VGA_DebugOverlay();
 
     if (!abort && render.active && RENDER_DrawLine == RENDER_ClearCacheHandler)
         render.scale.clearCache = false;
@@ -891,6 +898,14 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
     }
     LOG_MSG("pixratio %1.3f, dw %s, dh %s",ratio,dblw?"true":"false",dblh?"true":"false");
 
+    /* this must be done after dblw/dblh so extra room can be added without screwing up the screen.
+     * debug information is drawn into the buffer pre-scaler to make sure that if the user wants it
+     * in still image or video capture, they can. */
+    if (video_debug_overlay) {
+	if (width < 320) width = 320;
+	height += 128;
+    }
+
     if ( ratio > 1.0 ) {
         double target = height * ratio + 0.025;
         ratio = target / height;
@@ -1341,9 +1356,6 @@ void RENDER_Init() {
     }
 
     RENDER_UpdateFromScalerSetting();
-
-    vga_alt_new_mode = control->opt_alt_vga_render || section->Get_bool("alt render");
-    if (vga_alt_new_mode) LOG_MSG("Alternative VGA render engine not yet fully implemented!");
 
     render.autofit=section->Get_bool("autofit");
 

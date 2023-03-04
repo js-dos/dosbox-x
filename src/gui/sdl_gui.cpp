@@ -841,7 +841,6 @@ protected:
 public:
     PropertyEditorString(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         std::string title(section->GetName());
         if (title=="4dos"&&!strcmp(prop->propname.c_str(), "rem"))
             input = new GUI::Input(this, 30, 0, 470);
@@ -854,6 +853,26 @@ public:
         }
         std::string temps = prop->GetValue().ToString();
         input->setText(stringify(temps));
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -884,13 +903,32 @@ protected:
 public:
     PropertyEditorFloat(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         input = new GUI::Input(this, 380, 0, opts?90:120);
         if (opts) {
             infoButton=new GUI::Button(this, 470, 0, "...", 30, 24);
             infoButton->addActionHandler(this);
         }
         input->setText(stringify((double)prop->GetValue()));
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -922,7 +960,6 @@ protected:
 public:
     PropertyEditorHex(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         input = new GUI::Input(this, 380, 0, opts?90:120);
         if (opts) {
             infoButton=new GUI::Button(this, 470, 0, "...", 30, 24);
@@ -930,6 +967,26 @@ public:
         }
         std::string temps = prop->GetValue().ToString();
         input->setText(temps.c_str());
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -961,7 +1018,6 @@ protected:
 public:
     PropertyEditorInt(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         input = new GUI::Input(this, 380, 0, opts?90:120);
         if (opts) {
             infoButton=new GUI::Button(this, 470, 0, "...", 30, 24);
@@ -969,6 +1025,26 @@ public:
         }
         //Maybe use ToString() of Value
         input->setText(stringify(static_cast<int>(prop->GetValue())));
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     };
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -1279,6 +1355,7 @@ public:
             name += "_CONFIGFILE_HELP";
             setText(MSG_Get(name.c_str()));
         }
+        wiw->raise(); /* focus on the message, not the close button, so the user can immediately arrow up/down */
         move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
     };
 
@@ -1352,10 +1429,6 @@ public:
         GUI::Button *b = new GUI::Button(this, button_row_cx, button_row_y, mainMenu.get_item("HelpMenu").get_text().c_str(), button_w);
         b->addActionHandler(this);
 
-        b = new GUI::Button(this, button_row_cx + (button_w + button_pad_w)*2, button_row_y, MSG_Get("CANCEL"), button_w);
-        b->addActionHandler(this);
-        closeButton = b;
-
         b = new GUI::Button(this, button_row_cx + (button_w + button_pad_w), button_row_y, MSG_Get("OK"), button_w);
 
         int i = 0, j = 0;
@@ -1385,6 +1458,11 @@ public:
             j++;
         }
         b->addActionHandler(this);
+
+        b = new GUI::Button(this, button_row_cx + (button_w + button_pad_w)*2, button_row_y, MSG_Get("CANCEL"), button_w);
+        b->addActionHandler(this);
+	scan_tabbing = true;
+        closeButton = b;
 
         /* first child is first tabbable */
         {
@@ -1579,10 +1657,6 @@ public:
         b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w), button_row_y, mainMenu.get_item("HelpMenu").get_text().c_str(), button_w);
         b->addActionHandler(this);
 
-        b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w)*3, button_row_y, MSG_Get("CANCEL"), button_w);
-        b->addActionHandler(this);
-        closeButton = b;
-
         b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w)*2, button_row_y, MSG_Get("OK"), button_w);
 
         int i = 0;
@@ -1610,6 +1684,11 @@ public:
             i++;
         }
         b->addActionHandler(this);
+
+        b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w)*3, button_row_y, MSG_Get("CANCEL"), button_w);
+        b->addActionHandler(this);
+	scan_tabbing = true;
+        closeButton = b;
 
         /* first child is first tabbable */
         {
@@ -3588,7 +3667,7 @@ void GUI_Shortcut(int select) {
         PIC_AddEvent(RunCfgTool, 100);
     } else
 #endif
-    RunCfgTool(NULL);
+    RunCfgTool(0);
 }
 
 void GUI_Run(bool pressed) {
@@ -3603,5 +3682,5 @@ void GUI_Run(bool pressed) {
         PIC_AddEvent(RunCfgTool, 100);
     } else
 #endif
-    RunCfgTool(NULL);
+    RunCfgTool(0);
 }

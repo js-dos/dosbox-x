@@ -20,6 +20,8 @@
 #include "dosbox.h"
 #if C_DEBUG
 
+#include "../../tests/tests.h"
+
 #include <string.h>
 #include <list>
 #include <vector>
@@ -48,7 +50,6 @@ using namespace std;
 #include "../cpu/lazyflags.h"
 #include "keyboard.h"
 #include "control.h"
-#include "../../tests/tests.h"
 
 #ifdef WIN32
 void WIN32_Console();
@@ -401,7 +402,7 @@ uint64_t LinMakeProt(uint16_t selector, uint32_t offset)
 uint64_t GetAddress(uint16_t seg, uint32_t offset)
 {
 	if (cpu.pmode && !(reg_flags & FLAG_VM))
-        return LinMakeProt(seg,offset);
+		return LinMakeProt(seg,offset);
 
 	if (seg==SegValue(cs)) return SegPhys(cs)+(uint64_t)offset;
 	return ((uint64_t)seg<<4u)+offset;
@@ -1835,6 +1836,9 @@ bool lookslikefloat(char* str) {
     return true;
 }
 
+void VGA_DumpFontRamBIN(const char *filename);
+void VGA_DumpFontRamBMP(const char *filename);
+
 bool ParseCommand(char* str) {
     std::string copy_str = str;
     for (auto &c : copy_str) c = toupper(c);
@@ -2004,49 +2008,93 @@ bool ParseCommand(char* str) {
 
 	if (command == "SM") { // Set memory with following values
 		uint16_t seg = (uint16_t)GetHexValue(found,found);
-        if (*found == ':') { // allow seg:off syntax
-            found++;
-            SkipSpace(found);
-        }
+		if (*found == ':') { // allow seg:off syntax
+			found++;
+			SkipSpace(found);
+		}
 		uint32_t ofs = GetHexValue(found,found); SkipSpace(found);
 		uint16_t count = 0;
-        bool parsed;
+		bool parsed;
 
-        while (*found) {
-            char prefix = 'B';
-            uint32_t value;
+		while (*found) {
+			char prefix = 'B';
+			uint32_t value;
 
-            /* allow d: w: b: prefixes */
-            if ((*found == 'B' || *found == 'W' || *found == 'D') && found[1] == ':') {
-                prefix = *found; found += 2;
-                value = GetHexValue(found,found,&parsed);
-            }
-            else {
-                value = GetHexValue(found,found,&parsed);
-            }
+			/* allow d: w: b: prefixes */
+			if ((*found == 'B' || *found == 'W' || *found == 'D') && found[1] == ':') {
+				prefix = *found; found += 2;
+				value = GetHexValue(found,found,&parsed);
+			}
+			else {
+				value = GetHexValue(found,found,&parsed);
+			}
 
-            SkipSpace(found);
-            if (!parsed) {
-                DEBUG_ShowMsg("GetHexValue parse error at %s",found);
-                break;
-            }
+			SkipSpace(found);
+			if (!parsed) {
+				DEBUG_ShowMsg("GetHexValue parse error at %s",found);
+				break;
+			}
 
-            if (prefix == 'D') {
-                mem_writed_checked((PhysPt)GetAddress(seg,ofs+count),value);
-                count += 4;
-            }
-            else if (prefix == 'W') {
-                mem_writew_checked((PhysPt)GetAddress(seg,ofs+count),value);
-                count += 2;
-            }
-            else if (prefix == 'B') {
-                mem_writeb_checked((PhysPt)GetAddress(seg,ofs+count),value);
-                count++;
-            }
-        }
+			if (prefix == 'D') {
+				mem_writed_checked((PhysPt)GetAddress(seg,ofs+count),value);
+				count += 4;
+			}
+			else if (prefix == 'W') {
+				mem_writew_checked((PhysPt)GetAddress(seg,ofs+count),value);
+				count += 2;
+			}
+			else if (prefix == 'B') {
+				mem_writeb_checked((PhysPt)GetAddress(seg,ofs+count),value);
+				count++;
+			}
+		}
 
-        if (count > 0)
-            DEBUG_ShowMsg("DEBUG: Memory changed (%u bytes)\n",(unsigned int)count);
+		if (count > 0)
+			DEBUG_ShowMsg("DEBUG: Memory changed (%u bytes)\n",(unsigned int)count);
+
+		return true;
+	}
+
+	if (command == "SMV") { // Set memory with following values (virtual linear address)
+		uint32_t ofs = GetHexValue(found,found); SkipSpace(found);
+		uint16_t count = 0;
+		bool parsed;
+
+		while (*found) {
+			char prefix = 'B';
+			uint32_t value;
+
+			/* allow d: w: b: prefixes */
+			if ((*found == 'B' || *found == 'W' || *found == 'D') && found[1] == ':') {
+				prefix = *found; found += 2;
+				value = GetHexValue(found,found,&parsed);
+			}
+			else {
+				value = GetHexValue(found,found,&parsed);
+			}
+
+			SkipSpace(found);
+			if (!parsed) {
+				DEBUG_ShowMsg("GetHexValue parse error at %s",found);
+				break;
+			}
+
+			if (prefix == 'D') {
+				mem_writed_checked((PhysPt)(ofs+count),value);
+				count += 4;
+			}
+			else if (prefix == 'W') {
+				mem_writew_checked((PhysPt)(ofs+count),value);
+				count += 2;
+			}
+			else if (prefix == 'B') {
+				mem_writeb_checked((PhysPt)(ofs+count),value);
+				count++;
+			}
+		}
+
+		if (count > 0)
+			DEBUG_ShowMsg("DEBUG: Memory changed (%u bytes)\n",(unsigned int)count);
 
 		return true;
 	}
@@ -2259,28 +2307,28 @@ bool ParseCommand(char* str) {
 
 	if (command == "D") { // Set data overview
 		dataSeg = (uint16_t)GetHexValue(found,found); SkipSpace(found);
-        if (*found == ':') { // allow seg:off syntax
-            found++;
-            SkipSpace(found);
-        }
+		if (*found == ':') { // allow seg:off syntax
+			found++;
+			SkipSpace(found);
+		}
 		dataOfs = GetHexValue(found,found); SkipSpace(found);
-        dbg.set_data_view(DBGBlock::DATV_SEGMENTED);
+		dbg.set_data_view(DBGBlock::DATV_SEGMENTED);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
 	}
 
 	if (command == "DV") { // Set data overview
-        dataSeg = 0;
+		dataSeg = 0;
 		dataOfs = GetHexValue(found,found); SkipSpace(found);
-        dbg.set_data_view(DBGBlock::DATV_VIRTUAL);
+		dbg.set_data_view(DBGBlock::DATV_VIRTUAL);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
 	}
 
 	if (command == "DP") { // Set data overview
-        dataSeg = 0;
+		dataSeg = 0;
 		dataOfs = GetHexValue(found,found); SkipSpace(found);
-        dbg.set_data_view(DBGBlock::DATV_PHYSICAL);
+		dbg.set_data_view(DBGBlock::DATV_PHYSICAL);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
 	}
@@ -2740,14 +2788,56 @@ bool ParseCommand(char* str) {
     }
 
     if (command == "VGA") {
+        while (*found == ' ') found++;
         stream >> command;
+        while (*found != 0 && *found != ' ') found++;
+        while (*found == ' ') found++;
 
         if (IS_PC98_ARCH) {
             DEBUG_ShowMsg("VGA debugger commands not available in PC-98 mode");
             return false;
         }
 
-        if (command == "CRTC") {
+	if (command == "FONTDUMP") { // Dump font RAM to file
+		/* Rule: If the file extension is .BIN, write the entire contents of bitplane 2 where the font resides (64KB).
+		 *       If the file extension is .BMP, write only the visible font characters in a neat 8x8 (256) matrix.
+		 *       If you run this when EGA/VGA graphics are active, you will get "jibberish" based on the graphics on
+		 *       screen, and that is your fault.
+		 * TODO: VGA 512-char mode? */
+		if (IS_PC98_ARCH) {
+			LOG_MSG("Command not available in PC-98 mode");
+			return false;
+		}
+		else if (!IS_EGAVGA_ARCH) {
+			LOG_MSG("Command requires EGA, VGA, or SVGA machine type");
+			return false;
+		}
+		else {
+			std::string filename;
+			const char *fext;
+
+			while (*found == ' ') found++;
+			while (*found != 0 && *found != ' ') filename += *found++;
+			while (*found == ' ') found++;
+
+			/* Possible parameters following the filename here */
+
+			fext = (const char*)strrchr(filename.c_str(),'.');
+			if (fext == NULL) fext = "";
+
+			if (!strcasecmp(fext,".bin")) {
+				VGA_DumpFontRamBIN(filename.c_str());
+			}
+			else if (!strcasecmp(fext,".bmp")) {
+				VGA_DumpFontRamBMP(filename.c_str());
+			}
+			else {
+				LOG_MSG("Unknown file extension '%s' in '%s'. Please use .BIN or .BMP",fext,filename.c_str());
+				return false;
+			}
+		}
+	}
+	else if (command == "CRTC") {
             DEBUG_ShowMsg("VGA CRTC info: index=%02xh readonly=%u",vga.crtc.index,vga.crtc.read_only?1:0);
             DEBUG_ShowMsg("htotal=%02xh hdend=%02xh strhb=%02xh endhb=%02xh strrt=%02xh endrt=%02xh",
                 vga.crtc.horizontal_total,              vga.crtc.horizontal_display_end,
@@ -2911,6 +3001,20 @@ bool ParseCommand(char* str) {
                 vga.config.full_not_enable_set_reset,
                 vga.config.full_enable_set_reset,
                 vga.config.full_enable_and_set_reset);
+	    {
+		    std::string s;
+
+		    if (vga.complexity.flags & VGACMPLX_MAP_MASK) s += "mapmask|";
+		    if (vga.complexity.flags & VGACMPLX_NON_EXTENDED) s += "nonextend|";
+		    if (vga.complexity.flags & VGACMPLX_ODDEVEN) s += "oddeven|";
+		    if (vga.complexity.flags & VGACMPLX_BITMASK) s += "bitmask|";
+		    if (vga.complexity.flags & VGACMPLX_COLORDONTCARE) s += "clrdontcare|";
+		    if (vga.complexity.flags & VGACMPLX_WRITEMODE) s += "wrmode|";
+		    if (vga.complexity.flags & VGACMPLX_READMODE) s += "rdmode|";
+		    if (vga.complexity.flags & VGACMPLX_ROPROT) s += "roprot|";
+		    if (vga.complexity.flags & VGACMPLX_SETRESET) s += "setreset|";
+		    DEBUG_ShowMsg("complexity-flags=0x%lx=%s",(unsigned long)vga.complexity.flags,s.c_str());
+	    }
         }
         else {
             return false;
@@ -3410,6 +3514,8 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("BPLIST                    - List breakpoints.\n");
 		DEBUG_ShowMsg("BPDEL  [bpNr] / *         - Delete breakpoint nr / all.\n");
 		DEBUG_ShowMsg("C / D  [segment]:[offset] - Set code / data view address.\n");
+		DEBUG_ShowMsg("DV [addr]                 - Set data view to linear (virtual) address\n");
+		DEBUG_ShowMsg("DP [addr]                 - Set data view to physical address\n");
 		DEBUG_ShowMsg("DOS MCBS                  - Show Memory Control Block chain.\n");
 		DEBUG_ShowMsg("DOS KERN                  - Show DOS kernel memory blocks.\n");
 		DEBUG_ShowMsg("DOS XMS                   - Show XMS memory handles.\n");
@@ -3427,6 +3533,7 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("ADDLOG [message]          - Add message to the log file.\n");
 		DEBUG_ShowMsg("SR [reg] [value]          - Set register value. Multiple pairs allowed.\n");
 		DEBUG_ShowMsg("SM [seg]:[off] [val] [.]..- Set memory with following values.\n");
+		DEBUG_ShowMsg("SMV [addr] [val] [.]..    - Set memory with following values at linear (virtual) address.\n");
 		DEBUG_ShowMsg("EV [value [value] ...]    - Show register value(s).\n");
 		DEBUG_ShowMsg("IV [seg]:[off] [name]     - Create var name for memory address.\n");
 		DEBUG_ShowMsg("SV [filename]             - Save var list in file.\n");
@@ -4155,6 +4262,12 @@ void DEBUG_WaitNoExecute(void) {
     cpudecoder = oldcore;
 }
 
+int GetDynamicType();
+
+#if (C_DYNAMIC_X86)
+void dyn_core_dh_debug_flush (void);
+#endif
+
 Bitu DEBUG_Loop(void) {
     if (debug_running) {
         Bitu now = SDL_GetTicks();
@@ -4175,6 +4288,14 @@ Bitu DEBUG_Loop(void) {
         uint32_t oldEIP	= reg_eip;
         PIC_runIRQs();
         SDL_Delay(1);
+
+#if (C_DYNAMIC_X86)
+	if (GetDynamicType() > 0) {
+		/* Force dynamic core to flush whatever internal FPU state to the FPU state we can see */
+		dyn_core_dh_debug_flush();
+	}
+#endif
+
         if ((oldCS!=SegValue(cs)) || (oldEIP!=reg_eip)) {
             CBreakpoint::AddBreakpoint(oldCS,oldEIP,true);
             CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
@@ -4746,10 +4867,10 @@ static void LogFPUInfo(void) {
                       fpu.p_regs[adj].m3, fpu.p_regs[adj].m2, fpu.p_regs[adj].m1);
 #elif HAS_LONG_DOUBLE
         DEBUG_ShowMsg(" st(%u): %s val=%.20Lg (0x%04x%016llx)", i, FPU_tag(fpu.tags[adj]),
-                      fpu.regs_80[adj].v, fpu.regs_80[adj].raw.h, fpu.regs_80[adj].raw.l);
+                      fpu.regs_80[adj].v, fpu.regs_80[adj].raw.h, (unsigned long long)fpu.regs_80[adj].raw.l);
 #else
         DEBUG_ShowMsg(" st(%u): %s use80=%u val=%.16g (0x%016llx)", i, FPU_tag(fpu.tags[adj]),
-                      fpu.use80[adj], fpu.regs[adj].d, fpu.regs[adj].ll);
+                      fpu.use80[adj], fpu.regs[adj].d, (unsigned long long)fpu.regs[adj].ll);
 #endif
     }
 

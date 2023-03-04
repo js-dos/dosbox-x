@@ -63,6 +63,7 @@
 #endif
 
 #include <map>
+#include <cctype>
 
 #define BMOD_Mod1               0x0001
 #define BMOD_Mod2               0x0002
@@ -890,8 +891,8 @@ static SDLKey sdlkey_map[]={
     /*52-57*/ SDLK_KP0, SDLK_KP1, SDLK_KP2, SDLK_KP3, SDLK_KP4, SDLK_KP5,
     /*58-5C*/ SDLK_KP6, SDLK_KP7, Z, SDLK_KP8, SDLK_KP9,
 
-    /*5D-5F*/ Z, Z, SDLK_a,
-
+	/*5D-5F*/ SDLK_WORLD_1, SDLK_UNDERSCORE, SDLK_a,
+    
     /* Function keys and cursor blocks (F13 not supported, F14 =>
      * PRINT[SCREEN], F15 => SCROLLOCK, F16 => PAUSE, HELP => INSERT) */
     /*60-64*/ SDLK_F5, SDLK_F6, SDLK_F7, SDLK_F3, SDLK_F8,
@@ -1019,9 +1020,9 @@ static SDLKey sdlkey_map[MAX_SCANCODES] = { // Convert hardware scancode (XKB = 
     Z, //0x82 Hanguel
     Z, //0x83 Hanja
     SDLK_JP_YEN,//0x84
-    SDLK_LMETA, //0x85
-    SDLK_RMETA, //0x86
-    SDLK_MODE,  //0x87
+    SDLK_LSUPER, //0x85
+    SDLK_RSUPER, //0x86
+    SDLK_MENU,  //0x87
     Z,Z,Z,Z,Z,Z,Z,Z //0x88-0x8f unknown
     /* 0x90-0x9f unknown */
     //Z, Z, Z, Z, Z, Z, Z, Z, Z, Z, Z, Z, Z, Z, Z, Z
@@ -1166,12 +1167,25 @@ void setScanCode(Section_prop * section) {
 		usescancodes = 1;
 	else if (!strcasecmp(usesc, "false")||!strcmp(usesc, "0"))
 		usescancodes = 0;
+#if defined(WIN32)
+    else {
+        WORD cur_kb_layout = LOWORD(GetKeyboardLayout(0));
+        if(cur_kb_layout == 1033) { /* Locale ID: en-us */
+            usescancodes = 0;
+            LOG_MSG("SDL_mapper: US keyboard detected, set usescancodes=false");
+        }
+        else {
+            usescancodes = 1;
+            LOG_MSG("SDL_mapper: non-US keyboard detected, set usescancodes=true");
+        }
+    }
+#endif // defined(WIN32)
 }
 void loadScanCode();
 const char* DOS_GetLoadedLayout(void);
 bool load=false;
 bool prev_ret;
-#endif
+#endif // !defined(C_SDL2)
 
 bool useScanCode() {
 #if defined(C_SDL2)
@@ -1300,12 +1314,6 @@ Bitu GetKeyCode(SDL_keysym keysym) {
                 return SDLK_DELETE;
             case 0x7f:
                 return SDLK_PAUSE;
-            case 0x85:
-                return SDLK_LSUPER;
-            case 0x86:
-                return SDLK_RSUPER;
-            case 0x87:
-                return SDLK_MENU;
             default:
 #endif
                 key = (keysym.scancode < MAX_SCANCODES ? sdlkey_map[keysym.scancode] : SDLK_UNKNOWN);
@@ -4370,9 +4378,9 @@ static void CreateLayout(void) {
 
     // NOTE: screen budget is really tight down there, more than that and drawing crashes
 
-    bind_but.action = new CCaptionButton(PX(8) - CX, PY(22) - CY, BU(15), BV(1), false);
-    bind_but.dbg1   = new CCaptionButton(PX(8) - CX, PY(23) - CY, BU(16), BV(1), false);
-    bind_but.dbg2   = new CCaptionButton(PX(8) - CX, PY(24) - CY, BU(16), BV(1), false);
+    bind_but.action = new CCaptionButton(PX(7), PY(22) - CY, BU(15), BV(1), false);
+    bind_but.dbg1   = new CCaptionButton(PX(7), PY(23) - CY, BU(16), BV(1), false);
+    bind_but.dbg2   = new CCaptionButton(PX(7), PY(24) - CY, BU(16), BV(1), false);
 
     bind_but.dbg1->Change("%s", "");
     bind_but.dbg2->Change("%s", "");
@@ -4465,8 +4473,10 @@ static struct {
     /* Is that the extra backslash key ("less than" key) */
     /* on some keyboards with the 102-keys layout??      */
     {"lessthan",SDL_SCANCODE_NONUSBACKSLASH},
-#if !defined(MACOSX)
-#if (defined (WIN32) || defined (__linux__))
+#if defined(MACOSX)
+    {"jp_bckslash",SDL_SCANCODE_INTERNATIONAL1},
+    {"jp_yen",SDL_SCANCODE_INTERNATIONAL3},
+#elif (defined (WIN32) || defined (__linux__))
     /* Special handling for JP Keyboards */
     {"jp_bckslash",SDL_SCANCODE_INTERNATIONAL1}, // SDL2 returns same code as SDL_SCANCODE_NONUSBACKSLASH?
     {"jp_yen",SDL_SCANCODE_INTERNATIONAL3},
@@ -4474,7 +4484,6 @@ static struct {
     {"jp_henkan", SDL_SCANCODE_INTERNATIONAL4},
     {"jp_hiragana", SDL_SCANCODE_INTERNATIONAL2},
 #endif //(defined (WIN32) || defined (__linux__))
-#endif //!defined(MACOSX)
 #if 0
 #ifdef SDL_DOSBOX_X_SPECIAL
     /* hack for Japanese keyboards with \ and _ */
@@ -4566,11 +4575,16 @@ static struct {
     // TODO??
 #else
 #ifdef SDL_DOSBOX_X_SPECIAL
+#if defined(MACOSX)
+    {"jp_bckslash",SDLK_UNDERSCORE},
+    {"jp_yen",SDLK_WORLD_1 },
+#else
     /* hack for Japanese keyboards with \ and _ */
     {"jp_bckslash",SDLK_JP_RO}, // Same difference
     {"jp_ro",SDLK_JP_RO}, // DOSBox proprietary
     /* hack for Japanese keyboards with Yen and | */
     {"jp_yen",SDLK_JP_YEN },
+#endif
 #endif
     /* more */
     {"jp_hankaku", SDLK_WORLD_12 },
@@ -5049,7 +5063,7 @@ void BIND_MappingEvents(void) {
 #endif
 #if defined(SDL_VIDEO_DRIVER_X11)
 # if defined(C_SDL2)
-# elif defined(SDL_DOSBOX_X_SPECIAL)
+# elif defined(SDL_DOSBOX_X_SPECIAL) && defined(LINUX)
                 {
                     char *LinuxX11_KeySymName(Uint32 x);
 

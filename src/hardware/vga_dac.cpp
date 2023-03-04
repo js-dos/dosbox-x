@@ -25,6 +25,13 @@
 extern bool vga_enable_3C6_ramdac;
 extern bool vga_8bit_dac;
 
+unsigned int VGA_DAC_DeferredUpdate = 0;
+
+void VGA_DAC_DeferredUpdateColorPalette();
+
+extern bool vga_render_on_demand;
+void VGA_RenderOnDemandUpTo(void);
+
 /*
 3C6h (R/W):  PEL Mask
 bit 0-7  This register is anded with the palette index sent for each dot.
@@ -54,11 +61,54 @@ Note:  Each read or write of this register will cycle through first the
 
 enum {DAC_READ,DAC_WRITE};
 
+static inline uint8_t dacexpand(const uint8_t v,const uint8_t dacshl,const uint8_t dacshr) {
+	/* NTS: Expand to int for shift. You never know if some processor might
+	 *      limit the bit shift to the number of bits needed for the data
+	 *      type. Intel processors for example which only pay attention to
+	 *      the low 5 bits after the 8086 (6 bits for 64-bit).
+	 *
+	 *      In 6-bit mode, v is 6 bits wide. Caller is expected to mask v
+	 *      to 6 bits
+	 *
+	 *      The algorithm here is (x << dacshift) | (x >> (8 - (dacshift * 2u))).
+	 *
+	 *      For dacshift == 0, the result is v.
+	 *      For dacshift == 2, the result is (v << 2) | (v >> 4).
+	 *
+	 *      If dacshift 2, the idea is to take the top 2 bits and fill in
+	 *      the low 2 bits of the result with them. This is equivalent to
+	 *      computing (v * 255) / 63 but without a multiply and divide.
+	 *      dacshl == 2, dacshr == 4.
+	 *
+	 *      With apologies to those on GitHub I may have confused explaining
+	 *      this algorithm when I was more busy at work compared to a pull
+	 *      request that hardcoded (x << dacshift) | (x >> (dacshift * 2)),
+	 *      which would happen to work here, but would produce a wrong result
+	 *      for anything other than dacshift == 0 or dacshift == 2.
+	 *
+	 *      ++--------------++
+	 *      ||              ||
+	 *      001010 -> 00101000
+	 *      011001 -> 01000001
+	 *      100101 -> 10010110
+	 *      110011 -> 11001111
+	 *      abcdef    abcdefab
+	 */
+	if (dacshl == 0)
+		return v;
+	else
+		return	uint8_t((unsigned int)v << (unsigned int)dacshl) |
+			uint8_t((unsigned int)v >> (unsigned int)dacshr);
+}
+
 static void VGA_DAC_SendColor( Bitu index, Bitu src ) {
     const uint8_t dacshift = vga_8bit_dac ? 0u : 2u;
-    const uint8_t red = vga.dac.rgb[src].red << dacshift;
-    const uint8_t green = vga.dac.rgb[src].green << dacshift;
-    const uint8_t blue = vga.dac.rgb[src].blue << dacshift;
+    const uint8_t dacshl = dacshift;
+    const uint8_t dacshr = 8u - (dacshift * 2u); /* take 8 - dacshift bit field and shift right by dacshift i.e. 6 bit field shift right by 4 to fill lower bits. */
+    const uint8_t dacmask = (0x100 >> dacshift) - 1u; /* 8-bit = 0xFF 6-bit = 0x3F */
+    const uint8_t red = dacexpand(vga.dac.rgb[src].red&dacmask,dacshl,dacshr);
+    const uint8_t green = dacexpand(vga.dac.rgb[src].green&dacmask,dacshl,dacshr);
+    const uint8_t blue = dacexpand(vga.dac.rgb[src].blue&dacmask,dacshl,dacshr);
 
     /* FIXME: CGA composite mode calls RENDER_SetPal itself, which conflicts with this code */
     if (vga.mode == M_CGA16)
@@ -148,6 +198,13 @@ void VGA_DAC_UpdateColorPalette() {
         VGA_DAC_UpdateColor( i );
 }
 
+void VGA_DAC_DeferredUpdateColorPalette() {
+	if (VGA_DAC_DeferredUpdate > 0) {
+		VGA_DAC_DeferredUpdate = 0;
+		VGA_DAC_UpdateColorPalette(); // FIXME: Yes, this is very inefficient. Will improve later.
+	}
+}
+
 void write_p3c6(Bitu port,Bitu val,Bitu iolen) {
     (void)iolen;//UNUSED
     (void)port;//UNUSED
@@ -164,7 +221,8 @@ void write_p3c6(Bitu port,Bitu val,Bitu iolen) {
         // TODO: MCGA 640x480 2-color mode appears to latch the DAC at retrace
         //       for background/foreground. Does that apply to the PEL mask too?
 
-        VGA_DAC_UpdateColorPalette();
+        if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
+        VGA_DAC_DeferredUpdate++;
     }
 }
 
@@ -276,7 +334,8 @@ void write_p3c9(Bitu port,Bitu val,Bitu iolen) {
              * MCGA double-buffers foreground and background colors */
         }
         else {
-            VGA_DAC_UpdateColorPalette(); // FIXME: Yes, this is very inefficient. Will improve later.
+            if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
+            VGA_DAC_DeferredUpdate++;
         }
 
         /* only if we just completed a color should we advance */

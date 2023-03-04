@@ -1162,9 +1162,20 @@ static bool IsEnhancedKey(uint16_t &key) {
     return false;
 }
 
-#if defined(WIN32) && !defined(HX_DOS) && defined(C_SDL2)
+#if defined(C_SDL2)
+#if defined(WIN32) && !defined(HX_DOS)
 extern void IME_SetEnable(BOOL state);
 extern bool IME_GetEnable();
+#elif defined(MACOSX)
+extern bool IME_GetEnable();
+extern void IME_SetEnable(int state);
+#ifndef TRUE
+#define TRUE 1
+#endif
+#ifndef FALSE
+#define FALSE 0
+#endif
+#endif
 #endif
 
 extern bool DOS_BreakFlag;
@@ -1296,7 +1307,7 @@ Bitu INT16_Handler(void) {
                  (mem_readb(BIOS_KEYBOARD_FLAGS3)&0x0c);    // Right Ctrl/Alt pressed, bits 2,3
         break;
     case 0x13:
-#if defined(WIN32) && !defined(HX_DOS) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
+#if (defined(WIN32) && !defined(HX_DOS) || defined(MACOSX)) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
 #if defined(USE_TTF)
         if((IS_DOSV || ttf_dosv) && IS_DOS_CJK && (DOSV_GetFepCtrl() & DOSV_FEP_CTRL_IAS)) {
 #else
@@ -1316,7 +1327,7 @@ Bitu INT16_Handler(void) {
                 }
             }
         }
-#elif defined(WIN32) && !defined(HX_DOS) && defined(C_SDL2)
+#elif (defined(WIN32) && !defined(HX_DOS) || defined(MACOSX)) && defined(C_SDL2)
 #if defined(USE_TTF)
         if((IS_DOSV || ttf_dosv) && IS_DOS_CJK && (DOSV_GetFepCtrl() & DOSV_FEP_CTRL_IAS)) {
 #else

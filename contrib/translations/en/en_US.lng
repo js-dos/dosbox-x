@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:English (United States)
 :DOSBOX-X:CODEPAGE:437
-:DOSBOX-X:VERSION:2022.09.1
+:DOSBOX-X:VERSION:2022.12.26
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Lines in this section will be run at startup.
@@ -2598,6 +2598,9 @@ OpenGL perfect
 .
 :MENU:output_ttf
 TrueType font
+.
+:MENU:output_gamelink
+Game Link
 .
 :MENU:doublescan
 Doublescan

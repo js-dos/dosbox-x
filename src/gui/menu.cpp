@@ -382,6 +382,9 @@ static const char *def_menu_video_output[] =
 #if defined(USE_TTF)
     "output_ttf",
 #endif
+#if C_GAMELINK
+    "output_gamelink",
+#endif
     "--",
     "doublescan",
 #if !defined(C_SDL2)
@@ -812,8 +815,11 @@ static const char* def_menu_debug[] =
     "save_logas",
     "--",
     "show_console",
+    "clear_console",
     "disable_logging",
     "wait_on_error",
+    "--",
+    "video_debug_overlay",
     "--",
     "debug_logint21",
     "debug_logfileio",
@@ -824,6 +830,8 @@ static const char* def_menu_help_debug[] =
 {
     "show_console",
     "wait_on_error",
+    "--",
+    "video_debug_overlay",
     NULL
 };
 #endif

@@ -1,4 +1,257 @@
-Unreleased
+Next
+  - Dynamic core: Fix serious bug in dynrec dynamic core where calls
+    to handle x86 FPU instructions erronously passed the entire
+    FPU status word instead of passing only the FPU stack pointer.
+    The result of this error was that floating point was erratic,
+    buggy, and often caused memory corruption in DOSBox-X eventually
+    leading to a crash. It should now be possible to properly run
+    DOS games on dynrec based systems, including ARM-based M1 Macbooks,
+    that use the FPU. (joncampbell123)
+  - Debugger: When entering debugger interface, force dynamic core
+    to flush it's state so that the debugger can show the correct
+    state to the user when they use the "FPU" command to see it.
+     (joncampbell123).
+  - VGA emulation: Automatically ignore odd/even mode if "Chain 4"
+    mode is enabled in the sequencer (normally enabled only for
+    256-color mode). Some games accidentally set odd/even mode
+    in 256-color mode and yet apparently worked just fine on real
+    hardware. Without this change, such games will display distorted
+    graphics. It makes logical sense "Chain 4" would take priority
+    over odd/even mode. Note: If a game uses 256-color unchained mode
+    AND foolishly enables odd/even mode, then the resulting distorted
+    graphics are probably accurate to what would happen on real
+    hardware, but then programmers would have caught their mistake
+    and fixed it so that is very unlikely to occur. This helps to fix
+    "Seal: Magic Eye" although some remaining visual artifacts in the
+    game can only be resolved by setting machine=svga_et4000
+     (joncampbell123).
+  - Set usescancodes=true when non-US keyboards are detected
+     (Windows builds) (maron2000)
+  - For long double without using x86 FPU, the code still calls the
+    fstcw instruction and can enable FPU exceptions that crash the
+    emulator, therefore mask off all exception bits to stop that.
+    (joncampbell123)
+  - Added code to mouse emulation to control how often the mouse
+    reports events through the interrupt. Added dosbox.conf option
+    to allow the user to force a report rate, which can be used to
+    force a lower than normal report rate for games that cannot
+    proprly handle higher ones. Allow PS/2 mouse emulation, if
+    rate not set by user, to control report rate. (joncampbell123).
+  - Add code to COMMAND.COM to flush keyboard input before running
+    the command given by the user, and flush again when the command
+    returns. Added option to dosbox.conf to enable/disable this
+    function (joncampbell123)
+  - Fix bug where Tandy mode ignored the "allow more than 640kb"
+    setting.
+  - Fix INT13h AH=02 broken conditional branch which prevents
+    installer of game "Inherit the Earth: Quest for the Orb"
+    to obtain free space of hard drive (maron2000)
+  - qcow2 image support: Make image able to be mounted by
+    drive letters (experimental) (maron2000)
+  - VHD image support: Make file name check for .vhd extension
+    to be case insensitive (maron2000)
+  - VHD image support: Fix auto-detection of geometry (maron2000)
+  - Sound Blaster: Added code to periodically check the user's
+    settings regarding recording source selection and listening.
+    This should allow the user to change those settings on the
+    fly. (joncampbell123).
+  - Sound Blaster: Added options to control whether the generated
+    recording source is audible through the speakers, and what
+    generated audio to send to the client. Options are: silence,
+    hiss, and a 1KHz test tone. (joncampbell123).
+  - Sound Blaster: If the DSP is recording rather than playing,
+    then send audio to the guest at the recording sample rate
+    containing some form of generated audio. Default is silence.
+    This ALSO satisfies the Creative driver CTSB16.SYS when it
+    does the DMA test at startup. (joncampbell123).
+  - Sound Blaster: Fixed code to properly recognize when the
+    guest wants to record audio, including through SB16
+    commands. Prior to this fix, all SB16 Bxh-Cxh commands
+    were handled as if playback even if the command would
+    instead trigger recording. (joncampbell123).
+  - Sound Blaster: Add missing update of "last DMA callback"
+    timestamp that is needed for when the guest pauses DMA
+    during playback or recording. (joncampbell123).
+  - VHD image support: If the VHD image is not a fixed type,
+    say so in the log (previously it said nothing) and say
+    what kind of image was mounted (joncampbell123).
+  - Added INT 13h AH=44h Extended Verify to satisfy any disk
+    utilities that might use it. The function doesn't really
+    do anything except return success (joncampbell123).
+  - Fix CPU stack management to use CPU mode agnostic method
+    using mem_readw instead of real_readw. However the real
+    mode version is used if real or virtual 8086 mode because
+    of comments in an older commit that mention UNLZEXE that
+    depends on real mode stack pointer rollover. This fixes
+    a bug related to protected mode APM (Advanced Power
+    Management) emulation that prevented the Linux kernel
+    from booting (joncampbell123).
+  - Add support for INT 2F function 1680h "Idle" and DOS
+    idle (INT 28h), add code to reduce DOSBox-X CPU load
+    during emulation when the idle function is called,
+    add dosbox.conf enable/disable (default enable) to
+    control this behavior (Github user "finalpatch")
+  - Graphical fixes and dialog support for Haiku OS (amol-)
+  - Allow jp106 keyboard layout in DOS/V mode, automatically
+    choose when keyboard layout is auto on Windows with
+    Japanese keyboard, fix jp106 input in SDL1 builds running
+    on Japanese Windows with English keyboard (nanshiki)
+  - Sync dh fpu state with normal fpu when dynamic core
+    calls normal core to handle self modifying code. Add
+    additional code to other cases. (Github user "finalpatch")
+  - Fix incorrect handling of upper 4 bits of character attributes
+    in video mode 72h in DOS/V mode (nanshiki)
+  - Fix BIOS signature at 0xFFFFF to reflect actual value
+    of Tandy machines so "Ninja" works correctly in
+    Tandy mode (rderooy)
+    See also: [https://www.vogons.org/viewtopic.php?f=32&t=92129]
+  - Change default mixer rate to 48KHz instead of the
+    long standard 44.1KHz. Most modern sound cards on
+    modern OSes render at 48KHz anyway and resample
+    either in hardware or software and most configurations
+    render at 48KHz. Perhaps somewhat improved audio quality
+    could be had by rendering at what most sound cards are
+    doing these days anyway. As usual, audiophiles are free
+    to set the mixer rate to 96KHz if supported by their
+    sound card. (joncampbell123)
+  - Fix PIT 0 timer interrupt handling not to attempt
+    periodic event and error adjustment unless the game
+    is using periodic modes 2 or 3. This fixes PIT timing
+    bug and possible emulator hang when exiting games
+    like "Days of Thunder" that leave PIT 0 in mode 0 or
+    1 on exit for some reason. (joncampbell123)
+  - Fix Sound Blaster DMA rate limits to better reflect
+    actual hardware. SB16 limits to 45454Hz just as
+    Pro and earlier do. These limits were added before
+    the proper measurements were coded and tested on
+    real hardware. (joncampbell123)
+  - Fix S3 cursor emulation to support both X11 and
+    Windows hardware mouse cursor modes available
+    on S3 Virge, Trio, and possibly other cards
+    (John Tsiombikas)
+  - Add EGA/VGA emulation code to keep track at runtime
+    whether planar features are in use. If they are not,
+    then handle EGA/VGA video memory access using a
+    simplified version for a bit of a performance boost
+    in response to complaints about poor VGA emulation
+    performance. (joncampbell123)
+  - VGA palette DAC update: Instead of recalculating
+    the palette map every time a color is written through
+    port 3C9h, set a flag. Defer palette map update to
+    when the next scan line is rendered, in order to
+    improve performance. (joncampbell123)
+  - Add option to enable or disable the "memory I/O
+    optimization" option, meaning the code that was
+    added to assign simplified VGA memory I/O handling
+    when the DOS game is not using any bit planar raster
+    op and more complicated features of the EGA/VGA
+    hardware. (joncampbell123)
+  - Added VGA render on demand mode to VGA emulation.
+    When enabled, VGA emulation does not render scanlines
+    until vertical retrace or when certain registers are
+    written that change the display (attribute controller,
+    VGA palette, etc.). It is added to dosbox.conf as
+    "scanline render on demand" and is false by default
+    because it can provide a performance boost for DOS games
+    but it also tends to break timing-dependent Demoscene
+    effects. The idea is that some emulator performance
+    improvement may be possible by not interrupting the
+    CPU loop per scanline for the same reason that DOSBox
+    SVN has traditionally only rendered the VGA display
+    in quarters instead of per scanline. (joncampbell123).
+  - Remove experimental "alt VGA" rendering code. It was
+    never completed and it is probably starting to
+    bitrot (joncampbell123).
+  - Fix EGA/VGA version of CGA 4-color graphics renderer
+    code to consider all four bitplanes when combining
+    each pair into a 2-bit value. When bitplanes 2+3 are
+    enabled and writeable, the 4-color mode becomes a
+    sort of 2-plane 2 bits per pixel 16-color mode. Fix
+    for machine=ega and "Leather Goddess of Phobos 2",
+    a game that sets up EGA 640x200 16-color mode then
+    suddenly switches on the 2bpp CGA mode as a way to
+    do 16-color dithered graphics. (joncampbell123).
+
+2022.12.26
+  - Allow more than 640KB of conventional memory,
+    regardless of "allow more than 640kb" option, for
+    Tandy machine type. The setting is capped to 768KB
+    to reflect Tandy systems with that upgrade, which
+    is said to allow a full 640KB for DOS and 128KB for
+    video RAM without any conflict from the MCB chain.
+    Adjust Tandy video emulation for 768KB case. This
+    fixes "Might and Magic III Isles of Terra" crashes
+    in Tandy mode and Tandy graphics because the game
+    does not correctly handle the memory configuration
+    when less RAM is involved. (joncampbell123).
+  - Fix code page CPI/CPX loader to allocate 128KB of
+    memory instead of 84KB. The code allocates a 64KB
+    stack for the executable code within. The 84KB
+    allocation permitted the initial stack pointer to
+    exist beyond available conventional memory if
+    conventional memory size was below about 156KB and
+    cause a crash. This is a quick fix, a long term fix
+    would be to instead set the initial stack pointer
+    to some offset below 0xFFFE based on available memory,
+    just as the .COM executable loader was modified to do
+    some time back to enable proper execution when
+    memsize < 64KB. (joncampbell123)
+  - Do not load country/font information at startup
+    if the code page to load is the same as the default
+    code page. (joncampbell123)
+  - Fix Tab/Shift+Tab in Configuration GUI regarding
+    setting text fields that have a ... button to select
+    from an enumeration. Those buttons are no longer a
+    trap for tab enumeration. (joncampbell123)
+  - Fix Mac OS SDL1 keyboard support code to properly
+    fill in unicode character values in relation to
+    IME checks. This fixes a problem where it was
+    impossible to type anything in the configuration GUI
+    in SDL1 Mac OS builds. (joncampbell123)
+  - Mark VBE mode 0x212 as "do not list" so that it does
+    not appear in normal VBE mode enumeration, while
+    keeping it valid for the Windows 3.1 driver which
+    assumes the mode is there at that number without
+    enumeration. By not listing the mode, drivers like
+    VBEMP and DOS application code will not attempt to
+    use it. There is already another mode number for
+    640x480 24bpp anyway. (joncampbell123)
+  - Fix VBE mode 0x212, which is 640x480 24bpp packed
+    mode but with a per scanline stride of 2048 bytes
+    per pixel set aside for the Windows 3.1 driver and
+    the "640x480 (1Meg) 16 million colors" setting,
+    so that the VBE "Get Mode Info" call reflects the
+    proper per-scanline stride instead of the ideal one.
+    This should fix complaints about VBEMP and 640x480
+    24-bit color mode. Given how minimal the use of the
+    mode is by the Windows 3.1 driver, the 2048 byte
+    mode does not permit setting scan line length or
+    display start i.e. panning is not permitted.
+    (joncampbell123).
+  - Fix Pentium Pro emulation to support microcode
+    related MSRs so that Windows 98 does not crash
+    on startup when cputype=ppro_slow. (joncampbell123).
+  - Added SMV debugger command. This is the linear
+    (virtual) equivalent of the SM "Set Memory"
+    command. (joncampbell123).
+    (https://github.com/joncampbell123/dosbox-x/issues/3826)
+  - Fix debugger help command to list both C / D commands
+    and the DV/DP commands. (joncampbell123)
+  - Add VGA FONTDUMP debugger command for those
+    who might want to take custom fonts in text
+    mode and do something with them outside the
+    emulator. "VGA FONTDUMP" followed by a filename
+    which must have the extension .BIN (for a raw
+    64KB dump of font RAM) or .BMP (for a formatted
+    dump as a monochrome bitmap file). (joncampbell123).
+  - Disabled code to randomly return GDC drawing
+    status active. The implementation was causing
+    severe performance issues. The code has not
+    been removed because it could be optimized and
+    fixed and could even follow the state of GDC
+    drawing. (joncampbell123)
+  - VGA 6-bit DAC mode expand to full 8-bit range,
+    instead of simple shifting (joncampbell123).
   - Fix 8254 PIT emulation (joncampbell123)
   - Add dosbox.conf option "cpuid string" to allow
     CPUID to return custom ID strings instead of just
@@ -52,6 +305,25 @@ Unreleased
     prevents a bug in UNLZEXE from causing a crash, and
     maybe helps other buggy programs and unusual cases.
     Use real addressing to support stack pointer wraparound.
+  - Fix Opl3! Duo and Opl2 Audio board audio playback on 
+    unix (stengun)
+  - Fix Japanese input related issues (nanshiki)
+  - Fix START command only ever opens first file
+    (NebularNerd, darac-10, aybe)
+  - Win32 logging console (aybe)
+    - add 'Debug/Clear logging console' menu entry
+    - ensure main window stays above it when shown
+  - Fix overflow in mapper info on SDL2 builds (aybe)
+  - Enable OpenGL output in MinGW builds again (maron2000)
+  - Fixed to display IME marked text in SDL2 version on 
+    macOS (nanshiki)
+  - Fix allocation of IDE slots when mounting images by 
+    IMGMOUNT (maron2000)
+  - Increase of sprintf buffer size in Program::WriteOut()
+    (caiiiycuk)
+  - Fix unexpected behavior of swapping multiple CD images
+    (maron2000)
+  - Fixed build on NetBSD and FreeBSD (Jookia)
 
 2022.09.0 (0.84.3)
   - Updated FFMPEG video capture to use newer API,

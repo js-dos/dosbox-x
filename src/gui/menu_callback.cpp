@@ -55,6 +55,7 @@ extern bool addovl, clearline, pcibus_enable, winrun, window_was_maximized, whee
 extern bool mountfro[26], mountiro[26];
 extern struct BuiltinFileBlob bfb_GLIDE2X_OVL;
 extern const char* RunningProgram;
+extern bool video_debug_overlay;
 
 void MSG_Init(void);
 void SendKey(std::string key);
@@ -2336,15 +2337,64 @@ bool show_console_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const
     if (DEBUG_IsDebuggerConsoleVisible())
         return true;
 #endif
-    HWND hwnd = GetConsoleWindow();
-    if (hwnd == NULL)
+    auto window = GetForegroundWindow();
+
+    auto console = GetConsoleWindow();
+
+    if (console == nullptr)
         DOSBox_ShowConsole();
-    else if (IsWindowVisible(hwnd))
-        ShowWindow(hwnd, SW_HIDE);
-    else
-        ShowWindow(hwnd, SW_SHOW);
-    mainMenu.get_item("show_console").check(IsWindowVisible(hwnd)).refresh_item(mainMenu);
+
+    auto visible = IsWindowVisible(console);
+
+    ShowWindow(console, visible ? SW_HIDE : SW_SHOW);
+
+    SetForegroundWindow(window);
+
+    if (console == nullptr)
+        console = GetConsoleWindow();
+
+    visible = IsWindowVisible(console);
+
+    mainMenu.get_item("show_console").check(visible).refresh_item(mainMenu);
+    mainMenu.get_item("clear_console").check(false).enable(visible).refresh_item(mainMenu);
 #endif
+    return true;
+}
+
+bool clear_console_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+#if !defined(C_EMSCRIPTEN) && defined(WIN32) && !defined(HX_DOS)
+#if C_DEBUG
+    bool DEBUG_IsDebuggerConsoleVisible(void);
+    if (DEBUG_IsDebuggerConsoleVisible())
+        return true;
+#endif
+    const HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    constexpr COORD position = { 0, 0 };
+
+    DWORD written;
+
+    CONSOLE_SCREEN_BUFFER_INFO info;
+
+    if(!GetConsoleScreenBufferInfo(handle, &info))
+        return false;
+
+    const DWORD size = info.dwSize.X * info.dwSize.Y;
+
+    if(!FillConsoleOutputCharacter(handle, ' ', size, position, &written))
+        return false;
+
+    if(!GetConsoleScreenBufferInfo(handle, &info))
+        return false;
+
+    if(!FillConsoleOutputAttribute(handle, info.wAttributes, size, position, &written))
+        return false;
+
+    SetConsoleCursorPosition(handle, position);
+#endif
+    // TODO clear console on other platforms
     return true;
 }
 
@@ -2386,6 +2436,18 @@ bool show_codetext_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     GUI_Shortcut(44);
+    return true;
+}
+
+bool video_debug_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+    video_debug_overlay = !video_debug_overlay;
+    mainMenu.get_item("video_debug_overlay").check(video_debug_overlay).refresh_item(mainMenu);
+
+    if (!vga.draw.vga_override)
+        RENDER_SetSize(vga.draw.width,vga.draw.height,render.src.bpp,render.src.fps,render.src.scrn_ratio);
+
     return true;
 }
 
@@ -3149,6 +3211,10 @@ void AllocCallback1() {
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_ttf").set_text("TrueType font").
                     set_callback_function(output_menu_callback);
 #endif
+#if C_GAMELINK
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_gamelink").set_text("Game Link").
+                    set_callback_function(output_menu_callback);
+#endif
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublescan").set_text("Doublescan").
                     set_callback_function(doublescan_menu_callback);
             }
@@ -3557,6 +3623,7 @@ void AllocCallback1() {
                     set_callback_function(help_about_callback);
 #if !defined(C_EMSCRIPTEN)
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"show_console").set_text("Show logging console").set_callback_function(show_console_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"clear_console").set_text("Clear logging console").set_callback_function(clear_console_menu_callback);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"disable_logging").set_text("Disable logging output").set_callback_function(disable_log_menu_callback).check(control->opt_nolog);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wait_on_error").set_text("Console wait on error").set_callback_function(wait_on_error_menu_callback).check(sdl.wait_on_error);
 #endif
@@ -3569,6 +3636,7 @@ void AllocCallback1() {
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_rundebug").set_text("Debugger option: Run debugger").set_callback_function(debugger_rundebug_menu_callback).check(debugrunmode==0);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_runnormal").set_text("Debugger option: Run normal").set_callback_function(debugger_runnormal_menu_callback).check(debugrunmode==1);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_runwatch").set_text("Debugger option: Run watch").set_callback_function(debugger_runwatch_menu_callback).check(debugrunmode==2);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"video_debug_overlay").set_text("Video debug overlay").set_callback_function(video_debug_callback).check(video_debug_overlay);
 #endif
             }
 

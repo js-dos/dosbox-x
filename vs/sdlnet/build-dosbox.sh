@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 rm -Rfv linux-host || exit 1
 mkdir -p linux-host || exit 1
 
@@ -51,3 +51,7 @@ if [ "$1" == "hx-dos" ]; then
     cp SDLnet.c.default SDLnet.c || exit 1
 fi
 
+# Delete libSDLmain.a and libSDL.a from archive file
+# otherwise linking will fail on macOS
+ar dv linux-host/lib/libSDL_net.a libSDLmain.a || true
+ar dv linux-host/lib/libSDL_net.a libSDL.a || true

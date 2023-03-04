@@ -785,6 +785,11 @@ bool font_14_init=false, font_16_init=false;
 uint8_t int10_font_14_init[256 * 14], int10_font_16_init[256 * 16];
 void initcodepagefont() {
     if (!dos.loaded_codepage) return;
+
+    /* If you don't load COUNTRY.SYS or do any codepage font commands on stock MS-DOS then
+     * there is no loading of it from disk at all */
+    if (GetDefaultCP() == dos.loaded_codepage) return;
+
 	uint32_t start_pos;
 	uint16_t number_of_codepages;
 	static uint8_t cpi_buff[65536];
@@ -852,7 +857,7 @@ void initcodepagefont() {
     size_of_cpxdata=cpi_buf_size;
     cpibuf[found_at_pos]=0xcb;
     uint16_t seg=0;
-    uint16_t size=0x1500;
+    uint16_t size=0x2000; // NTS: Based on loading up to 64KB of CPI/CPX + assignment of stack pointer at seg+0x1000:0xFFFE. The old value 0x1500 caused crashes with low memory amounts.
     if (!DOS_AllocateMemory(&seg,&size)) return;
     MEM_BlockWrite(((unsigned int)seg<<4u)+0x100u,cpibuf,size_of_cpxdata);
     uint16_t save_ds=SegValue(ds);
@@ -1410,7 +1415,10 @@ public:
 		const char * layoutname=section->Get_string("keyboardlayout");
 		dos.loaded_codepage = GetDefaultCP();	// default codepage already initialized
         int tocp=!strcmp(layoutname, "jp")||IS_JDOSV?932:(!strcmp(layoutname, "ko")||IS_KDOSV?949:(!strcmp(layoutname, "tw")||!strcmp(layoutname, "hk")||!strcmp(layoutname, "zht")||IS_TDOSV?950:(!strcmp(layoutname, "cn")||!strcmp(layoutname, "zh")||!strcmp(layoutname, "zhs")||IS_PDOSV?936:(!strcmp(layoutname, "us")?437:0))));
-        if (tocp && strcmp(layoutname, "jp") && strcmp(layoutname, "ko")) layoutname="us";
+#if defined(WIN32)
+		if (dos.loaded_codepage == 932 && !IS_PC98_ARCH && GetKeyboardType(0) == 7 && !strcmp(layoutname, "auto")) layoutname = "jp106";
+#endif
+        if (tocp && strcmp(layoutname, "jp106") && strcmp(layoutname, "jp") && strcmp(layoutname, "ko")) layoutname="us";
 
 #if defined(USE_TTF)
         if (TTF_using()) setTTFCodePage(); else
@@ -1675,6 +1683,8 @@ public:
 			}
 		}
         if (tocp && !IS_PC98_ARCH) {
+            if(dos.loaded_codepage == 932 && !strcmp(layoutname, "jp106")) loaded_layout->read_keyboard_file(layoutname, dos.loaded_codepage);
+
             uint16_t cpbak = dos.loaded_codepage;
 #if defined(USE_TTF)
             if (ttf.inUse)
