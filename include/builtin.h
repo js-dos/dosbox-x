@@ -1,5 +1,8 @@
-#ifndef JSDOS
 #include "dos_inc.h"
+
+extern struct BuiltinFileBlob bfb_XCOPY_EXE;		// XCOPY.EXE (FreeDOS)
+
+#ifndef JSDOS
 #include "../src/builtin/zip.h"
 #include "../src/builtin/eval.h"
 #include "../src/builtin/cdplay.h"
@@ -32,7 +35,6 @@ extern struct BuiltinFileBlob bfb_MEM_EXE;		// MEM.EXE (FreeDOS)
 extern struct BuiltinFileBlob bfb_FIND_EXE;		// FIND.EXE (FreeDOS)
 extern struct BuiltinFileBlob bfb_DEBUG_EXE;		// DEBUG.EXE (FreeDOS)
 extern struct BuiltinFileBlob bfb_PRINT_COM;		// PRINT.COM (FreeDOS)
-extern struct BuiltinFileBlob bfb_XCOPY_EXE;		// XCOPY.EXE (FreeDOS)
 extern struct BuiltinFileBlob bfb_APPEND_EXE;		// APPEND.EXE (FreeDOS)
 extern struct BuiltinFileBlob bfb_EDLIN_EXE;		// EDLIN.EXE (FreeDOS)
 extern struct BuiltinFileBlob bfb_EDIT_COM;		// EDIT.COM

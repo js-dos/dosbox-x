@@ -8575,23 +8575,23 @@ void Add_VFiles(bool usecp) {
     PROGRAMS_MakeFile("PARALLEL.COM", PARALLEL_ProgramStart,"/SYSTEM/");
     if (IS_DOSV)
         PROGRAMS_MakeFile("VTEXT.COM", VTEXT_ProgramStart,"/TEXTUTIL/");
+        VFILE_RegisterBuiltinFileBlob(bfb_XCOPY_EXE, "/DOS/");
 #ifndef JSDOS
-	VFILE_RegisterBuiltinFileBlob(bfb_EDLIN_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_DEBUG_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_MOVE_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_FIND_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_FCBS_COM, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_FILES_COM, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_LASTDRIV_COM, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_REPLACE_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_SORT_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_XCOPY_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_APPEND_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_DEVICE_COM, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_BUFFERS_COM, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_CHKDSK_EXE, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_COMP_COM, "/DOS/");
-	VFILE_RegisterBuiltinFileBlob(bfb_FC_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_EDLIN_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_DEBUG_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_MOVE_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_FIND_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_FCBS_COM, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_FILES_COM, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_LASTDRIV_COM, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_REPLACE_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_SORT_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_APPEND_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_DEVICE_COM, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_BUFFERS_COM, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_CHKDSK_EXE, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_COMP_COM, "/DOS/");
+        VFILE_RegisterBuiltinFileBlob(bfb_FC_EXE, "/DOS/");
 #endif
 #if C_IPX
 	if (addipx) PROGRAMS_MakeFile("IPXNET.COM",IPXNET_ProgramStart,"/SYSTEM/");
