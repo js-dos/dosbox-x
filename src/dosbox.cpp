@@ -80,8 +80,14 @@
 #include "keyboard.h"
 #include "clockdomain.h"
 
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
 # include <emscripten.h>
+#endif
+
+#ifdef JSDOS_X
+#include <jsdos-asyncify.h>
+#include <jsdos-support.h>
+#include <protocol.h>
 #endif
 
 #ifdef WIN32
@@ -410,11 +416,19 @@ extern bool DOSBox_Paused(), isDBCSCP(), InitCodePage();
 //#define DEBUG_CYCLE_OVERRUN_CALLBACK
 
 //For trying other delays
+
+#ifdef JSDOS_X
+#else
 #define wrap_delay(a) SDL_Delay(a)
+#endif
 
 static Uint32 SDL_ticks_last = 0,SDL_ticks_next = 0;
 
 static Bitu Normal_Loop(void) {
+#ifdef JSDOS_X
+	client_tick();
+    asyncify_sleep(0);
+#endif
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;
     Bits ret;
 
@@ -457,7 +471,11 @@ static Bitu Normal_Loop(void) {
 
                 saved_allow = dosbox_allow_nonrecursive_page_fault;
                 dosbox_allow_nonrecursive_page_fault = true;
+                auto cycles = CPU_Cycles;
                 ret = (*cpudecoder)();
+#ifdef JSDOS_X
+                jsdos::incCycles(cycles - CPU_Cycles);
+#endif
                 dosbox_allow_nonrecursive_page_fault = saved_allow;
 
                 if (GCC_UNLIKELY(ret<0))
@@ -566,7 +584,10 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
 
     if (ticksNew <= ticksLast) { //lower should not be possible, only equal.
         ticksAdded = 0;
-
+#ifdef JSDOS_X
+		asyncify_sleep(1, true);
+        int32_t timeslept = std::max((int32_t)(GetTicks() - ticksNew), int32_t(1));
+#else
         if (!CPU_CycleAutoAdjust || CPU_SkipCycleAutoAdjust || sleep1count < 3) {
             wrap_delay(1);
         }
@@ -585,6 +606,7 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
         // Count how many times in the current block (of 250 ms) the time slept was 1 ms
         if (CPU_CycleAutoAdjust && !CPU_SkipCycleAutoAdjust && timeslept == 1) sleep1count++;
         lastsleepDone = ticksDone;
+#endif
 
         // Update ticksDone with the time spent sleeping
         ticksDone -= timeslept;
@@ -733,6 +755,11 @@ void DOSBOX_RunMachine(void){
 #endif
 
     do {
+#ifdef JSDOS_X
+        if (jsdos::isExitRequested()) {
+            throw int(-1);
+        }
+#endif
         ret=(*loop)();
     } while (!ret);
 

@@ -30,7 +30,14 @@
 
 extern unsigned long PIT_TICK_RATE;
 
+
+#ifdef JSDOS
+typedef unsigned int mstime;
+double GetMsPassedFromStart();
+mstime GetTicks();
+#else
 #define GetTicks() SDL_GetTicks()
+#endif
 
 typedef void (*TIMER_TickHandler)(void);
 

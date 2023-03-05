@@ -25,7 +25,7 @@
 #include "bios.h"
 #include "cpu.h"
 
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
 # include <emscripten.h>
 #endif
 
@@ -109,7 +109,7 @@ void CALLBACK_DeAllocate(Bitu in) {
 
 
 void CALLBACK_Idle(void) {
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
     void GFX_Events();
     GFX_Events();
 #endif
@@ -130,7 +130,7 @@ void CALLBACK_Idle(void) {
 }
 
 void CALLBACK_IdleNoInts(void) {
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
     void GFX_Events();
     GFX_Events();
 #endif

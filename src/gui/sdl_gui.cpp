@@ -250,7 +250,9 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
         KEYBOARD_ClrBuffer();//Clear buffer
     }
     GFX_LosingFocus();//Release any keys pressed (buffer gets filled again). (could be in above if, but clearing the mapper input when exiting the mapper is sensible as well
+#ifndef JSDOS
     SDL_Delay(20);
+#endif
 
     unsigned int cpbak = dos.loaded_codepage;
     if (dos_kernel_disabled&&maincp) dos.loaded_codepage = maincp;
@@ -397,11 +399,18 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
     void GFX_SetResizeable(bool enable);
     GFX_SetResizeable(false);
 
+#ifdef JSDOS_X
+    SDL_Window* window = nullptr;
+    SDL_Surface* sdlscreen = reinterpret_cast<SDL_Surface*>(GFX_SetSDLSurfaceWindow(dw, dh));
+    if (sdlscreen == NULL) E_Exit("Could not initialize video mode for mapper: %s",SDL_GetError());
+#else
     SDL_Window* window = OpenGL_using() ? GFX_SetSDLWindowMode(dw, dh, SCREEN_OPENGL) : GFX_SetSDLSurfaceWindow(dw, dh);
     if (window == NULL) E_Exit("Could not initialize video mode for mapper: %s",SDL_GetError());
     SDL_Surface* sdlscreen = SDL_GetWindowSurface(window);
     if (sdlscreen == NULL) E_Exit("Could not initialize video mode for mapper: %s",SDL_GetError());
+#endif
 
+#ifndef JSDOS
     if (screenshot != NULL && background != NULL) {
         // fade out
         // Jonathan C: do it FASTER!
@@ -418,6 +427,7 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
         } 
         SDL_SetSurfaceBlendMode(screenshot, SDL_BLENDMODE_NONE);
     }
+#endif
 #else
     SDL_Surface* sdlscreen = SDL_SetVideoMode(dw, dh, 32, SDL_SWSURFACE|(fs?SDL_FULLSCREEN:0));
     if (sdlscreen == NULL) E_Exit("Could not initialize video mode %ix%ix32 for UI: %s", dw, dh, SDL_GetError());
@@ -541,6 +551,8 @@ static void UI_Shutdown(GUI::ScreenSDL *screen) {
 #endif
 
 #if defined(C_SDL2)
+
+#ifndef JSDOS
     if (screenshot != NULL && background != NULL) {
         // fade in
         // Jonathan C: do it FASTER!
@@ -557,6 +569,7 @@ static void UI_Shutdown(GUI::ScreenSDL *screen) {
         } 
         SDL_SetSurfaceBlendMode(screenshot, SDL_BLENDMODE_NONE);
     }
+#endif
 
     void GFX_SetResizeable(bool enable);
     GFX_SetResizeable(true);

@@ -23,6 +23,11 @@
 #include "callback.h"
 #include "bios.h"
 #include "bios_disk.h"
+
+#ifdef JSDOS_X
+#include <jsdos-drive.h>
+#endif
+
 #include "timer.h"
 #include "regs.h"
 #include "mem.h"

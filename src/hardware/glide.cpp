@@ -491,8 +491,13 @@ void GLIDE_ResetScreen(bool update)
         void GFX_SetResizeable(bool enable);
         GFX_SetResizeable(true);
         SDL_Window* GFX_SetSDLWindowMode(uint16_t width, uint16_t height, SCREEN_TYPES screenType);
+#ifdef JSDOS_X
+        sdl.window = nullptr;
+        sdl.surface = reinterpret_cast<SDL_Surface*>(GFX_SetSDLWindowMode(glide.width,glide.height, sdl.desktop.want_type == SCREEN_OPENGL ? SCREEN_OPENGL : SCREEN_SURFACE));
+#else
         sdl.window = GFX_SetSDLWindowMode(glide.width,glide.height, sdl.desktop.want_type == SCREEN_OPENGL ? SCREEN_OPENGL : SCREEN_SURFACE);
         if (sdl.window != NULL) sdl.surface = SDL_GetWindowSurface(sdl.window);
+#endif
 #else
         SDL_Surface* SDL_SetVideoMode(int width,int height,int bpp,uint32_t flags);
         sdl.surface = SDL_SetVideoMode(glide.width,glide.height,0,(glide.fullscreen[0]?SDL_FULLSCREEN:0)|SDL_ANYFORMAT);

@@ -175,22 +175,37 @@ Bitu OUTPUT_SURFACE_SetSize()
                 (unsigned int)final_height);
         }
 
-        sdl.window = GFX_SetSDLWindowMode(final_width, final_height, SCREEN_SURFACE);
+#ifdef JSDOS_X
+        sdl.window = nullptr;
+        sdl.surface = reinterpret_cast<SDL_Surface*>(GFX_SetSDLWindowMode(final_width, final_height, SCREEN_SURFACE));
+        if (sdl.surface == nullptr)
+          E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
+#else
         if (sdl.window == NULL)
             E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
 
         sdl.surface = SDL_GetWindowSurface(sdl.window);
+#endif
         if (sdl.surface->w < (sdl.clip.x+sdl.clip.w) ||
             sdl.surface->h < (sdl.clip.y+sdl.clip.h)) {
             /* the window surface must not be smaller than the size we want!
              * This is a way to prevent that! */
+#ifdef JSDOS_X
+          sdl.window = nullptr;
+          sdl.surface = reinterpret_cast<SDL_Surface*>(GFX_SetSDLWindowMode(sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h, SCREEN_SURFACE));
+          if (sdl.surface == NULL)
+            E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
+#else
             SDL_SetWindowMinimumSize(sdl.window, sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h);
             sdl.window = GFX_SetSDLWindowMode(sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h, SCREEN_SURFACE);
             if (sdl.window == NULL)
                 E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
+#endif
         }
     }
+#ifndef JSDOS_X
     sdl.surface = SDL_GetWindowSurface(sdl.window);
+#endif
     if (sdl.surface == NULL)
         E_Exit("Could not retrieve window surface: %s", SDL_GetError());
     switch (sdl.surface->format->BitsPerPixel) {

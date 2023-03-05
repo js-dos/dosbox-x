@@ -23,7 +23,11 @@
 // 1: complex scalers off, scaler cache off, all simple scalers on
 // 2: complex scalers off, scaler cache on
 // 3: complex scalers on
+#ifdef JSDOS
+#define RENDER_USE_ADVANCED_SCALERS 0
+#else
 #define RENDER_USE_ADVANCED_SCALERS 3
+#endif
 
 #include "../src/gui/render_scalers.h"
 

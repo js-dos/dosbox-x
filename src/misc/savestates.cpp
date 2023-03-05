@@ -415,7 +415,7 @@ int zipOutOpenFile(zipFile zf,const char *zfname,zip_fileinfo &zi,const bool com
 
 void SaveState::save(size_t slot) { //throw (Error)
 	if (slot >= SLOT_COUNT*MAX_PAGE)  return;
-#ifdef C_SDL2
+#if defined(C_SDL2) && !defined(JSDOS)
         SDL_PauseAudioDevice(SDL2_AudioDevice, 0);
 #else
         SDL_PauseAudio(0);
@@ -601,7 +601,7 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		notifyError("Unsupported memory size for loading states.", false);
 		return;
 	}
-#ifdef C_SDL2
+#if defined(C_SDL2) && !defined(JSDOS)
         SDL_PauseAudioDevice(SDL2_AudioDevice, 0);
 #else
         SDL_PauseAudio(0);

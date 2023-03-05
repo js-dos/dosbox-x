@@ -28,6 +28,8 @@
 #include <cctype>
 #include <string>
   
+#include <jsdos-support.h>
+
 #include "dosbox.h"
 #include "debug.h"
 #include "logging.h"
@@ -487,6 +489,12 @@ bool sdl_wait_on_error();
 
 static char buf[1024];           //greater scope as else it doesn't always gets thrown right (linux/gcc2.95)
 void E_Exit(const char * format,...) {
+#ifdef JSDOS
+        if (jsdos::isExitRequested()) {
+          // already exiting...
+          return;
+        }
+#endif
 #if C_DEBUG && C_HEAVY_DEBUG
  	DEBUG_HeavyWriteLogInstruction();
 #endif
@@ -497,6 +505,11 @@ void E_Exit(const char * format,...) {
 	buf[sizeof(buf) - 1] = '\0';
 	strcat(buf,"\n");
 	LOG_MSG("E_Exit: %s\n",buf);
+#if defined(JSDOS_X)
+        jsdos::requestExit();
+        return;
+#endif
+
 #if defined(WIN32)
 	/* Most Windows users DON'T run DOSBox-X from the command line! */
 	MessageBox(GetHWND(), buf, "E_Exit", MB_OK | MB_ICONEXCLAMATION);

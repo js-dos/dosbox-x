@@ -71,6 +71,13 @@ extern bool         sync_time;
 void cmos_sync_time(time_t t) {
     struct tm *tm = localtime(&t);
 
+#ifdef JSDOS
+    tm->tm_mday = 25 - 1;
+    tm->tm_wday = 3;
+    tm->tm_mon = 6;
+    tm->tm_year = 1998 - 1900;
+#endif
+
     cmos.clock.sec = tm->tm_sec;
     cmos.clock.min = tm->tm_min;
     cmos.clock.hour = tm->tm_hour;

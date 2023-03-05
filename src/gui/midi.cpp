@@ -22,6 +22,10 @@
 #include <string>
 #include <algorithm>
 
+#ifdef JSDOS_X
+#include <jsdos-asyncify.h>
+#endif
+
 #include "SDL.h"
 
 #include "dosbox.h"
@@ -512,7 +516,12 @@ void MIDI_State_LoadMessage()
 void MIDI_RawOutByte(uint8_t data) {
 	if (midi.sysex.start) {
 		uint32_t passed_ticks = GetTicks() - midi.sysex.start;
-		if (passed_ticks < midi.sysex.delay) SDL_Delay((Uint32)(midi.sysex.delay - passed_ticks));
+		if (passed_ticks < midi.sysex.delay)
+#ifdef JSDOS_X
+			asyncify_sleep((Uint32)(midi.sysex.delay - passed_ticks));
+#else
+			SDL_Delay((Uint32)(midi.sysex.delay - passed_ticks));
+#endif
 	}
 
 	/* Test for a realtime MIDI message */

@@ -22,6 +22,9 @@
 #include "config.h"
 #include "setup.h"
 
+#ifdef JSDOS_X
+#include <jsdos-log.h>
+#else
 enum LOG_TYPES {
 	LOG_ALL,
 	LOG_VGA, LOG_VGAGFX,LOG_VGAMISC,LOG_INT10,
@@ -76,5 +79,6 @@ public:
 void					DEBUG_ShowMsg(char const* format,...) GCC_ATTRIBUTE(__format__(__printf__, 1, 2));
 
 #define LOG_MSG				DEBUG_ShowMsg
+#endif
 
 #endif //DOSBOX_LOGGING_H

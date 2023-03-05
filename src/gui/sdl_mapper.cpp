@@ -58,8 +58,8 @@
 #include "shell.h"
 #include "jfont.h"
 
-#if C_EMSCRIPTEN
-# include <emscripten.h>
+#ifdef JSDOS
+#include <jsdos-asyncify.h>
 #endif
 
 #include <map>
@@ -4973,13 +4973,13 @@ void BIND_MappingEvents(void) {
     if (GUI_JoystickCount()>0) SDL_JoystickUpdate();
     MAPPER_UpdateJoysticks();
 
-#if C_EMSCRIPTEN
-    emscripten_sleep(0);
+#if JSDOS
+    asyncify_sleep(0);
 #endif
 
     while (SDL_PollEvent(&event)) {
-#if C_EMSCRIPTEN
-        emscripten_sleep(0);
+#if JSDOS
+        asyncify_sleep(0);
 #endif
 
         switch (event.type) {
@@ -5360,10 +5360,16 @@ void MAPPER_RunInternal() {
 #if defined(C_SDL2)
     void GFX_SetResizeable(bool enable);
     GFX_SetResizeable(false);
+#ifdef JSDOS_X
+    mapper.window = nullptr;
+    mapper.surface = reinterpret_cast<SDL_Surface*>(GFX_SetSDLSurfaceWindow(640,480));
+    if (mapper.surface == NULL) E_Exit("Could not initialize video mode for mapper: %s",SDL_GetError());
+#else
     mapper.window = OpenGL_using() ? GFX_SetSDLWindowMode(640,480,SCREEN_OPENGL) : GFX_SetSDLSurfaceWindow(640,480);
     if (mapper.window == NULL) E_Exit("Could not initialize video mode for mapper: %s",SDL_GetError());
     mapper.surface=SDL_GetWindowSurface(mapper.window);
     if (mapper.surface == NULL) E_Exit("Could not initialize video mode for mapper: %s",SDL_GetError());
+#endif
     mapper.draw_surface=SDL_CreateRGBSurface(0,640,480,8,0,0,0,0);
     // Needed for SDL_BlitScaled
     mapper.draw_surface_nonpaletted=SDL_CreateRGBSurface(0,640,480,32,0x0000ff00,0x00ff0000,0xff000000,0);
@@ -5409,8 +5415,8 @@ void MAPPER_RunInternal() {
     SDL_JoystickEventState(SDL_ENABLE);
 #endif
     while (!mapper.exit) {
-#if C_EMSCRIPTEN
-        emscripten_sleep(0);
+#if JSDOS
+        asyncify_sleep(0);
 #endif
 
         if (mapper.redraw) {

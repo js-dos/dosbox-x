@@ -65,7 +65,7 @@ extern bool PS1AudioCard;
 #include <sys/timeb.h>
 #endif
 
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
 # include <emscripten.h>
 #endif
 
@@ -5821,7 +5821,7 @@ Table            [Programmable key setting data buffer structure]
                 /* VF1-VF5 */
                 for (unsigned int f=0;f < 5;f++,ofs += 16)
                     INTDC_STORE_FUNCDEC(ofs,pc98_vfunc_key_ctrl[f]);
- 
+
                 goto done;
             }
             goto unknown;
@@ -6198,10 +6198,16 @@ uint32_t BIOS_HostTimeSync(uint32_t /*ticks*/) {
     loctime->tm_year = 2007 - 1900;
     */
 
+#ifdef JSDOS
+    dos.date.day=25;
+    dos.date.month=6;
+    dos.date.year=1998;
+#else
 // FIXME: Why is the BIOS filling in the DOS kernel's date? That should be done when DOS boots!
     dos.date.day=(uint8_t)loctime->tm_mday;
     dos.date.month=(uint8_t)loctime->tm_mon+1;
     dos.date.year=(uint16_t)loctime->tm_year+1900;
+#endif
 
     uint32_t nticks=(uint32_t)(((double)(
         (unsigned int)loctime->tm_hour*3600u*1000u+
@@ -10958,6 +10964,7 @@ startfunction:
 
         BIOS_Int10RightJustifiedPrint(x,y,msg);
 
+#ifndef JSDOS
         {
             png_bytep rows[1];
             unsigned char *row = NULL;/*png_width*/
@@ -11103,6 +11110,7 @@ startfunction:
             if (png_context) png_destroy_read_struct(&png_context,&png_info,&png_end);
             if (png_fp) fclose(png_fp);
         }
+#endif
 
         if (machine == MCH_PC98 && textsplash) {
             unsigned int bo, lastline = 7;
@@ -11387,7 +11395,7 @@ startfunction:
             BIOS_Int10RightJustifiedPrint(x+2,y,"\n"); /* sync cursor */
         }
 
-#if !defined(C_EMSCRIPTEN)
+#if !defined(JSDOS)
         BIOS_Int10RightJustifiedPrint(x,y,"\nHit SPACEBAR to pause at this screen\n", false, true);
         BIOS_Int10RightJustifiedPrint(x,y,"\nPress DEL to enter BIOS setup screen\n", false, true);
         y--; /* next message should overprint */
@@ -11411,7 +11419,7 @@ startfunction:
         //       a "BIOS setup" screen where all DOSBox-X configuration options can be
         //       modified, with the same look and feel of an old BIOS.
 
-#if C_EMSCRIPTEN
+#if C_EMSCRIPTEN && !defined(JSDOS)
         uint32_t lasttick=GetTicks();
         while ((GetTicks()-lasttick)<1000) {
             void CALLBACK_Idle(void);
