@@ -59,7 +59,7 @@ static inline PhysPt CALLBACK_GetBase(void) {
 
 uint8_t CALLBACK_Allocate();
 
-void CALLBACK_Idle(void);
+extern "C" void CALLBACK_Idle(void);
 
 
 void CALLBACK_RunRealInt(uint8_t intnum);
