@@ -32,9 +32,11 @@
 #include "bios.h"					// SetLPTPort(..)
 #include "hardware.h"				// OpenCaptureFile
 
+#if C_DIRECTLPT && (defined __i386__ || defined __x86_64__) && (defined BSD || defined LINUX)
+#include "libs/passthroughio/passthroughio.h" // for dropPrivileges()
+#endif
 #include "parport.h"
-#include "directlpt_win32.h"
-#include "directlpt_linux.h"
+#include "directlpt.h"
 #include "printer_redir.h"
 #include "filelpt.h"
 #include "dos_inc.h"
@@ -116,9 +118,10 @@ static Bitu PARALLEL_Read (Bitu port, Bitu iolen) {
 		/* NTS: The traditional parport range is assigned 8 ports by IBM, but only 0-2 are assigned.
 		 *      EPP ports assign ports 3-4 with possible vendor extensions in 5-6, while ECP assigns
 		 *      ports 0x400-0x402 relative to base and leave 3-7 undefined. */
-		if(((port-parallel_baseaddr[i])&0xfff8) == 0 && (parallelPortObjects[i]!=0)) {
+		// 0x3bc is a valid port
+		if(parallel_baseaddr[i]==(port&0xfffc) && parallelPortObjects[i]!=0) {
 			Bitu retval=0xff;
-			switch ((port-parallel_baseaddr[i]) & 0x7) {
+			switch (port & 0x3) {
 				case 0:
 					retval = parallelPortObjects[i]->Read_PR();
 					break;
@@ -135,7 +138,7 @@ static Bitu PARALLEL_Read (Bitu port, Bitu iolen) {
 			parallelPortObjects[i]->log_par(parallelPortObjects[i]->dbg_cregs,
 				"read  0x%2x from %s.",retval,dbgtext[port&3]);
 #endif
-			return retval;	
+			return retval;
 		}
 	}
 	return 0xff;
@@ -146,7 +149,8 @@ static void PARALLEL_Write (Bitu port, Bitu val, Bitu) {
 		/* NTS: The traditional parport range is assigned 8 ports by IBM, but only 0-2 are assigned.
 		 *      EPP ports assign ports 3-4 with possible vendor extensions in 5-6, while ECP assigns
 		 *      ports 0x400-0x402 relative to base and leave 3-7 undefined. */
-		if(((port-parallel_baseaddr[i])&0xfff8) == 0 && (parallelPortObjects[i]!=0)) {
+		// 0x3bc is a valid port
+		if(parallel_baseaddr[i]==(port&0xfffc) && parallelPortObjects[i]!=0) {
 #if PARALLEL_DEBUG
 			const char* const dbgtext[]={"DAT","IOS","CON","???"};
 			parallelPortObjects[i]->log_par(parallelPortObjects[i]->dbg_cregs,
@@ -155,7 +159,7 @@ static void PARALLEL_Write (Bitu port, Bitu val, Bitu) {
 				fprintf(parallelPortObjects[i]->debugfp,"%c",val);
 			}
 #endif
-			switch ((port-parallel_baseaddr[i]) & 0x7) {
+			switch (port & 0x3) {
 				case 0:
 					parallelPortObjects[i]->Write_PR (val);
 					return;
@@ -205,9 +209,9 @@ CParallel::CParallel(CommandLine* cmd, Bitu portnr, uint8_t initirq) {
 	dbg_cregs	= cmd->FindExist("dbgregs", false);
 	dbg_plainputchar = cmd->FindExist("dbgputplain", false);
 	dbg_plaindr = cmd->FindExist("dbgdataplain", false);
-	
+
 	if(cmd->FindExist("dbgall", false)) {
-		dbg_data= 
+		dbg_data=
 		dbg_putchar=
 		dbg_cregs=true;
 		dbg_plainputchar=dbg_plaindr=false;
@@ -218,7 +222,7 @@ CParallel::CParallel(CommandLine* cmd, Bitu portnr, uint8_t initirq) {
 	else debugfp=0;
 
 	if(debugfp == 0) {
-		dbg_data= 
+		dbg_data=
 		dbg_putchar=dbg_plainputchar=
 		dbg_cregs=false;
 	} else {
@@ -333,7 +337,7 @@ void BIOS_Post_register_parports() {
 			BIOS_SetLPTPort(i,(uint16_t)DISNEY_BasePort());
 	}
 }
-	
+
 class PARPORTS:public Module_base {
 	public:
 		PARPORTS (Section * configuration):Module_base (configuration) {
@@ -376,7 +380,7 @@ class PARPORTS:public Module_base {
 				if (i == 0 && DISNEY_ShouldInit())
 					continue;
 
-#if C_DIRECTLPT
+#if C_DIRECTLPT && HAS_CDIRECTLPT
 				if(str=="reallpt") {
 					CDirectLPT* cdlpt= new CDirectLPT(i, defaultirq[i],&cmd);
 					if(cdlpt->InstallationSuccessful) {
@@ -422,7 +426,7 @@ class PARPORTS:public Module_base {
 								parallelPortObjects[i] = 0;
 							}
 						} else
-#endif				
+#endif
 							if(str=="disabled") {
 								parallelPortObjects[i] = 0;
 							} else if (str == "disney") {
@@ -440,6 +444,11 @@ class PARPORTS:public Module_base {
 								parallelPortObjects[i] = 0;
 							}
 			} // for lpt 1-9
+#if C_DIRECTLPT && (defined __i386__ || defined __x86_64__) && (defined BSD || defined LINUX)
+			// Drop root privileges after they are no longer needed, which is a
+			// good practice if the executable is setuid root,
+			dropPrivileges(); // Ignore whether we could actually drop privileges.
+#endif
 		}
 #if C_PRINTER
 		// we can only have one printer redirection, hence the variable
@@ -464,7 +473,7 @@ static PARPORTS *testParallelPortsBaseclass = NULL;
 
 static const char *parallelTypes[PARALLEL_TYPE_COUNT] = {
 	"disabled",
-#if C_DIRECTLPT
+#if C_DIRECTLPT && HAS_CDIRECTLPT
 	"reallpt",
 #endif
 	"file",
@@ -611,7 +620,7 @@ void PARALLEL::Run()
 			case PARALLEL_TYPE_DISABLED:
 				parallelPortObjects[port-1] = 0;
 				break;
-#if C_DIRECTLPT
+#if C_DIRECTLPT && HAS_CDIRECTLPT
 			case PARALLEL_TYPE_REALLPT:
 				{
 					CDirectLPT* cdlpt= new CDirectLPT(port-1, defaultirq[port-1],&cmd);

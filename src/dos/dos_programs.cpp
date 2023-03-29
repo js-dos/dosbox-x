@@ -289,7 +289,7 @@ static const char* UnmountHelper(char umount) {
     return msgget.c_str();
 }
 
-void MountHelper(char drive, const char drive2[DOS_PATHLENGTH], std::string drive_type) {
+void MountHelper(char drive, const char drive2[DOS_PATHLENGTH], std::string const& drive_type) {
 	std::vector<std::string> options;
 	DOS_Drive * newdrive;
 	std::string temp_line;
@@ -442,7 +442,7 @@ void MenuMountDrive(char drive, const char drive2[DOS_PATHLENGTH]) {
 	uint8_t bit8size=(uint8_t) sizes[1];
 
 	temp_line = drive2;
-	int error, num = -1;
+	int error = 0, num = -1;
 	if(type==DRIVE_CDROM) {
 		int id, major, minor;
 		DOSBox_CheckOS(id, major, minor);
@@ -573,7 +573,7 @@ void MenuBrowseFDImage(char drive, int num, int type) {
 
     if (type==-1 || (Drives[drive-'A'] && !strncmp(Drives[drive-'A']->GetInfo(), "fatDrive ", 9))) {
 #if !defined(HX_DOS)
-        std::string image = type==1||type==-1&&dynamic_cast<imageDiskElToritoFloppy *>(imageDiskList[drive-'A'])!=NULL?"El Torito floppy image":(type==2||type==-1&&dynamic_cast<imageDiskMemory *>(imageDiskList[drive-'A'])!=NULL?"RAM floppy image":(type==-1?imageDiskList[drive-'A']->diskname.c_str():Drives[drive-'A']->GetInfo()+9));
+        std::string image = type==1||(type==-1&&dynamic_cast<imageDiskElToritoFloppy *>(imageDiskList[drive-'A'])!=NULL)?"El Torito floppy image":(type==2||(type==-1&&dynamic_cast<imageDiskMemory *>(imageDiskList[drive-'A'])!=NULL)?"RAM floppy image":(type==-1?imageDiskList[drive-'A']->diskname.c_str():Drives[drive-'A']->GetInfo()+9));
         std::string drive_warn = "Floppy drive "+(type==-1?std::string(1, drive-'A'+'0'):(dos_kernel_disabled?std::to_string(num):std::string(1, drive)+":"))+" is currently mounted with the image:\n\n"+image+"\n\nDo you want to change the floppy disk image now?";
         if (!systemmessagebox("Change floppy disk image",drive_warn.c_str(),"yesno","question", 1)) return;
 #endif
@@ -743,7 +743,7 @@ void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple) {
 #endif
 }
 
-void MenuBrowseFolder(char drive, std::string drive_type) {
+void MenuBrowseFolder(char drive, std::string const& drive_type) {
     std::string str(1, drive);
 	if (Drives[drive-'A']) {
 		std::string drive_warn="Drive "+str+": is already mounted. Unmount it first, and then try again.";
@@ -958,9 +958,11 @@ public:
     void Move_Z(char new_z) {
         char newz_drive = (char)toupper(new_z);
         int i_newz = (int)newz_drive - (int)'A';
-        if (Drives[i_newz])
-            WriteOut("Drive %c is already in use\n", new_z);
-        else if (i_newz >= 0 && i_newz < DOS_DRIVES) {
+        if (i_newz >= 0 && i_newz < DOS_DRIVES) {
+            if(Drives[i_newz]) {
+                WriteOut("Drive %c is already in use\n", new_z);
+                return;
+            }
             /* remap drives */
             Drives[i_newz] = Drives[ZDRIVE_NUM];
             Drives[ZDRIVE_NUM] = 0;
@@ -995,6 +997,8 @@ public:
             if (DOS_GetDefaultDrive() == ZDRIVE_NUM) DOS_SetDrive(i_newz);
             ZDRIVE_NUM = i_newz;
         }
+        else
+            WriteOut("Drive %c is not a valid drive\n", new_z);
     }
     void ListMounts(bool quiet, bool local) {
         char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];
@@ -4015,7 +4019,7 @@ void runImgmake(const char *str) {
 	imgmake.Run();
 }
 
-void swapInDrive(int drive, int position=0);
+void swapInDrive(int drive, unsigned int position=0);
 class IMGSWAP : public Program
 {
 public:
@@ -4072,7 +4076,7 @@ public:
             ListImgSwaps();
             return;
         }
-        if (!cmd->FindCommand(1,temp_line) || (temp_line.size() > 2) || ((temp_line.size()>1) && (temp_line[1]!=':')) || !(temp_line[0] >= 'A' && temp_line[0] <= 'Z') && !(temp_line[0] >= 'a' && temp_line[0] <= 'z')) {
+        if (!cmd->FindCommand(1,temp_line) || (temp_line.size() > 2) || ((temp_line.size()>1) && (temp_line[1]!=':')) || (!(temp_line[0] >= 'A' && temp_line[0] <= 'Z') && !(temp_line[0] >= 'a' && temp_line[0] <= 'z'))) {
             WriteOut(MSG_Get("SHELL_ILLEGAL_DRIVE"));
             return;
         }
@@ -4082,7 +4086,7 @@ public:
             return;
         }
         if (cmd->FindCommand(2,temp_line)) {
-            int swap=atoi(temp_line.c_str());
+            unsigned int swap=atoi(temp_line.c_str());
             if (swap<1||swap>DriveManager::GetDisksSize(d)) {
                 WriteOut(MSG_Get("PROGRAM_IMGSWAP_ERROR"), DriveManager::GetDisksSize(d));
                 return;
@@ -4926,7 +4930,7 @@ public:
         std::string el_torito;
         std::string ideattach="auto";
         std::string type="hdd";
-        uint8_t tdr;
+        uint8_t tdr = 0;
 	std::string bdisk;
 	int bdisk_number=-1;
 
@@ -5772,6 +5776,7 @@ private:
     }
 
     bool MountFat(Bitu sizes[], const char drive, const bool isHardDrive, const std::string &str_size, const std::vector<std::string> &paths, const signed char ide_index, const bool ide_slave, const int reserved_cylinders, bool roflag) {
+        (void)reserved_cylinders;
         if (Drives[drive - 'A']) {
             WriteOut(MSG_Get("PROGRAM_IMGMOUNT_ALREADY_MOUNTED"));
             return false;
@@ -5820,7 +5825,7 @@ private:
                             imageDiskVHD::ErrorCodes ret = imageDiskVHD::Open(ro?paths[i].c_str()+1:paths[i].c_str(), ro||roflag, &vhdImage);
                             switch (ret) {
                             case imageDiskVHD::UNSUPPORTED_WRITE:
-                                options.push_back("readonly");
+                                options.emplace_back("readonly");
                             case imageDiskVHD::OPEN_SUCCESS: {
                                 skipDetectGeometry = true;
                                 const imageDiskVHD* vhdDisk = dynamic_cast<imageDiskVHD*>(vhdImage);
@@ -5923,7 +5928,7 @@ private:
                     newImage = NULL;
                 }
                 else {
-                    if (roflag) options.push_back("readonly");
+                    if (roflag) options.emplace_back("readonly");
                     newDrive = new fatDrive(paths[i].c_str(), (uint32_t)sizes[0], (uint32_t)sizes[1], (uint32_t)sizes[2], (uint32_t)sizes[3], options);
                 }
                 imgDisks.push_back(newDrive);
@@ -7262,7 +7267,7 @@ void UTF8::Run()
     while (true) {
         DOS_ReadFile (STDIN,&c,&m);
         if (m) text+=std::string(1, c);
-        if (m && first && text.size() == 2 && (((uint8_t)text[0] == 0xFE && (uint8_t)text[1] == 0xFF) || (uint8_t)text[0] == 0xFF && (uint8_t)text[1] == 0xFE)) {
+        if (m && first && text.size() == 2 && (((uint8_t)text[0] == 0xFE && (uint8_t)text[1] == 0xFF) || ((uint8_t)text[0] == 0xFF && (uint8_t)text[1] == 0xFE))) {
             WriteOut("The input text is UTF-16.\n");
             break;
         }
@@ -7352,7 +7357,8 @@ void UTF16::Run()
         return;
     }
     test_char dst;
-    test_char_t *wch, ch;
+    test_char_t *wch;
+    test_char_t ch = 0;
     std::wstring text=L"";
     char temp[4096];
     unsigned int c=0;
@@ -7835,7 +7841,7 @@ bool setVGAColor(const char *colorArray, int i) {
             if (rgbVal[i] < 0 || rgbVal[i] > 255)
                 return false;
         }
-    } else if (sscanf(nextRGB, " #%6x", (int*)(&rgbVal[3])) == 1) {
+    } else if (sscanf(nextRGB, " #%6x", (unsigned int*)(&rgbVal[3])) == 1) {
         if (rgbVal[3] < 0)
             return false;
         for (int i = 0; i < 3; i++) {
@@ -7932,7 +7938,7 @@ void SETCOLOR::Run()
                         while (*nextRGB != ')')
                             nextRGB++;
                         nextRGB++;
-                    } else if (sscanf(nextRGB, " #%6x", (int*)(&rgbVal[0])) == 1) {
+                    } else if (sscanf(nextRGB, " #%6x", (unsigned int*)(&rgbVal[0])) == 1) {
                         sprintf(value,"#%6x",rgbVal[0]);
                         nextRGB = strchr(nextRGB, '#') + 7;
                     } else {
@@ -8287,7 +8293,7 @@ int flagged_backup(char *zip)
                 file << "";
                 file.close();
             }
-            uint16_t handle;
+            uint16_t handle = 0;
             if (DOS_FindDevice(("\""+std::string(g_flagged_files[i])+"\"").c_str()) != DOS_DEVICES || !DOS_OpenFile(("\""+std::string(g_flagged_files[i])+"\"").c_str(),0,&handle)) {
                 LOG_MSG(MSG_Get("SHELL_CMD_FILE_NOT_FOUND"),g_flagged_files[i]);
                 continue;
@@ -8674,7 +8680,7 @@ void Add_VFiles(bool usecp) {
     if(!IS_PC98_ARCH)
         VFILE_RegisterBuiltinFileBlob(bfb_EVAL_HLP, "/BIN/");
 
-	VFILE_RegisterBuiltinFileBlob(bfb_EGA18_CPX, "/CPI/");
+    VFILE_RegisterBuiltinFileBlob(bfb_EGA18_CPX, "/CPI/");
 	VFILE_RegisterBuiltinFileBlob(bfb_EGA17_CPX, "/CPI/");
 	VFILE_RegisterBuiltinFileBlob(bfb_EGA16_CPX, "/CPI/");
 	VFILE_RegisterBuiltinFileBlob(bfb_EGA15_CPX, "/CPI/");

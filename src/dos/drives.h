@@ -43,7 +43,7 @@ public:
 	static char * GetDrivePosition(int drive);
 //	static void CycleDrive(bool pressed);
 //	static void CycleDisk(bool pressed);
-	static void CycleDisks(int drive, bool notify, int position=0);
+	static void CycleDisks(int drive, bool notify, unsigned int position=0);
 	static void CycleAllDisks(void);
 	static void CycleAllCDs(void);
 	static void Init(Section* s);
@@ -1127,7 +1127,7 @@ private:
 		uint32_t index;
 		uint32_t pos;
 		UDFextents udfdirext;
-	} dirIterators[MAX_OPENDIRS];
+    } dirIterators[MAX_OPENDIRS] = {};
 private:
 	bool GetNextDirEntry(const int dirIteratorHandle, UDFFileIdentifierDescriptor &fid, UDFFileEntry &fe, UDFextents &dirext, char fname[LFN_NAMELENGTH],unsigned int dirIteratorIndex);
 };

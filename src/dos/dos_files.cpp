@@ -98,7 +98,7 @@ void DOS_SetDefaultDrive(uint8_t drive) {
 	if (drive<DOS_DRIVES && ((drive<2) || Drives[drive])) {dos.current_drive = drive; DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDrive(drive);}
 }
 
-bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive) {
+bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive,bool isVolume) {
 	if(!name || *name == 0 || *name == ' ' || *name == '\n' || *name == ':') {
 		/* Both \0 and space are separators and
 		 * empty filenames report file not found */
@@ -108,7 +108,17 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 	char names[LFN_NAMELENGTH];
 	strcpy(names,name);
 	char * name_int = names;
-	if (strlen(names)==14 && name_int[1]==':' && name_int[2]!='\\' && name_int[9]==' ' && name_int[10]=='.') {
+    if (isVolume)
+    {
+        if(name_int[10] == '.') // Remove extension dot
+        {
+                name_int[10] = name_int[11];
+                name_int[11] = name_int[12];
+                name_int[12] = name_int[13];
+                name_int[13] = 32;
+        }
+	}
+	else if (strlen(names)==14 && name_int[1]==':' && name_int[2]!='\\' && name_int[9]==' ' && name_int[10]=='.') {
 		for (unsigned int i=0;i<strlen(names);i++)
 			if (i<10 && name_int[i]==32) {
 				name_int[i]='.';
@@ -120,8 +130,8 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 			} else if (i<10) name_int[i]=toupper(name_int[i]);
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 	} else if (Network_IsNetworkResource(name)) {
-		int j=0, k=name[0]=='"'?1:0;
-		if (strlen(name)==2+k||name[2+k]=='*'||name[2+k]=='?'||name[2+k]=='\\'||strlen(name)==3+k&&name[2+k]=='"') {
+		unsigned int j=0, k=name[0]=='"'?1:0;
+		if (strlen(name)==2+k||name[2+k]=='*'||name[2+k]=='?'||name[2+k]=='\\'||(strlen(name)==3+k&&name[2+k]=='"')) {
 			DOS_SetError(DOSERR_PATH_NOT_FOUND);
 			return false;
 		}
@@ -137,8 +147,8 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 #endif
 	}
 
-	char tempdir[DOS_PATHLENGTH];
-	char upname[DOS_PATHLENGTH];
+    char tempdir[DOS_PATHLENGTH] = {};
+    char upname[DOS_PATHLENGTH] = {};
     Bitu r,w, q=0;
 	/* First get the drive */
 	*drive = DOS_GetDefaultDrive();
@@ -154,6 +164,13 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 		DOS_SetError(DOSERR_PATH_NOT_FOUND);
 		return false; 
 	}
+
+    if(isVolume) // Don't process any further
+    {
+        strcpy(fullname, name_int);
+        return true;
+    }
+
 	r=0;w=0;
 	while (r<DOS_PATHLENGTH && name_int[r]!=0) {
 		uint8_t c=(uint8_t)name_int[r++];
@@ -559,12 +576,14 @@ bool DOS_FindFirst(const char * search,uint16_t attr,bool fcb_findfirst) {
 		DOS_SetError(DOSERR_NO_MORE_FILES);
 		return false;
 	}
-	if (!DOS_MakeName(search,fullsearch,&drive)) return false;
+	if (!DOS_MakeName(search,fullsearch,&drive,attr == DOS_ATTR_VOLUME)) return false;
 	//Check for devices. FindDevice checks for leading subdir as well
-	bool device = (DOS_FindDevice(search) != DOS_DEVICES);
+    bool device = false;
+    if (attr & DOS_ATTR_DEVICE)
+        device = DOS_FindDevice(search) != DOS_DEVICES;
 
-	/* Split the search in dir and pattern */
-	forcelfn = false;
+    /* Split the search in dir and pattern */
+    forcelfn = false;
 	char *find_last = NULL;
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 	bool net = Network_IsNetworkResource(search);
@@ -1113,7 +1132,7 @@ bool DOS_SetFileAttr(char const * const name,uint16_t attr)
 	 * Also Windows 95 setup likes to create WINBOOT.INI as a file and then chattr it into a directory for some stupid reason. */
 	uint16_t old_attr;
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
-	if (Network_IsNetworkResource(name)&&!Network_GetFileAttr(name,&old_attr)||!Network_IsNetworkResource(name)&&!Drives[drive]->GetFileAttr(fullname,&old_attr))
+	if ((Network_IsNetworkResource(name)&&!Network_GetFileAttr(name,&old_attr))||(!Network_IsNetworkResource(name)&&!Drives[drive]->GetFileAttr(fullname,&old_attr)))
 #else
 	if (!Drives[drive]->GetFileAttr(fullname,&old_attr))
 #endif

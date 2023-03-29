@@ -31,12 +31,16 @@
 #include "control.h"
 #include "mapper.h"
 #include "menudef.h"
+#include "vga.h"
 #include "pic.h"
 #include "cross.h"
 #include "hardware.h"
 #include "support.h"
 #include "sdlmain.h"
 #include "shell.h"
+#include "pc98_cg.h"
+#include "pc98_gdc.h"
+#include "pc98_gdc_const.h"
 
 #include "render_scalers.h"
 #include "render_glsl.h"
@@ -903,7 +907,62 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
      * in still image or video capture, they can. */
     if (video_debug_overlay) {
 	if (width < 320) width = 320;
-	height += 128;
+	height += 4;
+	if (machine == MCH_EGA) {
+		height += 8*3;
+		width += 4;
+		width += 16*2; /* palette */
+		width += 4;
+		width += 4*2; /* cpe */
+		width += 4;
+		width += 8*32;
+		width += 4;
+	}
+	else if (machine == MCH_MDA || machine == MCH_HERC) {
+		/* add nothing, nothing to show at this time */
+	}
+	else if (machine == MCH_PC98) {
+		height += 8*6;
+		width += 4;
+		if (pc98_gdc_vramop & (1u << VOPBIT_VGA)) {
+			/* PC-98 games do not often use the 256-color mode, and if they do,
+			 * they do not do "copper" effects or per-scanline effects. */
+		}
+		else if (pc98_gdc_vramop & (1u << VOPBIT_ANALOG)) {
+			/* 16-color "analog". Though uncommon, there is at least one test
+			 * case I am aware of that does a per-scanline "copper" effect
+			 * in the title screen though it's more of a momentary flash of
+			 * light with a vertical gradient. */
+			width += 16*2;
+			width += 4;
+		}
+		else {
+			/* 8-color "digital". I can't think of any reason you'd want to
+			 * do "copper" effects when all you can do is map one 3-bit value
+			 * to another 3-bit value. It's like, what's the point? Woo. Well,
+			 * in case some game has a reason, show it. */
+			width += 8*2;
+			width += 4;
+		}
+		width += 8*32;
+		width += 4;
+	}
+	else if (machine == MCH_VGA) {
+		height += 8*7;
+		width += 4;
+		if (vga.mode == M_VGA || vga.mode == M_LIN8) {
+			width += 256;
+			width += 4;
+		}
+		width += 16; /* CSPAL */
+		width += 4;
+		width += 8*32;
+		width += 4;
+	}
+	else {
+		height += 8*2;
+	}
+	height += 4;
     }
 
     if ( ratio > 1.0 ) {

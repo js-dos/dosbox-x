@@ -869,8 +869,8 @@ void HostAppRun() {
                 uint16_t s = (uint16_t)strlen(msg);
                 DOS_WriteFile(STDOUT,(uint8_t*)msg,&s);
             }
-            DWORD temp = (DWORD)SHGetFileInfo(winName,NULL,NULL,NULL,SHGFI_EXETYPE);
-            if (temp==0) temp = (DWORD)SHGetFileInfo((std::string(winDirNew)+"\\"+std::string(fullname)).c_str(),NULL,NULL,NULL,SHGFI_EXETYPE);
+            DWORD temp = (DWORD)SHGetFileInfo(winName,0,NULL,0,SHGFI_EXETYPE);
+            if (temp==0) temp = (DWORD)SHGetFileInfo((std::string(winDirNew)+"\\"+std::string(fullname)).c_str(),0,NULL,0,SHGFI_EXETYPE);
             if (HIWORD(temp)==0 && LOWORD(temp)==0x4550) { // Console applications
                 lpExecInfo.cbSize  = sizeof(SHELLEXECUTEINFO);
                 lpExecInfo.fMask=SEE_MASK_DOENVSUBST|SEE_MASK_NOCLOSEPROCESS;
@@ -1158,7 +1158,7 @@ static Bitu DOS_21Handler(void) {
             }
         case 0x09:      /* Write string to STDOUT */
             {
-                uint8_t c;uint16_t n=1;
+                uint8_t c=0;uint16_t n=1;
                 PhysPt buf=SegPhys(ds)+reg_dx;
                 std::string str="";
                 if (mem_readb(buf)=='T')
@@ -1406,6 +1406,13 @@ static Bitu DOS_21Handler(void) {
             DOS_FCBSetRandomRecord(SegValue(ds),reg_dx);
             break;
         case 0x25:      /* Set Interrupt Vector */
+            // Magical Girl Pretty Sammy
+            // Patch sound driver bugs. Swap the order of "mov sp" and "mov ss".
+            if(IS_PC98_ARCH && reg_al == 0x60 && !strcmp(RunningProgram, "SNDCDDRV")
+              && real_readd(SegValue(ds), reg_dx + 47) == 0x0fa6268b && real_readd(SegValue(ds), reg_dx + 52) == 0x0fa4168e) {
+                real_writed(SegValue(ds), reg_dx + 47, 0x0fa4168e);
+                real_writed(SegValue(ds), reg_dx + 52, 0x0fa6268b);
+            }
             RealSetVec(reg_al, RealMakeSeg(ds, reg_dx));
             break;
         case 0x26:      /* Create new PSP */
@@ -2028,7 +2035,7 @@ static Bitu DOS_21Handler(void) {
                 }
                 else
                 {
-                    if(fRead = DOS_ReadFile(reg_bx, dos_copybuf, &toread)) {
+                    if((fRead = DOS_ReadFile(reg_bx, dos_copybuf, &toread))) {
                         MEM_BlockWrite(SegPhys(ds) + reg_dx, dos_copybuf, toread);
                         diskio_delay_handle(reg_bx, toread);
                     }
@@ -2109,7 +2116,7 @@ static Bitu DOS_21Handler(void) {
                         fWritten = !(((DOS_ExtDevice*)Files[handle])->CallDeviceFunction(8, 26, SegValue(ds), reg_dx, towrite) & 0x8000);
                     }
                     else {
-                        if(fWritten = DOS_WriteFile(reg_bx, dos_copybuf, &towrite)) {
+                        if((fWritten = DOS_WriteFile(reg_bx, dos_copybuf, &towrite))) {
                             diskio_delay_handle(reg_bx, towrite);
                         }
                     }
@@ -3590,7 +3597,6 @@ static Bitu DOS_29Handler(void)
 			/* expand tab if not direct output */
 			page = real_readb(BIOSMEM_SEG, BIOSMEM_CURRENT_PAGE);
 			do {
-				bool CheckAnotherDisplayDriver();
 				if(CheckAnotherDisplayDriver()) {
 					reg_ah = 0x0e;
 					reg_al = ' ';
@@ -3947,6 +3953,8 @@ static Bitu DOS_29Handler(void)
 
 	return CBRET_NONE;
 }
+
+void IPX_Setup(Section*);
 
 class DOS:public Module_base{
 private:
@@ -4470,6 +4478,10 @@ public:
                 }
             }
         }
+
+#if C_IPX
+	IPX_Setup(NULL);
+#endif
 
 		DOS_SetupPrograms();
 		DOS_SetupMisc();							/* Some additional dos interrupts */
@@ -5155,18 +5167,21 @@ void DOS_Int21_7160(char *name1, char *name2) {
             CALLBACK_SCF(true);
             return;
         }
+		bool tail = check_last_split_char(name1 + 1, strlen(name1 + 1), '\\');
 		*name1='\"';
 		char *p=name1+strlen(name1);
 		while (*p==' '||*p==0) p--;
 		*(p+1)='\"';
 		*(p+2)=0;
 		if (DOS_Canonicalize(name1,name2)) {
-				strcpy(name1,"\"");
-				strcat(name1,name2);
-				strcat(name1,"\"");
+				if(reg_cl != 0) {
+					strcpy(name1,"\"");
+					strcat(name1,name2);
+					strcat(name1,"\"");
+				}
 				switch(reg_cl)          {
 						case 0:         // Canonoical path name
-								strcpy(name2,name1);
+								if(tail) strcat(name2, "\\");
 								MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
 								reg_ax=0;
 								CALLBACK_SCF(false);
@@ -5174,6 +5189,7 @@ void DOS_Int21_7160(char *name1, char *name2) {
 						case 1:         // SFN path name
                                 checkwat=true;
 								if (DOS_GetSFNPath(name1,name2,false)) {
+									if(tail) strcat(name2, "\\");
 									MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
 									reg_ax=0;
 									CALLBACK_SCF(false);
@@ -5185,6 +5201,7 @@ void DOS_Int21_7160(char *name1, char *name2) {
 								break;
 						case 2:         // LFN path name
 								if (DOS_GetSFNPath(name1,name2,true)) {
+									if(tail) strcat(name2, "\\");
 									MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
 									reg_ax=0;
 									CALLBACK_SCF(false);
@@ -5282,7 +5299,8 @@ void DOS_Int21_71a6(const char *name1, const char *name2) {
     (void)name2;
 	char buf[64];
 	unsigned long serial_number=0x1234,st=0,cdate=0,ctime=0,adate=0,atime=0,mdate=0,mtime=0;
-	uint8_t entry=(uint8_t)reg_bx, handle;
+    uint8_t entry = (uint8_t)reg_bx;
+    uint8_t handle = 0;
 	if (entry>=DOS_FILES) {
 		reg_ax=DOSERR_INVALID_HANDLE;
 		CALLBACK_SCF(true);

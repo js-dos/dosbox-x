@@ -72,7 +72,7 @@ void GLIDE_ShutDown(Section* sec), GLIDE_PowerOn(Section* sec);
 void DOSBox_ShowConsole(void);
 void Load_Language(std::string name);
 void RebootLanguage(std::string filename, bool confirm=false);
-void MenuBrowseFolder(char drive, std::string drive_type);
+void MenuBrowseFolder(char drive, std::string const& drive_type);
 void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple);
 void MenuBootDrive(char drive);
 void MenuUnmountDrive(char drive);
@@ -487,7 +487,7 @@ bool drive_saveimg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
         }
     if (dos_kernel_disabled || !strcmp(RunningProgram, "LOADLIN")) return false;
     Section_prop *sec = static_cast<Section_prop *>(control->GetSection("dosbox"));
-    int freeMB = sec->Get_int("convert fat free space"), timeout = sec->Get_int("convert fat timeout");
+    uint32_t freeMB = sec->Get_int("convert fat free space"), timeout = sec->Get_int("convert fat timeout");
     imageDisk *imagedrv = new imageDisk(Drives[drive], drive, freeMB, timeout);
     if (!saveDiskImage(imagedrv, lTheSaveFileName)) systemmessagebox("Error", "Failed to save disk image.", "ok","error", 1);
     if (imagedrv) delete imagedrv;
@@ -523,7 +523,7 @@ bool drive_unmount_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     return true;
 }
 
-void swapInDrive(int drive, int position=0);
+void swapInDrive(int drive, unsigned int position=0);
 bool drive_swap_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
@@ -2156,9 +2156,9 @@ bool intensity_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const me
         reg_bl = 0;
     else
         reg_bl = 1;
-	reg_ax = 0x1003;
+    reg_ax = 0x1003;
     reg_bh = 0;
-	CALLBACK_RunRealInt(0x10);
+    CALLBACK_RunRealInt(0x10);
     reg_ax = oldax;
     reg_bx = oldbx;
     return true;
@@ -3636,8 +3636,8 @@ void AllocCallback1() {
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_rundebug").set_text("Debugger option: Run debugger").set_callback_function(debugger_rundebug_menu_callback).check(debugrunmode==0);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_runnormal").set_text("Debugger option: Run normal").set_callback_function(debugger_runnormal_menu_callback).check(debugrunmode==1);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_runwatch").set_text("Debugger option: Run watch").set_callback_function(debugger_runwatch_menu_callback).check(debugrunmode==2);
-                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"video_debug_overlay").set_text("Video debug overlay").set_callback_function(video_debug_callback).check(video_debug_overlay);
 #endif
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"video_debug_overlay").set_text("Video debug overlay").set_callback_function(video_debug_callback).check(video_debug_overlay);
             }
 
             {
