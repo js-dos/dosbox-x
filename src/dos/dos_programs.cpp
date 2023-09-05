@@ -60,6 +60,11 @@
 #include "mouse.h"
 #include "../ints/int10.h"
 #include "../output/output_opengl.h"
+
+#if defined(JSDOS)
+#include <jsdos-drive.h>
+#endif
+
 #if !defined(HX_DOS) && !defined(JSDOS)
 #include "../libs/tinyfiledialogs/tinyfiledialogs.c"
 #endif
@@ -5091,7 +5096,17 @@ public:
         }
 
         // find all file parameters, assuming that all option parameters have been removed
-        bool removed=ParseFiles(temp_line, paths, el_torito != "" || type == "ram" || bdisk != "");
+        bool removed = false;
+#if defined(JSDOS)
+        bool sockdrive = false;
+        if (cmd->FindExist("sockdrive", true)) {
+            sockdrive = true;
+        } else {
+            removed = ParseFiles(temp_line, paths, el_torito != "" || type == "ram" || bdisk != "");
+        }
+#else
+        removed = ParseFiles(temp_line, paths, el_torito != "" || type == "ram" || bdisk != "");
+#endif
 
         // some generic checks
         if (el_torito != "") {
@@ -5108,7 +5123,11 @@ public:
                 return;
             }
         }
+#if defined(JSDOS)
+        else if (!sockdrive) {
+#else
         else {
+#endif
             if (paths.size() == 0) {
                 if (strcasecmp(temp_line.c_str(), "-u")&&!qmount) WriteOut(MSG_Get("PROGRAM_IMGMOUNT_SPECIFY_FILE"));
                 return; 
@@ -5189,6 +5208,18 @@ public:
             else if (type == "ram") {
                 newImage = MountImageNoneRam(sizes, reserved_cylinders, driveIndex < 2);
             }
+#if defined(JSDOS)
+            else if (sockdrive) {
+                std::string url;
+                std::string owner;
+                std::string name;
+                if (!cmd->FindCommand(2, url) || !cmd->FindCommand(3, owner) || !cmd->FindCommand(4, name)) {
+                    WriteOut("Wrong syntax, command should be: imgmount n sockdrive host:port owner drive\n");
+                    return;
+                }
+                newImage = jsdos::SockDrive::create(url, owner, name);
+            }
+#endif
             else {
                 newImage = MountImageNone(paths[0].c_str(), NULL, sizes, reserved_cylinders, roflag);
             }
