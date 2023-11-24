@@ -5686,9 +5686,15 @@ uint32_t BIOS_HostTimeSync(uint32_t ticks) {
     loctime->tm_year = 2007 - 1900;
     */
 
+#ifdef JSDOS
+    dos.date.day=25;
+    dos.date.month=6; 
+    dos.date.year=1998;
+#else
     dos.date.day=(uint8_t)loctime->tm_mday;
     dos.date.month=(uint8_t)loctime->tm_mon+1;
     dos.date.year=(uint16_t)loctime->tm_year+1900;
+#endif
 
     uint32_t nticks=(uint32_t)(((double)(
         (unsigned int)loctime->tm_hour*3600u*1000u+
