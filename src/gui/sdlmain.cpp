@@ -154,9 +154,18 @@ extern int tryconvertcp, Reflect_Menu(void);
 # include <shobjidl.h>
 #endif
 
+#include <output/output_direct3d.h>
+#include <output/output_opengl.h>
+#include <output/output_surface.h>
+#include <output/output_tools.h>
+#include <output/output_ttf.h>
+#include <output/output_tools_xbrz.h>
+static bool init_output = false;
+
 #if defined(WIN32)
 #include "resource.h"
 #if !defined(HX_DOS)
+
 BOOL CALLBACK EnumDispProc(HMONITOR hMon, HDC dcMon, RECT* pRcMon, LPARAM lParam) {
     (void)hMon;
     (void)dcMon;
@@ -301,7 +310,6 @@ void resetFontSize(), increaseFontSize(), decreaseFontSize();
 void GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight);
 void MAPPER_CheckEvent(SDL_Event * event), MAPPER_CheckKeyboardLayout(), MAPPER_ReleaseAllKeys();
 bool isDBCSCP(), InitCodePage();
-int GetNumScreen();
 
 SDL_Block sdl;
 Bitu frames = 0;
@@ -381,7 +389,7 @@ extern bool bootguest, bootfast, bootvm;
 std::string dosboxpath="";
 std::string GetDOSBoxXPath(bool withexe=false) {
     std::string full;
-#if defined(HX_DOS) || defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR)
+#if defined(HX_DOS) || defined(_WIN32_WINDOWS) /*wai_* is problematic */ || defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR)
     char exepath[MAX_PATH];
     GetModuleFileName(NULL, exepath, sizeof(exepath));
     full=std::string(exepath);
@@ -443,11 +451,11 @@ const char *DKM_to_descriptive_string(const unsigned int dkm) {
     return "";
 }
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 ITaskbarList3 *winTaskbarList = NULL;
 #endif
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 void WindowsTaskbarUpdatePreviewRegion(void) {
     if (winTaskbarList != NULL) {
         /* Windows 7/8/10: Tell the taskbar which part of our window contains the DOS screen */
@@ -699,7 +707,7 @@ void PrintScreenSizeInfo(void) {
 void Windows_GetWindowDPI(ScreenSizeInfo &info) {
     info.clear();
 
-# if !defined(HX_DOS)
+# if !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     HMONITOR mon;
     HWND hwnd;
 
@@ -945,7 +953,7 @@ void GFX_SetIcon(void)
 bool IsDebuggerActive(void);
 #endif
 
-extern std::string dosbox_title, GetDefaultOutput();
+extern std::string dosbox_title;
 
 void GFX_SetTitle(int32_t cycles, int frameskip, Bits timing, bool paused) {
     (void)frameskip;//UNUSED
@@ -2015,14 +2023,14 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags, double scalex, double scal
 #endif
     UpdateWindowDimensions();
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     WindowsTaskbarUpdatePreviewRegion();
 #endif
 
     return retFlags;
 }
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 // WARNING: Not recommended, there is danger you cannot exit emulator because mouse+keyboard are taken
 static bool enable_hook_everything = false;
 #endif
@@ -2033,7 +2041,7 @@ static bool enable_hook_everything = false;
 // danger you become trapped in the DOSBox-X emulator!
 static bool enable_hook_special_keys = true;
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 // Whether or not to hook Num/Scroll/Caps lock in order to give the guest OS full control of the
 // LEDs on the keyboard (i.e. the LEDs do not change until the guest OS changes their state).
 // This flag also enables code to set the LEDs to guest state when setting mouse+keyboard capture,
@@ -2041,7 +2049,7 @@ static bool enable_hook_special_keys = true;
 static bool enable_hook_lock_toggle_keys = true;
 #endif
 
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 // and this is where we store host LED state when capture is set.
 static bool on_capture_num_lock_was_on = true; // reasonable guess
 static bool on_capture_scroll_lock_was_on = false;
@@ -2049,7 +2057,7 @@ static bool on_capture_caps_lock_was_on = false;
 #endif
 
 static bool exthook_enabled = false;
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 static HHOOK exthook_winhook = NULL;
 
 #if !defined(__MINGW32__)
@@ -2210,7 +2218,7 @@ void DoExtendedKeyboardHook(bool enable) {
     if (exthook_enabled == enable)
         return;
 
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     if (enable) {
         if (!exthook_winhook) {
             exthook_winhook = SetWindowsHookEx(WH_KEYBOARD_LL, WinExtHookKeyboardHookProc, GetModuleHandle(NULL), 0);
@@ -2389,7 +2397,7 @@ void CaptureMouseNotifyWin32(bool lck)
     break;
     case AUTOLOCK_FEEDBACK_FLASH:
     {
-# if !defined(HX_DOS)
+# if !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         const auto cnt = lck ? 4 : 2;
         const auto tim = lck ? 80 : 40;
         const auto wnd = GetHWND();
@@ -3707,7 +3715,13 @@ static void GUI_StartUp() {
     sdl.desktop.isperfect = false; /* Reset before selection */
     if (output == "surface") 
     {
+#if C_DIRECT3D
+        if(!init_output) OUTPUT_DIRECT3D_Select();
+#elif C_OPENGL && defined(MACOSX) // JC: This is breaking SDL1 on Linux! Limit this to MAC OS! Windows users may use this if needed.
+        if(!init_output) OUTPUT_OPENGL_Select(GLBilinear); // Initialize screen before switching to TTF (required for macOS builds)     
+#endif
         OUTPUT_SURFACE_Select();
+        init_output = true;
 #if C_OPENGL
     } 
     else if (output == "opengl" || output == "openglhq") 
@@ -3741,13 +3755,22 @@ static void GUI_StartUp() {
 #if defined(USE_TTF)
     else if (output == "ttf")
     {
+        LOG_MSG("SDL(sdlmain.cpp): TTF activated");
+#if ((WIN32 && !defined(C_SDL2)) || MACOSX) && C_OPENGL
+        if(!init_output) OUTPUT_OPENGL_Select(GLBilinear); // Initialize screen before switching to TTF (required for Windows & macOS builds)
+#endif
         OUTPUT_TTF_Select(0);
+        init_output = true;
     }
 #endif
     else 
     {
         LOG_MSG("SDL: Unsupported output device %s, switching back to surface",output.c_str());
+#if MACOSX && C_OPENGL
+        if(!init_output) OUTPUT_OPENGL_Select(GLBilinear); // Initialize screen before switching to surface (required for macOS builds)     
+#endif
         OUTPUT_SURFACE_Select(); // should not reach there anymore
+        init_output = true;
     }
 
     sdl.overscan_width=(unsigned int)section->Get_int("overscan");
@@ -3775,7 +3798,7 @@ static void GUI_StartUp() {
     // SDL_VIDEO_WINDOW_POS environment variable then "windowposition" setting should have no effect.
     // SDL2 position is set later, using SDL_SetWindowPosition()
 #if !defined(C_SDL2)
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     MONITORINFO info;
     if (sdl.displayNumber>0) {
         xyp xy={0};
@@ -3801,7 +3824,7 @@ static void GUI_StartUp() {
 #else
         setenv("SDL_VIDEO_WINDOW_POS",(std::to_string(posx)+","+std::to_string(posy)).c_str(),0);
 #endif
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     } else if (sdl.displayNumber>0 && !(posx == -2 && posy == -2)) {
         safe_strncpy(pos, "SDL_VIDEO_WINDOW_POS=", sizeof(pos));
         safe_strcat(pos, (std::to_string(info.rcMonitor.left+200)+","+std::to_string(info.rcMonitor.top+200)).c_str());
@@ -4956,7 +4979,7 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button, SDL_MouseMotionEven
 #if !defined(C_SDL2)
         case SDL_BUTTON_WHEELUP: /* Ick, really SDL? */
 			if (wheel_key && (wheel_guest || !dos_kernel_disabled)) {
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
                 if (wheel_key<4) {
                     INPUT ip = {0};
                     ip.type = INPUT_KEYBOARD;
@@ -4989,7 +5012,7 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button, SDL_MouseMotionEven
 			break;
         case SDL_BUTTON_WHEELDOWN: /* Ick, really SDL? */
 			if (wheel_key && (wheel_guest || !dos_kernel_disabled)) {
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
                 if (wheel_key<4) {
                     INPUT ip = {0};
                     ip.type = INPUT_KEYBOARD;
@@ -5093,59 +5116,6 @@ void GFX_LosingFocus(void) {
 bool GFX_IsFullscreen(void) {
     return sdl.desktop.fullscreen;
 }
-
-#if (defined(WIN32) && !defined(HX_DOS) || defined(MACOSX)) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
-static bool CheckEnableImmOnKey(SDL_KeyboardEvent key)
-{
-	if(key.keysym.sym == 0 || (
-	  #if defined(SDL_DOSBOX_X_IME) && !defined(MACOSX)
-	  !SDL_IM_Composition() &&
-	  #endif
-	  (key.keysym.sym == 0x08 || key.keysym.sym == 0x09 || (!IS_JDOSV && !IS_PC98_ARCH && key.keysym.sym >= 0x20 && key.keysym.sym <= 0x7F) || (key.keysym.sym >= 0x100 && key.keysym.sym <= 0x119) || key.keysym.sym == 0x12C || key.keysym.sym == 0x12D) || (strPasteBuffer.length() && key.keysym.sym >= 0x80))
-	) {
-		// BS, <-, ->, PgUp, PgDn, etc.
-		return true;
-	}
-	if(key.keysym.scancode == 0x01 || key.keysym.scancode == 0x1d || key.keysym.scancode == 0x2a || key.keysym.scancode == 0x36 || key.keysym.scancode == 0x38) {
-		// ESC, shift,  control, alt
-		return true;
-	}
-	if(key.keysym.scancode >= 0x3b && key.keysym.scancode <= 0x44) {
-		// function
-		return true;
-	}
-	if(key.keysym.mod & (KMOD_CTRL|KMOD_ALT)) {
-		// ctrl+, alt+
-		return true;
-	}
-	if((key.keysym.mod & 0x03) != 0 && key.keysym.scancode == 0x39) {
-		// shift + space
-		return true;
-	}
-	return false;
-}
-#elif (defined(WIN32) && !defined(HX_DOS) || defined(MACOSX)) && defined(C_SDL2)
-static bool CheckEnableImmOnKey(SDL_KeyboardEvent key)
-{
-	if(ime_text.size() != 0) return false;
-	if(key.keysym.scancode == 0x29 ||
-#if defined(SDL_DOSBOX_X_IME)
-	(!SDL_IM_Composition(4) && (key.keysym.sym == 0x20 || (key.keysym.sym >= 0x30 && key.keysym.sym <= 0x39))) ||
-	(!SDL_IM_Composition(1) && (key.keysym.sym == 0x08 || key.keysym.sym == 0x09 || (!IS_JDOSV && !IS_PC98_ARCH && key.keysym.sym > 0x20 && key.keysym.sym <= 0x2F) || (!IS_JDOSV && !IS_PC98_ARCH && key.keysym.sym > 0x3A && key.keysym.sym <= 0x7F) || key.keysym.scancode == 0x39 || (key.keysym.scancode >= 0x53 && key.keysym.scancode <= 0x63))) ||
-#endif
-	(key.keysym.scancode >= 0x49 && key.keysym.scancode <= 0x52) || (key.keysym.scancode >= 0xe0 && key.keysym.scancode <= 0xe6) || (strPasteBuffer.length() && key.keysym.sym >= 0x20)) {
-		// ESC, shift, control, alt, PgUp, PgDn, etc.
-		return true;
-	} else if((key.keysym.mod & 0x03) != 0 && key.keysym.scancode == 0x2c) {
-		// shift + space
-		return true;
-	} else if(key.keysym.mod & (KMOD_CTRL|KMOD_ALT)) {
-		// ctrl+, alt+
-		return true;
-	}
-	return false;
-}
-#endif
 
 bool sdl_wait_on_error() {
     return sdl.wait_on_error;
@@ -5790,25 +5760,24 @@ void GFX_Events() {
             if (event.type == SDL_KEYDOWN && isModifierApplied())
                 ClipKeySelect(event.key.keysym.sym);
             if(dos.im_enable_flag) {
-#if defined (WIN32) && !defined(HX_DOS) || defined(MACOSX)
-                if(event.type == SDL_KEYDOWN && IME_GetEnable()
-#if 0 // defined(SDL_DOSBOX_X_IME) && defined(MACOSX)
-                && (SDL_IM_Composition(4) || ((event.key.keysym.mod & 0x03) == 0 && event.key.keysym.scancode == 0x2c && dos.loaded_codepage == 932))
-#endif
-                ) {
+#if defined(MACOSX)
+                if(event.type == SDL_KEYDOWN && IME_GetEnable()) {
                     // Enter, BS, TAB, <-, ->
-                    if(event.key.keysym.sym == 0x0d || event.key.keysym.sym == 0x08 || event.key.keysym.sym == 0x09 || event.key.keysym.scancode == 0x4f || event.key.keysym.scancode == 0x50) {
+                    if(event.key.keysym.sym == 0x0d || event.key.keysym.sym == 0x08 || event.key.keysym.sym == 0x09 || (event.key.keysym.scancode >= 0x4f && event.key.keysym.scancode <= 0x52)) {
                         if(ime_text.size() != 0) {
                             break;
                         }
-                    } else
-                        if((event.key.keysym.mod & 0x03) == 0 && event.key.keysym.scancode == 0x2c && ime_text.size() == 0 && dos.loaded_codepage == 932) {
-                        // Zenkaku space
-                        BIOS_AddKeyToBuffer(0xf100 | 0x81);
-                        BIOS_AddKeyToBuffer(0xf000 | 0x40);
-                        break;
-                    } else if(!CheckEnableImmOnKey(event.key))
-                        break;
+                    } else {
+                        if(event.key.keysym.scancode == 0x2c && ime_text.size() == 0 && dos.loaded_codepage == 932) {
+                            if((event.key.keysym.mod & 0x03) == 0) {
+                                // Zenkaku space
+                                BIOS_AddKeyToBuffer(0xf100 | 0x81);
+                                BIOS_AddKeyToBuffer(0xf000 | 0x40);
+                                break;
+                            }
+                        }
+                        else break;
+                    }
                 }
 #endif
                 // Hankaku/Zenkaku
@@ -6155,9 +6124,6 @@ void GFX_Events() {
 								break;
 							}
 						}
-					} else if(!CheckEnableImmOnKey(event.key)) {
-						sdl.ime_ticks = 0;
-						break;
 					}
 				}
 			}
@@ -6193,6 +6159,7 @@ void GFX_Events() {
 #endif
 #endif
 #if defined (MACOSX) &&  defined(SDL_DOSBOX_X_SPECIAL)
+			bool ime_key;
 			int onoff;
 			if(SDL_GetIMValues(SDL_IM_ONOFF, &onoff, NULL) == NULL) {
 				if(onoff != 0 && event.type == SDL_KEYDOWN) {
@@ -6203,12 +6170,10 @@ void GFX_Events() {
 								break;
 							}
 						}
-					} else if(!CheckEnableImmOnKey(event.key)) {
-						sdl.ime_ticks = 0;
-						break;
 					}
 				}
 			}
+			ime_key = false;
 			sdl.ime_ticks = 0;
 			if(event.key.keysym.scancode == 0 && event.key.keysym.sym == 0) {
 				int len;
@@ -6223,7 +6188,29 @@ void GFX_Events() {
 								flag = 1;
 								BIOS_AddKeyToBuffer(0xf000 | buff[no]);
 							} else {
-								BIOS_AddKeyToBuffer(buff[no]);
+								if(buff[no] == 0x1c) {
+									event.key.keysym.scancode = 0x7b;
+									event.key.keysym.sym = SDLK_LEFT;
+									ime_key = true;
+								} else if(buff[no] == 0x1d) {
+									event.key.keysym.scancode = 0x7c;
+									event.key.keysym.sym = SDLK_RIGHT;
+									ime_key = true;
+								} else if(buff[no] == 0x1e) {
+									event.key.keysym.scancode = 0x7e;
+									event.key.keysym.sym = SDLK_UP;
+									ime_key = true;
+								} else if(buff[no] == 0x1f) {
+									event.key.keysym.scancode = 0x7d;
+									event.key.keysym.sym = SDLK_DOWN;
+									ime_key = true;
+								} else if(buff[no] == 0x08) {
+									event.key.keysym.scancode = 0x33;
+									event.key.keysym.sym = SDLK_BACKSPACE;
+									ime_key = true;
+								} else {
+									BIOS_AddKeyToBuffer(buff[no]);
+								}
 							}
 						} else {
 							BIOS_AddKeyToBuffer(0xf100 | buff[no]);
@@ -6257,6 +6244,12 @@ void GFX_Events() {
 #endif
             if (ticksLocked && event.type == SDL_KEYDOWN && static_cast<Section_prop *>(control->GetSection("cpu"))->Get_bool("stop turbo on key")) DOSBOX_UnlockSpeed2(true);
             MAPPER_CheckEvent(&event);
+#if defined (MACOSX) &&  defined(SDL_DOSBOX_X_SPECIAL)
+            if(ime_key) {
+                event.type = SDL_KEYUP;
+                MAPPER_CheckEvent(&event);
+            }
+#endif
         }
     }
 #endif
@@ -6771,7 +6764,7 @@ bool DEBUG_IsDebuggerConsoleVisible(void);
 #endif
 
 void DOSBox_ShowConsole() {
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     COORD crd;
     HWND hwnd;
@@ -7253,6 +7246,7 @@ void DEBUG_Init();
 #endif
 void SBLASTER_Init();
 void GUS_Init();
+void IMFC_Init();
 void INNOVA_Init();
 void PCSPEAKER_Init();
 void TANDYSOUND_Init();
@@ -7280,6 +7274,7 @@ void IDE_Init();
 void NE2K_Init();
 void FDC_Primary_Init();
 void AUTOEXEC_Init();
+void DOS_InitClock();
 
 #if defined(WIN32)
 // NTS: I intend to add code that not only indicates High DPI awareness but also queries the monitor DPI
@@ -7370,6 +7365,9 @@ bool VM_Boot_DOSBox_Kernel() {
 
         DispatchVMEvent(VM_EVENT_DOS_INIT_KERNEL_READY); // <- kernel is ready
 
+        /* Date/time */
+        DOS_InitClock();
+
         /* keyboard mapping, at this point in CONFIG.SYS parsing, right? */
         void DOS_KeyboardLayout_Startup(Section* sec);
         DOS_KeyboardLayout_Startup(NULL);
@@ -7438,7 +7436,7 @@ void SetWindowTransparency(int trans) {
     double alpha = (double)(100-trans)/100;
 #if defined(C_SDL2)
     SDL_SetWindowOpacity(sdl.window,alpha);
-#elif defined(WIN32) && !defined(HX_DOS)
+#elif defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     SetWindowLong(GetHWND(), GWL_EXSTYLE, GetWindowLong(GetHWND(), GWL_EXSTYLE) | WS_EX_LAYERED);
     SetLayeredWindowAttributes(GetHWND(), 0, 255 * alpha, LWA_ALPHA);
 #elif defined(MACOSX)
@@ -7542,6 +7540,11 @@ std::wstring win32_prompt_folder(const char *default_folder) {
     const size_t size = default_folder == NULL? 0 : strlen(default_folder)+1;
     wchar_t* wfolder = default_folder == NULL ? NULL : new wchar_t[size];
     if (default_folder != NULL) mbstowcs (wfolder, default_folder, size);
+
+    //fix memory leaks
+    std::wstring wsfolder = wfolder ? wfolder : L"";
+    if(wfolder) delete[] wfolder;
+    wfolder = &wsfolder[0];
 
 #if 0 // Browse for folder using SHBrowseForFolder, which works on Windows XP and higher
     WCHAR szDir[MAX_PATH];
@@ -8058,7 +8061,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     {
         std::string tmp,config_path,res_path,config_combined;
 
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         {
             DISPLAY_DEVICE dd;
             unsigned int i = 0;
@@ -8522,7 +8525,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 #endif
         }
     }
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         if (!enableime&&!tonoime) ImmDisableIME((DWORD)(-1));
 #endif
     }
@@ -8535,7 +8538,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         /* -- initialize logging first, so that higher level inits can report problems to the log file */
         LOG::Init();
 
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         {
             DISPLAY_DEVICE dd;
             unsigned int i = 0;
@@ -8575,7 +8578,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 
         /* -- [debug] setup console */
 #if C_DEBUG
-# if defined(WIN32) && !defined(HX_DOS)
+# if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         /* Can't disable the console with debugger enabled */
         if (control->opt_noconsole) {
             LOG(LOG_MISC,LOG_DEBUG)("-noconsole: hiding Win32 console window");
@@ -8595,7 +8598,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
             int id, major, minor;
 
             DOSBox_CheckOS(id, major, minor);
-            if (id == 1) menu.compatible=true;
+            //if (id == 1) menu.compatible=true; //?
 
             /* use all variables to shut up the compiler about unused vars */
             LOG(LOG_MISC,LOG_DEBUG)("DOSBox-X CheckOS results: id=%u major=%u minor=%u",id,major,minor);
@@ -8724,7 +8727,16 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
             sdl.inited = true;
         else
             E_Exit("Can't init SDL %s",SDL_GetError());
-
+#if defined(C_SDL2)
+        SDL_version sdl_version;
+        SDL_GetVersion(&sdl_version);
+        LOG_MSG("SDL: version %d.%d.%d, Video %s, Audio %s)",
+            sdl_version.major, sdl_version.minor, sdl_version.patch,
+            SDL_GetCurrentVideoDriver(), SDL_GetCurrentAudioDriver());
+#endif //defined (C_SDL2)
+#if defined(__MINGW32__) && defined(C_DEBUG)
+        LOG_MSG("EXPERIMENTAL: Debugger enabled for MinGW build, DOSBox-X crashes depending on the terminal software you use. Launching from command prompt (cmd.exe) is recommended.");
+#endif
         /* -- -- decide whether to show menu in GUI */
         if (control->opt_nogui || menu.compatible)
             menu.gui=false;
@@ -8928,6 +8940,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         DISNEY_Init();
         GUS_Init();
         IDE_Init();
+        IMFC_Init();
         INNOVA_Init();
         BIOS_Init();
         INT10_Init();
@@ -9152,7 +9165,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 
 #if !defined(C_EMSCRIPTEN)
         mainMenu.get_item("show_console").check(showconsole_init).refresh_item(mainMenu);
-        mainMenu.get_item("clear_console").check(false).enable(false).refresh_item(mainMenu);
+        mainMenu.get_item("clear_console").check(false).enable(showconsole_init).refresh_item(mainMenu);
         if (control->opt_display2) {
             mainMenu.get_item("show_console").enable(false).refresh_item(mainMenu);
             mainMenu.get_item("wait_on_error").enable(false).refresh_item(mainMenu);
@@ -9178,7 +9191,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
           Drop root privileges after they are no longer needed, which is a good
           practice if the executable is setuid root.
           dropPrivileges() is called by PARPORTS::PARPORTS() after contructing
-          CDirectLPT instances, but only if the constant C_DIRECTLPT is
+          CDirectLPT instances, but only if the constant HAS_CDIRECTLPT is
           non-zero. dropPrivileges() should be called regardless (if
           initPassthroughIO() is used anywhere else).
         */
@@ -9212,7 +9225,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         mainMenu.screenHeight = (unsigned int)sdl.surface->h;
         mainMenu.updateRect();
 #endif
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         /* Windows 7 taskbar extension support */
         {
             HRESULT hr;
@@ -9689,7 +9702,7 @@ fresh_boot:
 #endif
         SDL_Quit();//Let's hope sdl will quit as well when it catches an exception
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         if (winTaskbarList != NULL) {
                 winTaskbarList->Release();
                 winTaskbarList = NULL;

@@ -102,7 +102,7 @@ static struct {
 #include "midi_mt32.h"
 #endif
 
-#if C_FLUIDSYNTH || defined(WIN32) && !defined(HX_DOS)
+#if C_FLUIDSYNTH || defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 #include "midi_synth.h"
 #endif
 
@@ -549,7 +549,12 @@ void MIDI_RawOutByte(uint8_t data) {
 						midi.sysex.delay = 145; // Viking Child
 					} else if (midi.sysex.buf[5] == 0x10 && midi.sysex.buf[6] == 0x00 && midi.sysex.buf[7] == 0x01) {
 						midi.sysex.delay = 30; // Dark Sun 1
-					} else midi.sysex.delay = (Bitu)(((float)(midi.sysex.used) * 1.25f) * 1000.0f / 3125.0f) + 2;
+					} else {
+						midi.sysex.delay = (Bitu)(((float)(midi.sysex.used) * 1.25f) * 1000.0f / 3125.0f) + 2;
+						if (midi.sysex.extra_delay && midi.sysex.delay < 40) {
+							midi.sysex.delay = 40;
+						}
+					}
 					midi.sysex.start = GetTicks();
 				}
 			}
@@ -594,7 +599,7 @@ public:
 		Section_prop * section = static_cast<Section_prop *>(configuration);
 		const char * dev=section->Get_string("mididevice");
 		std::string fullconf = section->Get_string("midiconfig");
-#if C_FLUIDSYNTH || defined(WIN32) && !defined(HX_DOS)
+#if C_FLUIDSYNTH || defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 		synthsamplerate = section->Get_int("samplerate");
 		if (synthsamplerate == 0) synthsamplerate = 44100;
 #endif
@@ -611,6 +616,7 @@ public:
 			midi.sysex.start = GetTicks();
 			fullconf.erase(fullconf.find("delaysysex"));
 			LOG(LOG_MISC,LOG_DEBUG)("MIDI:Using delayed SysEx processing");
+			midi.sysex.extra_delay = true;
 		}
 		trim(fullconf);
 		const char * conf = fullconf.c_str();

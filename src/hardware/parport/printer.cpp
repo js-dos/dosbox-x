@@ -39,6 +39,8 @@
 #include "../../ints/int10.h"
 #include "sdlmain.h"
 
+#include <output/output_ttf.h>
+
 #if defined(USE_TTF)
 extern unsigned char DOSBoxTTFbi[48868];
 extern bool printfont;
@@ -98,7 +100,7 @@ void CPrinter::FillPalette(uint8_t redmax, uint8_t greenmax, uint8_t bluemax, ui
 extern std::string prtlist;
 
 void CPrinter::getPrinterContext() {
-#if defined (WIN32)
+#if defined (WIN32) && !defined(_WIN32_WINDOWS)
     if (device.size()&&device!="-") {
         printerDC = CreateDC("WINSPOOL", device.c_str(), NULL, NULL);
         return;
@@ -393,7 +395,7 @@ void CPrinter::updateFont()
 #if defined(WIN32)
         const char* windir = "C:\\WINDOWS";
         if(stat(windir,&wstat) || !(wstat.st_mode & S_IFDIR)) {
-            TCHAR dir[MAX_PATH];
+            TCHAR dir[MAX_PATH] = {};
             if (GetWindowsDirectory(dir, MAX_PATH))
                 windir=dir;
         }
@@ -1134,7 +1136,7 @@ bool CPrinter::processCommandChar(uint8_t ch)
 			    numParam = 0;
 			    break;
 		    case 0x274: // Assign character table (ESC (t)
-			    if (params[2] < 4 && params[3] < 16)
+			    if (params[2] < 4 && params[3] < 15)
 			    {
 				    charTables[params[2]] = codepages[params[3]];
 				    //LOG_MSG("curr table: %d, p2: %d, p3: %d",curCharTable,params[2],params[3]);
@@ -2567,7 +2569,7 @@ void PRINTER_Init()
 	//IO_RegisterWriteHandler(LPTPORT+2,PRINTER_writecontrol,IO_MB);
 	//IO_RegisterReadHandler(LPTPORT+2,PRINTER_readcontrol,IO_MB);
 
-#if defined(WIN32)
+#if defined(WIN32) && !defined(_WIN32_WINDOWS)
     if (!inited && !strcasecmp(confoutputDevice, "printer")) {
         DWORD dwNeeded = 0, dwReturned = 0;
         bool fnReturn = EnumPrinters(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, NULL, 1L, (LPBYTE)NULL, 0L, &dwNeeded, &dwReturned);        PRINTER_INFO_1* pInfo = NULL;

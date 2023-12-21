@@ -1,5 +1,5 @@
 dnl Init.
-AC_INIT(dosbox-x,2022.12.26,[https://github.com/joncampbell123/dosbox-x/issues],[],[https://dosbox-x.com])
+AC_INIT(dosbox-x,2023.10.06,[https://github.com/joncampbell123/dosbox-x/issues],[],[https://dosbox-x.com])
 AC_PREREQ(2.60)
 AC_CONFIG_SRCDIR(README.md)
 
@@ -64,6 +64,24 @@ AC_CANONICAL_BUILD
 dnl Setup for automake
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AC_CONFIG_HEADER(config.h)
+AH_BOTTOM([/*
+  Define HAS_CDIRECTLPT as 1 if C_DIRECTLPT is defined (as 1) *and* parallel
+  pass-through is available on the current platform. It is only available on
+  x86{_64} with Windows or BSD, and on Linux.
+  We cannot override the value of C_DIRECTLPT, because configure will replace
+  "#undef C_DIRECTLPT" or "#define C_DIRECTLPT 0" with "#define C_DIRECTLPT 1".
+*/
+#ifdef C_DIRECTLPT
+#if ((defined __i386__ || defined __x86_64__ || defined _M_IX86 || defined _M_X64) && \
+     (defined WIN32 || defined BSD || defined __CYGWIN__)) || \
+     /* WIN32 is not defined by default on Cygwin */ \
+    defined LINUX /* Linux, including non-x86 (e.g. Raspberry Pi) */
+#define HAS_CDIRECTLPT 1
+#endif
+#endif // C_DIRECTLPT
+#ifndef HAS_CDIRECTLPT
+#define HAS_CDIRECTLPT 0
+#endif])
 
 dnl Checks for programs.
 AC_PROG_MAKE_SET
@@ -158,6 +176,13 @@ AC_ARG_ENABLE(force-menu-sdldraw,AC_HELP_STRING([--enable-force-menu-sdldraw],[F
 dnl This is how the build script can specify a HX DOS extender target
 AH_TEMPLATE(C_HX_DOS,[Define to 1 to target HX DOS])
 AC_ARG_ENABLE(hx-dos,AC_HELP_STRING([--enable-hx-dos],[Enable HX target]),enable_hx=yes)
+
+dnl This is how the build script can use libopencow for win9x unicode 
+# AH_TEMPLATE(C_OPENCOW,[Define to 1 to enable opencow])
+AC_ARG_ENABLE(opencow,AC_HELP_STRING([--enable-opencow],[Enable OpenCOW]),enable_opencow=yes)
+
+dnl Disable SDLnet for win9x builds
+AC_ARG_ENABLE(sdlnet,AC_HELP_STRING([--disable-sdlnet],[Disable SDLNet]),disable_sdl_net=yes)
 
 dnl Let me know if you're targeting Emscripten
 AH_TEMPLATE(C_EMSCRIPTEN,[Define to 1 to target Emscripten])
@@ -353,6 +378,7 @@ AC_CHECK_CXXFLAGS([ -Wall ])
 AC_CHECK_CXXFLAGS([ -Wextra ])
 AC_CHECK_CXXFLAGS([ -Wunused ])
 AC_CHECK_CXXFLAGS([ -pedantic ])
+AC_CHECK_CXXFLAGS([ -Wno-error=format-security ])     # imfc.cpp and later versions of GCC, see https://github.com/joncampbell123/dosbox-x/issues/4436
 #AC_CHECK_CXXFLAGS([ -Wconversion ])      DO NOT ENABLE. THIS WARNING IS WAY TOO PEDANTIC TO BE USEFUL, EXCEPT FOR SPECIFIC CASES
 #AC_CHECK_CXXFLAGS([ -Wsign-conversion ])
 AC_CHECK_CXXFLAGS([ -Wlogical-op ])
@@ -840,6 +866,10 @@ if test x$enable_mt32 = xyes ; then
       AC_MSG_RESULT(yes)
       AC_DEFINE(C_MT32,1)
       ;;
+    aarch64)
+      AC_MSG_RESULT(yes)
+      AC_DEFINE(C_MT32,1)
+      ;;
     *)
       enable_mt32=no
       AC_MSG_RESULT(no)
@@ -1012,7 +1042,9 @@ case "$host" in
 esac
 dnl enable SDL2 net if SDL2
 if test -n "$SDL2_LIBS"; then
- if test x$have_sdl2_net_lib = xyes -a x$have_sdl_net_h = xyes ; then
+ if test x$disable_sdl_net = xyes ; then
+  AC_MSG_WARN([SDL_net is disabled in parameters])
+ elif test x$have_sdl2_net_lib = xyes -a x$have_sdl_net_h = xyes ; then
   LIBS="$LIBS -lSDL2_net"
   AC_DEFINE(C_SDL_NET,1)
   AC_DEFINE(C_MODEM,1)
@@ -1028,7 +1060,9 @@ if test -n "$SDL2_LIBS"; then
   AC_MSG_WARN([Can't find SDL_net, internal modem and ipx disabled])
  fi
 else
- if test x$have_sdl_net_lib = xyes -a x$have_sdl_net_h = xyes ; then
+ if test x$disable_sdl_net = xyes ; then
+  AC_MSG_WARN([SDL_net is disabled in parameters])
+ elif test x$have_sdl_net_lib = xyes -a x$have_sdl_net_h = xyes ; then
   LIBS="$LIBS -lSDL_net"
   AC_DEFINE(C_SDL_NET,1)
   AC_DEFINE(C_MODEM,1)
@@ -1250,6 +1284,20 @@ case "$host" in
     ;;
 esac
 fi
+
+dnl LIBRARY USE: opencow
+case "$host" in
+    *-*-cygwin* | *-*-mingw32*)
+    if test x$enable_opencow = xyes; then
+      LIBS="-lopencow $LIBS -lstdc++ -lopencow" #need to put at the first, also better at the last too.
+      LDFLAGS="$LDFLAGS -Wl,--allow-multiple-definition "
+      if test -n "$SDL_LIBS"; then
+        LIBS="${LIBS//-luser32/-lopencow -luser32}"
+        #SDL_LIBS="${SDL_LIBS//-luser32/\-lopencow -luser32}"
+      fi
+    fi
+    ;;
+esac
 
 dnl BUILD: whether to enable universal binary support
 if test x"$macosx" = x"1" && test x"$host_cpu" = x"arm"; then

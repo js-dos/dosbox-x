@@ -35,6 +35,8 @@
 #include "callback.h"
 #include "../ints/int10.h"
 
+#include <output/output_ttf.h>
+
 using namespace std;
 
 std::map<int, int> lowboxdrawmap {
@@ -59,8 +61,8 @@ uint16_t cpMap_AX[32] = {
 #define MIN_PTSIZE 9
 
 #ifdef _MSC_VER
-# define MIN(a,b) ((a) < (b) ? (a) : (b))
-# define MAX(a,b) ((a) > (b) ? (a) : (b))
+# define MIN(a,b) (std::min)(a,b)
+# define MAX(a,b) (std::max)(a,b)
 #else
 # define MIN(a,b) std::min(a,b)
 # define MAX(a,b) std::max(a,b)
@@ -110,13 +112,15 @@ static SDL_Rect ttf_textClip = {0, 0, 0, 0};
 ttf_cell curAttrChar[txtMaxLins*txtMaxCols];					// currently displayed textpage
 ttf_cell newAttrChar[txtMaxLins*txtMaxCols];					// to be replaced by
 
-alt_rgb altBGR0[16], altBGR1[16];
+extern alt_rgb altBGR0[16];
+alt_rgb altBGR1[16];
 int blinkCursor = -1;
 static int prev_sline = -1;
 static int charSet = 0;
 static alt_rgb *rgbColors = (alt_rgb*)render.pal.rgb;
 static bool blinkstate = false;
-bool colorChanged = false, justChanged = false, staycolors = false, firstsize = true, ttfswitch=false, switch_output_from_ttf=false;
+bool colorChanged = false, justChanged = false, staycolors = false, firstsize = true, ttfswitch = false, switch_output_from_ttf = false;
+bool init_once = false, init_twice = false;
 
 int menuwidth_atleast(int width), FileDirExistCP(const char *name), FileDirExistUTF8(std::string &localname, const char *name);
 void AdjustIMEFontSize(void),refreshExtChar(void), initcodepagefont(void), change_output(int output), drawmenu(Bitu val), KEYBOARD_Clear(void), RENDER_Reset(void), DOSBox_SetSysMenu(void), GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight), SetWindowTransparency(int trans), resetFontSize(void), RENDER_CallBack( GFX_CallBackFunctions_t function );
@@ -186,7 +190,7 @@ Bitu OUTPUT_TTF_SetSize() {
         SDL_FULLSCREEN
 #endif
         );
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
         if (sdl.displayNumber>0) {
             xyp xy={0};
             xy.x=-1;
@@ -240,9 +244,9 @@ void setVGADAC() {
             IO_WriteB(VGAREG_ACTL_ADDRESS, i+32);
             imap[i]=IO_ReadB(VGAREG_ACTL_READ_DATA);
             IO_WriteB(VGAREG_DAC_WRITE_ADDRESS, imap[i]);
-            IO_WriteB(VGAREG_DAC_DATA, (altBGR1[i].red+3)*63/255);
-            IO_WriteB(VGAREG_DAC_DATA, (altBGR1[i].green+3)*63/255);
-            IO_WriteB(VGAREG_DAC_DATA, (altBGR1[i].blue+3)*63/255);
+            IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].red>>2);
+            IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].green>>2);
+            IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].blue>>2);
         }
     }
 }
@@ -250,44 +254,42 @@ void setVGADAC() {
 /* NTS: EGA/VGA etc have at least 16 DOS colors. Check also CGA etc. */
 bool setColors(const char *colorArray, int n) {
     if (IS_PC98_ARCH) return false;
-    if (!colorChanged)
-        for (uint8_t i = 0; i < 0x10; i++) {
-            altBGR1[i].red=rgbColors[i].red;
-            altBGR1[i].green=rgbColors[i].green;
-            altBGR1[i].blue=rgbColors[i].blue;
-        }
     staycolors = strlen(colorArray) && *colorArray == '+';
     const char* nextRGB = colorArray + (staycolors?1:0);
 	uint8_t * altPtr = (uint8_t *)altBGR1;
-	int rgbVal[3] = {-1,-1,-1};
-	for (int colNo = 0; colNo < (n>-1?1:16); colNo++) {
-		if (n>-1) altPtr+=4*n;
-		if (sscanf(nextRGB, " ( %d , %d , %d)", &rgbVal[0], &rgbVal[1], &rgbVal[2]) == 3) {	// Decimal: (red,green,blue)
-			for (int i = 0; i< 3; i++) {
-				if (rgbVal[i] < 0 || rgbVal[i] > 255)
-					return false;
-				altPtr[i] = rgbVal[i];
-			}
-			while (*nextRGB != ')')
-				nextRGB++;
-			nextRGB++;
-		} else if (sscanf(nextRGB, " #%6x", &rgbVal[0]) == 1) {							// Hexadecimal
-			if (rgbVal[0] < 0)
-				return false;
-			for (int i = 0; i < 3; i++) {
-				altPtr[2-i] = rgbVal[0]&255;
-				rgbVal[0] >>= 8;
-			}
-			nextRGB = strchr(nextRGB, '#') + 7;
-		} else
-			return false;
-		altPtr += 4;
-	}
-	for (int i = n>-1?n:0; i < (n>-1?n+1:16); i++) {
-		altBGR0[i].blue = (altBGR1[i].blue*2 + 128)/4;
-		altBGR0[i].green = (altBGR1[i].green*2 + 128)/4;
-		altBGR0[i].red = (altBGR1[i].red*2 + 128)/4;
-	}
+	int32_t rgbVal[4] = {-1,-1,-1,-1};
+    for(int colNo = n > -1 ? n : 0; colNo < (n > -1 ? n + 1 : 16); colNo++) {
+        if(sscanf(nextRGB, " ( %d , %d , %d)", &rgbVal[0], &rgbVal[1], &rgbVal[2]) == 3) {	// Decimal: (red,green,blue)
+            for(int i = 0; i < 3; i++) {
+                if(rgbVal[i] < 0 || rgbVal[i] > 255)
+                    return false;
+            }
+            while(*nextRGB != ')')
+                nextRGB++;
+            nextRGB++;
+        }
+        else if(sscanf(nextRGB, " #%6x", ((uint32_t*)(&rgbVal[3]))) == 1) {	// Hexadecimal
+            if(rgbVal[3] < 0 || rgbVal[3] > 0xFFFFFF)
+                return false;
+            for(int i = 2; i >= 0; i--) {
+                rgbVal[i] = rgbVal[3] & 255;
+                rgbVal[3] >>= 8;
+            }
+            nextRGB = strchr(nextRGB, '#') + 7;
+        }
+        else
+            return false;
+
+        altBGR0[colNo].blue = rgbVal[2];
+        altBGR0[colNo].green = rgbVal[1];
+        altBGR0[colNo].red = rgbVal[0];
+        rgbColors[colNo].blue = (uint8_t)rgbVal[2];
+        rgbColors[colNo].green = (uint8_t)rgbVal[1];
+        rgbColors[colNo].red = (uint8_t)rgbVal[0];
+        altBGR1[colNo].blue = rgbVal[2];
+        altBGR1[colNo].green = rgbVal[1];
+        altBGR1[colNo].red = rgbVal[0];
+    }
     setVGADAC();
     colorChanged=justChanged=true;
 	return true;
@@ -468,7 +470,7 @@ void SetBlinkRate(Section_prop* section) {
     const char * blinkCstr = section->Get_string("blinkc");
     unsigned int num=-1;
     if (!strcasecmp(blinkCstr, "false")||!strcmp(blinkCstr, "-1")) blinkCursor = -1;
-    else if (1==sscanf(blinkCstr,"%u",&num)&&num>=0&&num<=7) blinkCursor = num;
+    else if (1==sscanf(blinkCstr,"%u",&num)&&int(num)>=0&&int(num)<=7) blinkCursor = num;
     else blinkCursor = IS_PC98_ARCH?6:4; // default cursor blinking is slower on PC-98 systems
 }
 
@@ -597,7 +599,7 @@ void GFX_SelectFontByPoints(int ptsize) {
 
 void SetOutputSwitch(const char *outputstr) {
 #if C_DIRECT3D
-        if (!strcasecmp(outputstr, "direct3d"))
+        if (!strcasecmp(outputstr, "direct3d") || !strcasecmp(outputstr, "auto"))
             switchoutput = 6;
         else
 #endif
@@ -606,7 +608,7 @@ void SetOutputSwitch(const char *outputstr) {
             switchoutput = 5;
         else if (!strcasecmp(outputstr, "openglnb"))
             switchoutput = 4;
-        else if (!strcasecmp(outputstr, "opengl")||!strcasecmp(outputstr, "openglnq"))
+        else if (!strcasecmp(outputstr, "opengl")||!strcasecmp(outputstr, "openglnq") || !strcasecmp(outputstr, "auto"))
             switchoutput = 3;
         else
 #endif
@@ -620,7 +622,7 @@ void OUTPUT_TTF_Select(int fsize) {
     if (!initttf&&TTF_Init()) {											// Init SDL-TTF
         std::string message = "Could not init SDL-TTF: " + std::string(SDL_GetError());
         systemmessagebox("Error", message.c_str(), "ok","error", 1);
-        sdl.desktop.want_type = SCREEN_SURFACE;
+        change_output(switchoutput == -1 ? 0 : switchoutput);
         return;
     }
     int fontSize = 0;
@@ -678,12 +680,17 @@ void OUTPUT_TTF_Select(int fsize) {
             }
         }
         const char * colors = ttf_section->Get_string("colors");
-        if (*colors) {
+        staycolors = strlen(colors) && *colors == '+'; // Always switch to preset value when '+' is specified
+        if ((*colors && (!init_once || !init_twice))|| staycolors) {
             if (!setColors(colors,-1)) {
                 LOG_MSG("Incorrect color scheme: %s", colors);
                 //setColors("#000000 #0000aa #00aa00 #00aaaa #aa0000 #aa00aa #aa5500 #aaaaaa #555555 #5555ff #55ff55 #55ffff #ff5555 #ff55ff #ffff55 #ffffff",-1);
             }
-        } else if (IS_EGAVGA_ARCH) {
+            if(ttf.inUse) init_once = true;
+            if(!init_once) init_once = true;
+            else if(!init_twice) init_twice = true;
+        }
+        else if (IS_EGAVGA_ARCH) {
             alt_rgb *rgbcolors = (alt_rgb*)render.pal.rgb;
             std::string str = "";
             char value[30];
@@ -1358,7 +1365,7 @@ void ttf_reset() {
 #endif
 }
 
-void ttfreset(Bitu val) {
+void ttfreset(Bitu /*val*/) {
     ttf_reset();
 }
 
@@ -1390,7 +1397,11 @@ void ttf_switch_on(bool ss=true) {
 #endif
         }
         bool OpenGL_using(void), gl = OpenGL_using();
-        change_output(10);
+	(void)gl; // unused var warning
+#if defined(WIN32) && !defined(C_SDL2)
+        change_output(0); // call OUTPUT_SURFACE_Select() to initialize output before enabling TTF output on Windows builds
+#endif
+        change_output(10); // call OUTPUT_TTF_Select()
         SetVal("sdl", "output", "ttf");
         std::string showdbcsstr = static_cast<Section_prop *>(control->GetSection("dosv"))->Get_string("showdbcsnodosv");
         showdbcs = showdbcsstr=="true"||showdbcsstr=="1"||(showdbcsstr=="auto" && (loadlang || dbcs_sbcs));

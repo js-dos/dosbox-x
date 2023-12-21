@@ -68,6 +68,8 @@
 #include "../libs/tinyfiledialogs/tinyfiledialogs.h"
 #endif
 
+#include <output/output_ttf.h>
+
 #ifdef DOSBOXMENU_EXTERNALLY_MANAGED
 static DOSBoxMenu guiMenu, nullMenu;
 #endif
@@ -284,7 +286,7 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
 
     if (dw < 640) dw = 640;
     if (dh < 350) dh = 350;
-    scalex = dw / 640; /* maximum horisontal scale */
+    scalex = dw / 640; /* maximum horizontal scale */
     scaley = dh / 350; /* maximum vertical   scale */
     if( scalex > scaley ) scale = scaley;
     else                  scale = scalex;
@@ -447,7 +449,7 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
     SDL_UpdateRect(sdlscreen, 0, 0, 0, 0);
 #endif
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     WindowsTaskbarResetPreviewRegion();
 #endif
 
@@ -606,7 +608,7 @@ static void UI_Shutdown(GUI::ScreenSDL *screen) {
 #endif
 #endif
 
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     DOSBox_SetSysMenu();
     WindowsTaskbarUpdatePreviewRegion();
 #endif
@@ -3071,7 +3073,7 @@ public:
 };
 
 extern std::string helpcmd;
-char *str_replace(char *orig, char *rep, char *with);
+char *str_replace(const char *orig, const char *rep, const char *with);
 class ShowHelpCommand : public GUI::ToplevelWindow {
 protected:
     GUI::Input *name;
@@ -3085,7 +3087,7 @@ public:
             else if (helpcmd=="RD") helpcmd="RMDIR";
             else if (helpcmd=="REN") helpcmd="RENAME";
             std::string helpinfo=std::string(MSG_Get(("SHELL_CMD_"+helpcmd+"_HELP").c_str()))+"\n"+std::string(MSG_Get(("SHELL_CMD_"+helpcmd+"_HELP_LONG").c_str()));
-            std::istringstream in(str_replace(str_replace(str_replace(str_replace((char *)helpinfo.c_str(), (char*)"%%", (char*)"%"), (char*)"\033[0m", (char*)""), (char*)"\033[33;1m", (char*)""), (char*)"\033[37;1m", (char*)""));
+            std::istringstream in(str_replace(str_replace(str_replace(str_replace(helpinfo.c_str(), "%%", "%"), "\033[0m", ""), "\033[33;1m", ""), "\033[37;1m", ""));
             int r=0;
             if (in)	for (std::string line; std::getline(in, line); ) {
                 r+=25;

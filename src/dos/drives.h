@@ -101,7 +101,7 @@ public:
 	virtual bool add_special_file_to_disk(const char* dosname, const char* operation, uint16_t value, bool isdir);
 	virtual void EmptyCache(void) { dirCache.EmptyCache(); };
 	virtual void MediaChange() {};
-	const char* getBasedir() {return basedir;};
+	const char* getBasedir() const {return basedir;};
 	struct {
 		uint16_t bytes_sector;
 		uint8_t sectors_cluster;
@@ -367,8 +367,8 @@ class fatDrive : public DOS_Drive {
 public:
 	fatDrive(const char * sysFilename, uint32_t bytesector, uint32_t cylsector, uint32_t headscyl, uint32_t cylinders, std::vector<std::string> &options);
 	fatDrive(imageDisk *sourceLoadedDisk, std::vector<std::string> &options);
-    void fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32_t cylsector, uint32_t headscyl, uint32_t cylinders, uint64_t filesize, const std::vector<std::string> &options);
-    virtual ~fatDrive();
+	void fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32_t cylsector, uint32_t headscyl, uint32_t cylinders, uint64_t filesize, const std::vector<std::string> &options);
+	virtual ~fatDrive();
 	virtual bool FileOpen(DOS_File * * file,const char * name,uint32_t flags);
 	virtual bool FileCreate(DOS_File * * file,const char * name,uint16_t attributes);
 	virtual bool FileUnlink(const char * name);
@@ -395,13 +395,20 @@ public:
 	virtual bool isRemovable(void);
 	virtual Bits UnMount(void);
 public:
+	struct clusterChainMemory {
+		uint32_t	current_cluster_no = 0;
+		uint32_t	current_cluster_index = 0;
+
+		void clear(void);
+	};
+public:
 	uint8_t readSector(uint32_t sectnum, void * data);
 	uint8_t writeSector(uint32_t sectnum, void * data);
-	uint32_t getAbsoluteSectFromBytePos(uint32_t startClustNum, uint32_t bytePos);
+	uint32_t getAbsoluteSectFromBytePos(uint32_t startClustNum, uint32_t bytePos,clusterChainMemory *ccm=NULL);
 	uint32_t getSectorCount(void);
 	uint32_t getSectorSize(void);
 	uint32_t getClusterSize(void);
-	uint32_t getAbsoluteSectFromChain(uint32_t startClustNum, uint32_t logicalSector);
+	uint32_t getAbsoluteSectFromChain(uint32_t startClustNum, uint32_t logicalSector,clusterChainMemory *ccm=NULL);
 	bool allocateCluster(uint32_t useCluster, uint32_t prevCluster);
 	uint32_t appendCluster(uint32_t startCluster);
 	void deleteClustChain(uint32_t startCluster, uint32_t bytePos);
@@ -414,20 +421,21 @@ public:
 	uint8_t req_ver_major = 0,req_ver_minor = 0;
 	bool created_successfully = true;
 	uint32_t partSectOff;
-    struct {
-        uint32_t bytesector;
-        uint32_t cylsector;
-        uint32_t headscyl;
-        uint32_t cylinders;
-        int mounttype;
-    } opts = {0, 0, 0, 0, -1};
-    struct {
-        unsigned char CDROM_drive;
-        unsigned long cdrom_sector_offset;
-        unsigned char floppy_emu_type;
-    } el = {0, 0, 0};
+	struct {
+		uint32_t bytesector;
+		uint32_t cylsector;
+		uint32_t headscyl;
+		uint32_t cylinders;
+		int mounttype;
+	} opts = {0, 0, 0, 0, -1};
+	struct {
+		unsigned char CDROM_drive;
+		unsigned long cdrom_sector_offset;
+		unsigned char floppy_emu_type;
+	} el = {0, 0, 0};
 
 private:
+	bool iseofFAT(const uint32_t cv) const;
 	char* Generate_SFN(const char *path, const char *name);
 	uint32_t getClusterValue(uint32_t clustNum);
 	void setClusterValue(uint32_t clustNum, uint32_t clustValue);
@@ -441,7 +449,7 @@ private:
 	friend void DOS_Shell::CMD_SUBST(char* args); 	
 	struct {
 		char srch_dir[CROSS_LEN];
-    } srchInfo[MAX_OPENDIRS] = {};
+	} srchInfo[MAX_OPENDIRS] = {};
 
 	/* directory entry range of LFN entries after FindNextInternal(), needed by
 	 * filesystem code such as RemoveDir() which needs to delete the dirent AND
@@ -468,8 +476,8 @@ private:
 		uint16_t total_clusters;
 		uint16_t free_clusters;
 		uint8_t mediaid;
-    } allocation = {};
-	
+	} allocation = {};
+
 	FAT_BootSector::bpb_union_t BPB = {}; // BPB in effect (translated from on-disk BPB as needed)
 	bool absolute = false;
 	uint8_t fattype = 0;
@@ -478,31 +486,32 @@ private:
 	uint32_t firstDataSector = 0;
 	uint32_t firstRootDirSect = 0;
 	uint32_t physToLogAdj = 0; // Some PC-98 HDI images have larger logical than physical bytes/sector and the partition is not a multiple of it, so this is needed
+	uint32_t searchFreeCluster = 0;
 	int partition_index = -1;
 
 	uint32_t cwdDirCluster = 0;
 
-    uint8_t fatSectBuffer[SECTOR_SIZE_MAX * 2] = {};
+	uint8_t fatSectBuffer[SECTOR_SIZE_MAX * 2] = {};
 	uint32_t curFatSect = 0;
 
 	DOS_Drive_Cache labelCache;
 public:
-    /* the driver code must use THESE functions to read the disk, not directly from the disk drive,
-     * in order to support a drive with a smaller sector size than the FAT filesystem's "sector".
-     *
-     * It is very common for instance to have PC-98 HDI images formatted with 256 bytes/sector at
-     * the disk level and a FAT filesystem marked as having 1024 bytes/sector. */
+	/* the driver code must use THESE functions to read the disk, not directly from the disk drive,
+	 * in order to support a drive with a smaller sector size than the FAT filesystem's "sector".
+	 *
+	 * It is very common for instance to have PC-98 HDI images formatted with 256 bytes/sector at
+	 * the disk level and a FAT filesystem marked as having 1024 bytes/sector. */
 	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
 	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, void * data);
 	virtual uint32_t getSectSize(void);
 	uint32_t sector_size = 0;
 
-    // INT 25h/INT 26h
-    virtual uint32_t GetSectorCount(void);
-    virtual uint32_t GetSectorSize(void);
+	// INT 25h/INT 26h
+	virtual uint32_t GetSectorCount(void);
+	virtual uint32_t GetSectorSize(void);
 	virtual uint8_t Read_AbsoluteSector_INT25(uint32_t sectnum, void * data);
 	virtual uint8_t Write_AbsoluteSector_INT25(uint32_t sectnum, void * data);
-    virtual void UpdateDPB(unsigned char dos_drive);
+	virtual void UpdateDPB(unsigned char dos_drive);
 
 	virtual char const * GetLabel(){return labelCache.GetLabel();};
 	virtual void SetLabel(const char *label, bool iscdrom, bool updatable);
@@ -510,6 +519,8 @@ public:
 	virtual uint32_t GetPartitionOffset(void);
 	virtual uint32_t GetFirstClusterOffset(void);
 	virtual uint32_t GetHighestClusterNumber(void);
+
+	bool unformatted = false;
 };
 
 PhysPt DOS_Get_DPB(unsigned int dos_drive);
@@ -536,7 +547,7 @@ public:
 	virtual bool isRemote(void);
 	virtual bool isRemovable(void);virtual Bits UnMount(void);
 private:
-	uint8_t subUnit;	char driveLetter;
+	uint8_t subUnit = 0;	char driveLetter = '\0';
 };
 
 class physfscdromDrive : public physfsDrive
@@ -687,8 +698,8 @@ struct UDFTagId { /* ECMA-167 7.2.1 */
 
 	bool					get(const unsigned int sz,const unsigned char *b);
 	void					parse(const unsigned int sz,const unsigned char *b);
-	bool					tagChecksumOK(const unsigned int sz,const unsigned char *b);
-	bool					dataChecksumOK(const unsigned int sz,const unsigned char *b);
+	bool					tagChecksumOK(const unsigned int sz,const unsigned char *b) const;
+	bool					dataChecksumOK(const unsigned int sz,const unsigned char *b) const;
 	bool					checksumOK(const unsigned int sz,const unsigned char *b);
 						UDFTagId(const unsigned int sz,const unsigned char *b);
 						UDFTagId();
@@ -1058,13 +1069,13 @@ public:
 	virtual Bits UnMount(void);
 	bool loadImage();
 	bool loadImageUDF();
-	bool loadImageUDFAnchorVolumePointer(UDFAnchorVolumeDescriptorPointer &avdp,uint8_t *pvd/*COOKED_SECTOR_SIZE*/,uint32_t sector);
-	bool readSector(uint8_t *buffer, uint32_t sector);
+	bool loadImageUDFAnchorVolumePointer(UDFAnchorVolumeDescriptorPointer &avdp,uint8_t *pvd/*COOKED_SECTOR_SIZE*/,uint32_t sector) const;
+	bool readSector(uint8_t *buffer, uint32_t sector) const;
 	void setFileName(const char* fileName);
 	virtual char const* GetLabel(void) {return discLabel;};
 	virtual void Activate(void);
 private:
-    int  readDirEntry(isoDirEntry* de, const uint8_t* data, unsigned int direntindex);
+    int  readDirEntry(isoDirEntry* de, const uint8_t* data, unsigned int direntindex) const;
 	bool lookup(isoDirEntry *de, const char *path);
 	bool lookup(UDFFileIdentifierDescriptor &fid, UDFFileEntry &fe, const char *path);
 	int  UpdateMscdex(char driveLetter, const char* path, uint8_t& subUnit);
@@ -1113,10 +1124,10 @@ private:
 	UDFFileSetDescriptor						fsetd;
 	UDFPartitionDescriptor						partd;
 public:
-	void UDFextent_rewind(struct UDFextents &ex);
-	void UDFFileEntryToExtents(UDFextents &ex,UDFFileEntry &fe);
-	uint64_t UDFextent_seek(struct UDFextents &ex,uint64_t ofs);
-	int UDFextent_read(struct UDFextents &ex,unsigned char *buf,size_t count);
+	void UDFextent_rewind(struct UDFextents &ex) const;
+	void UDFFileEntryToExtents(UDFextents &ex,UDFFileEntry &fe) const;
+	uint64_t UDFextent_seek(struct UDFextents &ex,uint64_t ofs) const;
+	unsigned int UDFextent_read(struct UDFextents &ex,unsigned char *buf,size_t count) const;
 	uint64_t UDFtotalsize(struct UDFextents &ex) const;
 private:
 	struct DirIterator {
@@ -1189,7 +1200,7 @@ public:
 	virtual bool TestDir(const char * dir);
 	virtual bool RemoveDir(const char * dir);
 	virtual bool MakeDir(const char * dir);
-	const char* getOverlaydir() {return overlaydir;};
+	const char* getOverlaydir() const {return overlaydir;};
 	bool ovlnocachedir = false;
 	bool ovlreadonly = false;
 private:
@@ -1245,7 +1256,7 @@ int get_expanded_files(const std::string &path, std::vector<std::string> &paths,
 typedef wchar_t host_cnv_char_t;
 # define host_cnv_use_wchar
 # define _HT(x) L##x
-# if defined(HX_DOS)
+# if defined(HX_DOS) || defined(_WIN32_WINDOWS)
 #  define ht_stat_t struct _stat
 #  define ht_stat(x,y) _wstat(x,y)
 # elif defined(__MINGW32__)

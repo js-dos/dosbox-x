@@ -193,6 +193,8 @@ MachineType         machine;
 bool                PS1AudioCard;       // Perhaps have PS1 as a machine type...?
 SVGACards           svgaCard;
 S3Card              s3Card;
+ATICard             atiCard;
+HerculesCard        hercCard;
 bool                SDLNetInited;
 int32_t              ticksDone;
 uint32_t              ticksScheduled;
@@ -266,6 +268,7 @@ void                TANDYSOUND_Init(Section*);
 void                DISNEY_Init(Section*);
 void                PS1SOUND_Init(Section*);
 void                INNOVA_Init(Section*);
+void                IMFC_Init(Section*);
 void                SERIAL_Init(Section*);
 void                DONGLE_Init(Section*);
 #if C_IPX
@@ -605,6 +608,7 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
                has taken place are most likely caused by heavy load through a
                different application, the cycles adjusting is skipped as well */
             if ((ratio > 120) || (ticksDone < 700)) {
+                RDTSC_rebase();
                 CPU_CycleMax = new_cmax;
                 if (CPU_CycleLimit > 0) {
                     if (CPU_CycleMax > CPU_CycleLimit) CPU_CycleMax = CPU_CycleLimit;
@@ -624,6 +628,7 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
         /* ticksAdded > 15 but ticksScheduled < 5, lower the cycles
            but do not reset the scheduled/done ticks to take them into
            account during the next auto cycle adjustment */
+        RDTSC_rebase();
         CPU_CycleMax /= 3;
         if (CPU_CycleMax < CPU_CYCLES_LOWER_LIMIT)
             CPU_CycleMax = CPU_CYCLES_LOWER_LIMIT;
@@ -685,6 +690,7 @@ static void DOSBOX_UnlockSpeed( bool pressed ) {
         turbolasttick = GetTicks();
         ticksLocked = true;
         if (CPU_CycleAutoAdjust) {
+            RDTSC_rebase();
             autoadjust = true;
             CPU_CycleAutoAdjust = false;
             CPU_CycleMax /= 3;
@@ -1011,7 +1017,7 @@ void DOSBOX_RealInit() {
 
     LOG(LOG_MISC,LOG_DEBUG)("DOSBOX-X RealInit: loading settings and initializing");
 
-    MAPPER_AddHandler(DOSBOX_UnlockSpeed, MK_rightarrow, MMODHOST,"speedlock","Toggle Speedlock");
+    MAPPER_AddHandler(DOSBOX_UnlockSpeed2, MK_rightarrow, MMODHOST,"speedlock","Toggle Speedlock");
     {
         MAPPER_AddHandler(DOSBOX_UnlockSpeed2, MK_nothing, 0, "speedlock2", "Turbo (Fast Forward)", &item);
         item->set_description("Toggle emulation speed, to allow running faster than realtime (fast forward)");
@@ -1093,6 +1099,8 @@ void DOSBOX_RealInit() {
     //       base video of it's own, and then to specify an ISA or PCI card attached to the bus that
     //       provides video.
     std::string mtype(section->Get_string("machine"));
+    hercCard = HERC_GraphicsCard;
+    atiCard = ATI_VGAWonder;
     svgaCard = SVGA_None;
     s3Card = S3_Generic;
     machine = MCH_VGA;
@@ -1110,7 +1118,18 @@ void DOSBOX_RealInit() {
     else if (mtype == "pcjr")          { machine = MCH_PCJR; }
     else if (mtype == "pcjr_composite") { machine = MCH_PCJR; cga_comp = 1; new_cga = false; }
     else if (mtype == "pcjr_composite2"){ machine = MCH_PCJR; cga_comp = 1; new_cga = true; }
-    else if (mtype == "hercules")      { machine = MCH_HERC; }
+    else if (mtype == "hercules")      { machine = MCH_HERC; hercCard = HERC_GraphicsCard; }
+    else if (mtype == "hercules_plus") { machine = MCH_HERC; hercCard = HERC_GraphicsCardPlus; }
+    else if (mtype == "hercules_incolor") { machine = MCH_HERC; hercCard = HERC_InColor; }
+    else if (mtype == "hercules_color") { machine = MCH_CGA; mono_cga = false; new_cga = true; } /* guess */
+    else if (mtype == "svga_ati_egavgawonder") { svgaCard = SVGA_ATI; atiCard = ATI_EGAVGAWonder; }
+    else if (mtype == "svga_ati_vgawonder") { svgaCard = SVGA_ATI; atiCard = ATI_VGAWonder; }
+    else if (mtype == "svga_ati_vgawonderplus") { svgaCard = SVGA_ATI; atiCard = ATI_VGAWonderPlus; }
+    else if (mtype == "svga_ati_vgawonderxl") { svgaCard = SVGA_ATI; atiCard = ATI_VGAWonderXL; }
+    else if (mtype == "svga_ati_vgawonderxl24") { svgaCard = SVGA_ATI; atiCard = ATI_VGAWonderXL24; }
+    else if (mtype == "svga_ati_mach8") { svgaCard = SVGA_ATI; atiCard = ATI_Mach8; }
+    else if (mtype == "svga_ati_mach32") { svgaCard = SVGA_ATI; atiCard = ATI_Mach32; }
+    else if (mtype == "svga_ati_mach64") { svgaCard = SVGA_ATI; atiCard = ATI_Mach64; }
     else if (mtype == "mda")           { machine = MCH_MDA; }
     else if (mtype == "ega")           { machine = MCH_EGA; ega200 = false; }
     else if (mtype == "ega200")        { machine = MCH_EGA; ega200 = true; }
@@ -1356,7 +1375,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* machines[] = {
         "mda",
         "cga", "cga_mono", "cga_rgb", "cga_composite", "cga_composite2",
-        "hercules",
+        "hercules","hercules_plus","hercules_incolor", "hercules_color",
         "tandy",
         "pcjr", "pcjr_composite", "pcjr_composite2",
         "amstrad",
@@ -1376,11 +1395,19 @@ void DOSBOX_SetupConfigSections(void) {
         "svga_paradise",
         "vesa_nolfb", "vesa_oldvbe", "vesa_oldvbe10",
         "pc98", "pc9801", "pc9821",
-        "fm_towns", // STUB
+	"svga_ati_egavgawonder",
+	"svga_ati_vgawonder",
+	"svga_ati_vgawonderplus",
+	"svga_ati_vgawonderxl",
+	"svga_ati_vgawonderxl24",
+	"svga_ati_mach8",
+	"svga_ati_mach32",
+	"svga_ati_mach64",
+	"fm_towns", // STUB
         0 };
 
     const char* backendopts[] = {
-        "pcap", "slirp", "auto", "none",
+        "pcap", "slirp", "nothing", "auto", "none",
         0 };
 
     const char* workdiropts[] = {
@@ -1585,7 +1612,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("compresssaveparts", Property::Changeable::WhenIdle,true);
     Pbool->Set_help("If set, DOSBox-X will compress components of saved states to save space.");
 
-    Pbool = secprop->Add_bool("show recorded filename", Property::Changeable::WhenIdle,true);
+    Pbool = secprop->Add_bool("show recorded filename", Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, DOSBox-X will show message boxes with recorded filenames when making audio or video captures.");
 
     /* will change to default true unless this causes compatibility issues with other users or their editing software */
@@ -1797,8 +1824,15 @@ void DOSBOX_SetupConfigSections(void) {
             "A few DOS games & demos require this option to be set:\n"
             "     Majic 12 \"Show\": If UMBs are enabled, set this option to 639 to avoid MCB chain corruption error.");
 
-    Pbool = secprop->Add_bool("isa memory hole at 512kb",Property::Changeable::WhenIdle,false);
-    Pbool->Set_help("If set, emulate an ISA memory hole at the 512KB to 640KB area (0x80000-0x9FFFF).");
+    Pstring = secprop->Add_string("isa memory hole at 512kb",Property::Changeable::WhenIdle,"auto");
+    Pstring->Set_values(truefalseautoopt);
+    Pstring->Set_help("If set, emulate an ISA memory hole at the 512KB to 640KB area (0x80000-0x9FFFF).");
+
+    Pstring = secprop->Add_string("isa memory hole at 15mb",Property::Changeable::WhenIdle,"auto");
+    Pstring->Set_values(truefalseautoopt);
+    Pstring->Set_help("If set, emulate an ISA memory hole at the 15MB to 16MB area (0xF00000-0xFFFFFF).\n"
+		    "If auto, hole is disabled by default for IBM compatible modes and enabled by default for NEC PC-98 compatible modes.\n"
+		    "The reason for this is that the hole is needed for the PC-9821 256-color mode linear framebuffer to work with some DOS games even when memsize >= 16.");
 
     Pint = secprop->Add_int("reboot delay", Property::Changeable::WhenIdle,-1);
     Pint->SetMinMax(-1,10000);
@@ -1928,37 +1962,67 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_help(
         "Aspect ratio correction mode. Can be set to the following values:\n"
         "  'false' (default):\n"
-        "      'direct3d'/opengl outputs: image is simply scaled to full window/fullscreen size, possibly resulting in disproportional image\n"
-        "      'surface' output: it does no aspect ratio correction (default), resulting in disproportional images if VGA mode pixel ratio is not 4:3\n"
+        "      'direct3d'/opengl outputs: image is simply scaled to full\n"
+        "         window/fullscreen size, possibly resulting in dis-\n"
+        "         proportional image\n"
+        "      'surface' output: it does no aspect ratio correction,\n"
+        "         resulting in disproportional images if VGA mode pixel\n"
+        "         ratio is not 4:3 (default)\n"
         "  'true':\n"
-        "      'direct3d'/opengl outputs: uses output driver functions to scale / pad image with black bars, correcting output to proportional 4:3 image\n"
-        "          In most cases image degradation should not be noticeable (it all depends on the video adapter and how much the image is upscaled).\n"
-        "          Should have none to negligible impact on performance, mostly being done in hardware\n"
-        "          For the pixel-perfect scaling (output=openglpp), it is recommended to enable this whenever the emulated display has an aspect ratio of 4:3\n"
-        "      'surface' output: inherits old DOSBox aspect ratio correction method (adjusting rendered image line count to correct output to 4:3 ratio)\n"
-        "          Due to source image manipulation this mode does not mix well with scalers, i.e. multiline scalers like hq2x/hq3x will work poorly\n"
-        "          Slightly degrades visual image quality. Has a tiny impact on performance"
+        "      'direct3d'/opengl outputs: uses output driver functions to\n"
+        "         scale / pad image with black bars, correcting output \n"
+        "         to proportional 4:3 image\n"
+        "         In most cases image degradation should not be noticeable\n"
+        "        (it all depends on the video adapter and how much the image\n"
+        "         is upscaled).\n"
+        "         Should have none to negligible impact on performance,\n"
+        "         mostly being done in hardware.\n"
+        "         For the pixel-perfect scaling (output=openglpp), it is\n"
+        "         recommended to enable this whenever the emulated display\n"
+        "         has an aspect ratio of 4:3\n"
+        "      'surface' output: inherits old DOSBox aspect ratio correction\n"
+        "         method (adjusting rendered image line count to correct\n"
+        "         output to 4:3 ratio)\n"
+        "         Due to source image manipulation this mode does not mix\n"
+        "         well with scalers, i.e. multiline scalers like hq2x/hq3x\n"
+        "         will work poorly\n"
+        "         Slightly degrades visual image quality. Has a tiny impact\n"
+        "         on performance."
 #if C_XBRZ
         "\n"
-        "          When using xBRZ scaler with 'surface' output, aspect ratio correction is done by the scaler itself, so none of the above apply"
+        "         When using xBRZ scaler with 'surface' output, aspect\n"
+        "         ratio correction is done by the scaler itself, so none of\n"
+        "         the above apply."
 #endif
 #if C_SURFACE_POSTRENDER_ASPECT
         "\n"
         "  'nearest':\n"
-        "      'direct3d'/opengl outputs: not available, fallbacks to 'true' mode automatically\n"
-        "      'surface' output: scaler friendly aspect ratio correction, works by rescaling rendered image using nearest neighbor scaler\n"
-        "          Complex scalers work. Image quality is on par with 'true' mode (and better with scalers). More CPU intensive than 'true' mode\n"
+        "      'direct3d'/opengl outputs: not available, fallbacks to 'true'\n"
+        "         mode automatically\n"
+        "      'surface' output: scaler friendly aspect ratio correction, \n"
+        "         works by rescaling rendered image using nearest neighbor\n"
+        "         scaler.\n"
+        "         Complex scalers work. Image quality is on par with 'true'\n"
+        "         mode (and better with scalers). More CPU intensive than\n"
+        "         'true' mode\n"
 #if C_XBRZ
-        "          When using xBRZ scaler with 'surface' output, aspect ratio correction is done by the scaler itself, so it fallbacks to 'true' mode\n"
+        "         When using xBRZ scaler with 'surface' output, aspect\n"
+        "         ratio correction is done by the scaler itself, so it\n"
+        "         falls back to 'true' mode.\n"
 #endif
         "  'bilinear':\n"
-        "      'direct3d'/opengl outputs: not available, fallbacks to 'true' mode automatically\n"
-        "      'surface' output: scaler friendly aspect ratio correction, works by rescaling rendered image using bilinear scaler\n"
-        "          Complex scalers work. Image quality is much better, should be on par with using 'direct3d' output + 'true' mode\n"
-        "          Very CPU intensive, high end CPU may be required"
+        "      'direct3d'/opengl outputs: not available, fallbacks to 'true'\n"
+        "         mode automatically\n"
+        "      'surface' output: scaler friendly aspect ratio correction,\n"
+        "         works by rescaling rendered image using bilinear scaler.\n"
+        "         Complex scalers work. Image quality is much better,\n"
+        "         should be on par with using 'direct3d' output + 'true'\n"
+        "         mode. Very CPU intensive, high end CPU may be required."
 #if C_XBRZ
         "\n"
-        "          When using xBRZ scaler with 'surface' output, aspect ratio correction is done by the scaler itself, so it fallbacks to 'true' mode"
+        "         When using xBRZ scaler with 'surface' output, aspect\n"
+        "         ratio correction is done by the scaler itself, so it\n"
+        "         falls back to 'true' mode."
 #endif
 #endif
     );
@@ -1980,21 +2044,24 @@ void DOSBOX_SetupConfigSections(void) {
     /* NTS: In the original code borrowed from yhkong, this was named "multiscan". All it really does is disable
      *      the doublescan down-rezzing DOSBox normally does with 320x240 graphics so that you get the full rendition of what a VGA output would emit. */
     Pbool = secprop->Add_bool("doublescan",Property::Changeable::Always,true);
-    Pbool->Set_help("If set, doublescanned output emits two scanlines for each source line, in the\n"
-            "same manner as the actual VGA output (320x200 is rendered as 640x400 for example).\n"
+    Pbool->Set_help("If set, doublescanned output emits two scanlines for each source line, "
+            "in the same manner as the actual VGA output (320x200 is rendered as 640x400 for example).\n"
             "If clear, doublescanned output is rendered at the native source resolution (320x200 as 320x200).\n"
-            "This affects the raster PRIOR to the software or hardware scalers. Choose wisely.\n"
+            "This affects the raster PRIOR to the software or hardware scalers.\n"
+            "Setting this option may prevent some scalers to work as expected.\n"
+            "Try turning this option off in such case.\n"
             "For pixel-perfect scaling (output=openglpp), it is recommended to turn this option off.");
     Pbool->SetBasic(true);
 
     Pmulti = secprop->Add_multi("scaler",Property::Changeable::Always," ");
     Pmulti->SetValue("normal2x",/*init*/true);
-    Pmulti->Set_help("Scaler used to enlarge/enhance low resolution modes. If 'forced' is appended,\n"
-                     "then the scaler will be used even if the result might not be desired.\n"
-                     "Appending 'prompt' will cause a confirmation message for forcing the scaler.\n"
-                     "To fit a scaler in the resolution used at full screen may require a border or side bars.\n"
-                     "To fill the screen entirely, depending on your hardware, a different scaler/fullresolution might work.\n"
-                     "Scalers should work with most output options, but they are ignored for openglpp and TrueType font outputs.");
+    Pmulti->Set_help("Scaler used to enlarge/enhance low resolution modes. Add keyword 'forced', "
+            "after the name of the scaler to always use the scaler even if the result might not be desired."
+            "(e.g. 'normal2x forced')\n"
+            "Appending 'prompt' will cause a confirmation message for forcing the scaler.\n"
+            "To fit a scaler in the resolution used at full screen may require a border or side bars.\n"
+            "To fill the screen entirely, depending on your hardware, a different scaler/fullresolution might work.\n"
+            "Scalers should work with most output options, but they are ignored for openglpp and TrueType font outputs.");
     Pmulti->SetBasic(true);
     Pstring = Pmulti->GetSection()->Add_string("type",Property::Changeable::Always,"normal2x");
     Pstring->Set_values(scalers);
@@ -2004,15 +2071,15 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pstring = secprop->Add_path("glshader",Property::Changeable::Always,"none");
     Pstring->Set_help("Path to GLSL shader source to use with OpenGL output (\"none\" to disable, or \"default\" for default shader).\n"
-                    "Can be either an absolute path, a file in the \"glshaders\" subdirectory of the DOSBox-X configuration directory,\n"
-                    "or one of the built-in shaders (e.g. \"sharp\" for the pixel-perfect scaling mode):\n"
-                    "advinterp2x, advinterp3x, advmame2x, advmame3x, rgb2x, rgb3x, scan2x, scan3x, tv2x, tv3x, sharp.");
+            "Can be either an absolute path, a file in the \"glshaders\" subdirectory of the DOSBox-X configuration directory, "
+            "or one of the built-in shaders (e.g. \"sharp\" for the pixel-perfect scaling mode):\n"
+            "advinterp2x, advinterp3x, advmame2x, advmame3x, rgb2x, rgb3x, scan2x, scan3x, tv2x, tv3x, sharp.");
     Pstring->SetBasic(true);
 
     Pmulti = secprop->Add_multi("pixelshader",Property::Changeable::Always," ");
     Pmulti->SetValue("none",/*init*/true);
-    Pmulti->Set_help("Set Direct3D pixel shader program (effect file must be in Shaders subdirectory). If 'forced' is appended,\n"
-        "then the pixel shader will be used even if the result might not be desired.");
+    Pmulti->Set_help("Set Direct3D pixel shader program (effect file must be in Shaders subdirectory). If 'forced' is appended, "
+            "then the pixel shader will be used even if the result might not be desired.");
     Pmulti->SetBasic(true);
 
     Pstring = Pmulti->GetSection()->Add_string("type",Property::Changeable::Always,"none");
@@ -2034,20 +2101,17 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("autofit",Property::Changeable::Always,true);
     Pbool->Set_help(
-        "Best fits image to window\n"
-        "- Intended for output=direct3d, fullresolution=original, aspect=true");
+           "Best fits image to window\n"
+           "  Intended for output=direct3d, fullresolution=original, aspect=true");
     Pbool->SetBasic(true);
 
     Pmulti = secprop->Add_multi("monochrome_pal",Property::Changeable::Always," ");
     Pmulti->SetValue("green",/*init*/true);
     Pmulti->Set_help("Specify the color of monochrome display.\n"
-        "Possible values: green, amber, gray, white\n"
-        "Append 'bright' for a brighter look.");
+            "Append 'bright' for a brighter look.");
     Pmulti->SetBasic(true);
     Pstring = Pmulti->GetSection()->Add_string("color",Property::Changeable::Always,"green");
-    const char* monochrome_pal_colors[]={
-      "green","amber","gray","white",0
-    };
+    const char* monochrome_pal_colors[]={"green","amber","gray","white",0};
     Pstring->Set_values(monochrome_pal_colors);
     Pstring = Pmulti->GetSection()->Add_string("bright",Property::Changeable::Always,"");
     const char* bright[] = { "", "bright", 0 };
@@ -2060,13 +2124,13 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("pc-98 int 1b fdc timer wait",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, INT 1Bh floppy access will wait for the timer to count down before returning.\n"
-                    "This is needed for Ys II to run without crashing.");
+            "This is needed for Ys II to run without crashing.");
 
     Pbool = secprop->Add_bool("pc-98 pic init to read isr",Property::Changeable::WhenIdle,true);
-    Pbool->Set_help("If set, the programmable interrupt controllers are initialized by default (if PC-98 mode)\n"
-                    "so that the in-service interrupt status can be read immediately. There seems to be a common\n"
-                    "convention in PC-98 games to program and/or assume this mode for cooperative interrupt handling.\n"
-                    "This option is enabled by default for best compatibility with PC-98 games.");
+    Pbool->Set_help("If set, the programmable interrupt controllers are initialized by default (if PC-98 mode) "
+            "so that the in-service interrupt status can be read immediately. There seems to be a common "
+            "convention in PC-98 games to program and/or assume this mode for cooperative interrupt handling. "
+            "This option is enabled by default for best compatibility with PC-98 games.");
 
     Pstring = secprop->Add_string("pc-98 fm board",Property::Changeable::Always,"auto");
     Pstring->Set_values(pc98fmboards);
@@ -2649,11 +2713,12 @@ void DOSBOX_SetupConfigSections(void) {
 		    "If graphical artifacts or errors occur, try turning this off first. May provide a performance benefit.");
     Pbool->SetBasic(true);
 
-    Pbool = secprop->Add_bool("scanline render on demand",Property::Changeable::Always,false);
-    Pbool->Set_help("Render video output at vsync or when something is changed mid frame, instead of stopping to render every scanline.\n"
+    Pstring = secprop->Add_string("scanline render on demand",Property::Changeable::Always,"auto");
+    Pstring->Set_values(truefalseautoopt);
+    Pstring->Set_help("Render video output at vsync or when something is changed mid frame, instead of stopping to render every scanline.\n"
 		    "May provide a performance benefit to most DOS games. However this may also break timing-dependent game or Demoscene effects.\n"
-		    "Default OFF (false)");
-    Pbool->SetBasic(true);
+		    "Default auto, which will turn if off for VGA modes and turn it on for SVGA modes.");
+    Pstring->SetBasic(true);
 
     secprop=control->AddSection_prop("vsync",&Null_Init,true);//done
 
@@ -2691,6 +2756,11 @@ void DOSBOX_SetupConfigSections(void) {
             "If not set, then emulation will act as if the PSN has been disabled by the BIOS.\n"
 	    "Enter as 4 sets of 16-bit hexadecimal digits XXXX-XXXX-XXXX-XXXX.\n"
 	    "Note that the processor info and feature bits form the topmost 32 bits of the PSN and cannot be changed.");
+
+    Pint = secprop->Add_int("rdtsc rate",Property::Changeable::Always,0);
+    Pint->SetMinMax(0,0x7FFFFFFE);
+    Pint->Set_help("If nonzero, the Pentium RDTSC counter will tick at this rate per millisecond instead of by the cycle count");
+    Pint->SetBasic(true);
 
     Pbool = secprop->Add_bool("segment limits",Property::Changeable::Always,true);
     Pbool->Set_help("Enforce checks for segment limits on 80286 and higher CPU types.");
@@ -3131,7 +3201,7 @@ void DOSBOX_SetupConfigSections(void) {
                       "See the README/Manual for more details.");
     Pstring->SetBasic(true);
 
-    Pint = secprop->Add_int("samplerate",Property::Changeable::WhenIdle,44100);
+    Pint = secprop->Add_int("samplerate",Property::Changeable::WhenIdle,48000);
     Pint->Set_values(rates);
     Pint->Set_help("Sample rate for MIDI synthesizer, if applicable.");
     Pint->SetBasic(true);
@@ -3480,7 +3550,7 @@ void DOSBOX_SetupConfigSections(void) {
 		"'nuked' is the most accurate (but the most CPU-intensive). See oplrate as well.");
     Pstring->SetBasic(true);
 
-    Pint = secprop->Add_int("oplrate",Property::Changeable::WhenIdle,44100);
+    Pint = secprop->Add_int("oplrate",Property::Changeable::WhenIdle,48000);
     Pint->Set_values(rates);
     Pint->Set_help("Sample rate of OPL music emulation. Use 49716 for highest quality (set the mixer rate accordingly).");
     Pint->SetBasic(true);
@@ -3644,7 +3714,7 @@ void DOSBOX_SetupConfigSections(void) {
             "accurate emulation attempts to better reflect how the actual hardware handles panning,\n"
             "while the old emulation uses a simpler idealistic mapping.");
 
-    Pint = secprop->Add_int("gusrate",Property::Changeable::WhenIdle,44100);
+    Pint = secprop->Add_int("gusrate",Property::Changeable::WhenIdle,48000);
     Pint->Set_values(rates);
     Pint->Set_help("Sample rate of Ultrasound emulation.");
     Pint->SetBasic(true);
@@ -3718,6 +3788,23 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->Set_help("Set SID emulation quality level (0 to 3).");
     Pint->SetBasic(true);
 
+    secprop = control->AddSection_prop("imfc", &Null_Init, Property::Changeable::WhenIdle);
+    Pbool = secprop->Add_bool("imfc", Property::Changeable::WhenIdle, false);
+    Pbool->Set_help("Enable the IBM Music Feature Card (disabled by default).");
+    Phex = secprop->Add_hex("imfc_base", Property::Changeable::WhenIdle, 0x2A20);
+    const char* const bases[] = { "2A20", "2A30", nullptr };
+    Phex->Set_values(bases);
+    Phex->Set_help("The IO base address of the IBM Music Feature Card (2A20 by default).");
+    Pint = secprop->Add_int("imfc_irq", Property::Changeable::WhenIdle, 3);
+    const char* const irqs[] = { "2", "3", "4", "5", "6", "7", nullptr };
+    Pint->Set_values(irqs);
+    Pint->Set_help("The IRQ number of the IBM Music Feature Card (3 by default).");
+    Pstring = secprop->Add_string("imfc_filter", Property::Changeable::WhenIdle, "on");
+    Pstring->Set_help(
+        "Filter for the IBM Music Feature Card output:\n"
+        "  on:        Filter the output (default).\n"
+        "  off:       Don't filter the output.");
+
     secprop = control->AddSection_prop("speaker",&Null_Init,true);//done
     Pbool = secprop->Add_bool("pcspeaker",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Enable PC-Speaker emulation.");
@@ -3750,7 +3837,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_help("Enable Tandy Sound System emulation. For 'auto', emulation is present only if machine is set to 'tandy'.");
     Pstring->SetBasic(true);
 
-    Pint = secprop->Add_int("tandyrate",Property::Changeable::WhenIdle,44100);
+    Pint = secprop->Add_int("tandyrate",Property::Changeable::WhenIdle,48000);
     Pint->Set_values(rates);
     Pint->Set_help("Sample rate of the Tandy 3-Voice generation.");
     Pint->SetBasic(true);
@@ -3892,6 +3979,7 @@ void DOSBOX_SetupConfigSections(void) {
         "    shellhide to hide the command window when opening programs on the Windows platform.\n"
         "    openwith:<program>: start a program to open the output file.\n"
         "    openerror:<program>: start a program to open the output file if an error had occurred.\n"
+        "    multiplier:<x>: Actual baud rate is the programmed rate times X to allow rates higher than 115200.\n"
         "Example: serial1=file file:output1.txt timeout:1000 openwith:notepad\n"
         "for directserial: realport (required), rxdelay (optional).\n"
         "                 (realport:COM1 realport:ttyS0).\n"
@@ -4594,11 +4682,12 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->Set_help("The interrupt it uses. Note serial2 uses IRQ3 as default.");
     Pint->SetBasic(true);
 
-    Pstring = secprop->Add_string("macaddr", Property::Changeable::WhenIdle,"AC:DE:48:88:99:AA");
+    Pstring = secprop->Add_string("macaddr", Property::Changeable::WhenIdle,"random");
     Pstring->Set_help("The MAC address the emulator will use for its network adapter.\n"
         "If you have multiple DOSBox-Xes running on the same network,\n"
         "this has to be changed for each. AC:DE:48 is an address range reserved for\n"
-        "private use, so modify the last three number blocks, e.g. AC:DE:48:88:99:AB.");
+        "private use, so modify the last three number blocks, e.g. AC:DE:48:88:99:AB.\n"
+        "Default setting is 'random' which randomly choses a MAC address.");
     Pstring->SetBasic(true);
 
     Pstring = secprop->Add_string("backend", Property::Changeable::WhenIdle, "auto");
@@ -4942,3 +5031,49 @@ private:
 	}
 } dummy;
 }
+
+#if defined(_WIN32_WINDOWS) && defined(__MINGW64_VERSION_MAJOR) //win9x && mingw-w64 toolchain
+
+//win9x's default msvcrt.dll doesn't have fstat64
+//used by libstdc++
+#include <sys/stat.h>
+#undef _fstat
+extern "C" int __cdecl internal_fstat64(int _FileDes,struct _stat64 *_Stat)
+{
+    struct stat st;
+    //memset(&st,0,sizeof(st));
+    int ret = fstat(_FileDes, &st);
+    if (ret == -1) {
+      memset(_Stat,0,sizeof(*_Stat));
+      return -1;
+    }
+    _Stat->st_dev=st.st_dev;
+    _Stat->st_ino=st.st_ino;
+    _Stat->st_mode=st.st_mode;
+    _Stat->st_nlink=st.st_nlink;
+    _Stat->st_uid=st.st_uid;
+    _Stat->st_gid=st.st_gid;
+    _Stat->st_rdev=st.st_rdev;
+    _Stat->st_size=(_off_t) st.st_size;
+    _Stat->st_atime=st.st_atime;
+    _Stat->st_mtime=st.st_mtime;
+    _Stat->st_ctime=st.st_ctime;
+    return ret;
+}
+extern "C" int __cdecl (*__MINGW_IMP_SYMBOL(_fstat64))(int,struct _stat64*) = internal_fstat64;
+
+//win9x's default msvcrt.dll doesn't have strtoll/strtoull/strtoi64
+//libstdc++ (__USE_MINGW_ANSI_STDIO=1)
+//strtoll = _strtoi64
+//*scanf -> __mingw_*scanf -> strtoll 
+extern "C" long long  __cdecl strtoll(const char * __restrict__ str, char ** __restrict ptr, int base)
+{
+    return strtol(str, ptr, base);
+}
+
+extern "C" unsigned long long  __cdecl strtoull(const char * __restrict__ str, char ** __restrict ptr, int base)
+{
+    return strtoul(str, ptr, base);
+}
+
+#endif

@@ -103,27 +103,36 @@ sudo make install
     make dosbox-x.app
     ```
 
-* MinGW compile (using MinGW-w64) for Windows Vista/7 or later (SDL1)
-```
-./build-mingw
-```
+* MinGW compile for Windows 7 or later
+  * First install the required libraries needed.  
+    Libraries for mingw32(32-bit)
+    ```
+    pacman -S git make mingw-w64-i686-toolchain mingw-w64-i686-libslirp mingw-w64-i686-libtool mingw-w64-i686-nasm autoconf automake mingw-w64-i686-ncurses
+    ```
+    Libraries for mingw64(64-bit)
+    ```
+    pacman -S git make mingw-w64-x86_64-toolchain mingw-w64-x86_64-libslirp mingw-w64-x86_64-libtool mingw-w64-x86_64-nasm autoconf automake  mingw-w64-x86_64-ncurses
+    ```
+  * Compile SDL1 (32-bit or 64-bit)
+    ```
+    ./build-mingw
+    ```
+    Compile SDL2 (32-bit or 64-bit)
+    ```
+    ./build-mingw-sdl2
+    ```
 
-* MinGW compile (using MinGW-w64) for Windows Vista/7 or later (SDL2)
-```
-./build-mingw-sdl2
-```
-
-* MinGW compile (using MinGW32, not MinGW-w64) for lower-end systems including Windows XP or later (SDL1)
+* MinGW compile (using MinGW32, not MinGW-w64: see NOTICE below) for lower-end systems including Windows XP or later (SDL1)
 ```
 ./build-mingw-lowend
 ```
 
-* MinGW compile (using MinGW32, not MinGW-w64) for lower-end systems including Windows XP or later (SDL2)
+* MinGW compile (using MinGW32, not MinGW-w64: see NOTICE below) for lower-end systems including Windows XP or later (SDL2)
 ```
 ./build-mingw-lowend-sdl2
 ```
 
-* MinGW compile (using MinGW32, not MinGW-w64) on Windows to target the DOS platform (MS-DOS or compatible with HX DOS Extender)
+* MinGW compile (using MinGW32, not MinGW-w64: see NOTICE below) on Windows to target the DOS platform (MS-DOS or compatible with HX DOS Extender)
 ```
 ./build-mingw-hx-dos
 ```
@@ -192,20 +201,24 @@ Compiling the source code using Visual Studio (Windows)
 You can build the source code with Visual Studio 2017, 2019, and 2022.
 (The code currently cannot be built with Visual Studio 2015)
 The executables will work on 32-bit and 64-bit Windows Vista or higher.
-If you want the executables to work on Windows XP, you can patch the PE header
-using a tool included in the source code.
-
-```./contrib/windows/installer/PatchPE.exe path-to-your-exe-file/dosbox-x.exe```
 
 Use the ```./vs/dosbox-x.sln``` "solution" file and build the source code.
 You will need the DirectX 2010 SDK for Direct3D9 support.
 
 By default the targeted platform is v142 (Visual Studio 2019).
-For building the source code in Visual Studio 2017 or 2022,
+To build the source code on Visual Studio 2017 or 2022,
 you may change the platform toolset to v141 or v143 respectively.
 For Visual Studio 2017, you have to set ``WindowsTargetPlatformVersion`` to whatever
 Windows SDK version installed in your PC, for example ``10.0.22000.0``.
-(Visual Studio 2019 and beyond will pick the latest Windows SDK version if you set the value to `10.0`)
+(Visual Studio 2019 and beyond will pick the latest Windows SDK version installed
+if you set the value to `10.0`)
+
+To build executables that will work on Windows XP,
+you have to change the target platform to v141 (Visual Studio 2017).
+After the build is completed, you have to patch the PE header of the executable using
+a tool included in the source code.
+
+```./contrib/windows/installer/PatchPE.exe path-to-your-exe-file/dosbox-x.exe```
 
 Libraries such as SDL, freetype, libpdcurses, libpng and zlib are already included,
 and as of DOSBox-X 0.83.6 support for FluidSynth MIDI Synthesizer is also included

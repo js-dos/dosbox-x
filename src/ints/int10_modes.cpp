@@ -35,6 +35,8 @@
 #include "sdlmain.h"
 #include "bitop.h"
 
+#include <output/output_ttf.h>
+
 #define SEQ_REGS 0x05
 #define GFX_REGS 0x09
 #define ATT_REGS 0x15
@@ -103,6 +105,7 @@ VideoModeBlock ModeList_VGA[]={
 
 /* Toshiba T3100, J-3100 */
 { 0x074  ,M_DCGA   ,640 ,400 ,80 ,25 ,8 ,16 ,1 ,0xB8000 ,0x8000 ,100 ,449 ,80 ,400 ,0	},
+{ 0x075  ,M_EGA    ,640 ,400 ,80 ,25 ,8 ,16 ,1 ,0xA0000 ,0xA000 ,100 ,525 ,80 ,400 ,0	},
 
 /* Follow vesa 1.2 for first 0x20 */
 { 0x100  ,M_LIN8   ,640 ,400 ,80 ,25 ,8 ,16 ,1 ,0xA0000 ,0x10000,100 ,449 ,80 ,400 ,0   },
@@ -397,6 +400,7 @@ VideoModeBlock ModeList_VGA_Tseng[]={
 
 /* Toshiba T3100, J-3100 */
 { 0x074  ,M_DCGA   ,640 ,400 ,80 ,25 ,8 ,16 ,1 ,0xB8000 ,0x8000 ,100 ,449 ,80 ,400 ,0	},
+{ 0x075  ,M_EGA    ,640 ,400 ,80 ,25 ,8 ,16 ,1 ,0xA0000 ,0xA000 ,100 ,525 ,80 ,400 ,0	},
 
 // Sierra SC1148x Hi-Color DAC modes
 { 0x213  ,M_LIN15  ,320 ,200 ,40 ,25 ,8 ,8  ,1 ,0xA0000 ,0x10000,100 ,449 ,80 ,400 , _VGA_PIXEL_DOUBLE | _REPEAT1 },
@@ -697,7 +701,11 @@ static bool SetCurMode(VideoModeBlock modeblock[],uint16_t mode) {
 		else {
 			if ((!int10.vesa_oldvbe) || (ModeList_VGA[i].mode<0x120)) {
 				CurMode=&modeblock[i];
-				return true;
+#if defined(USE_TTF)
+                if(modeblock[i].type == M_TEXT) ttf_switch_on(false);
+                else ttf_switch_off(false); // Disable TTF output when switching to graphics mode
+#endif
+                return true;
 			}
 			return false;
 		}
@@ -862,7 +870,9 @@ static void FinishSetMode(bool clearmem) {
 	real_writew(BIOSMEM_SEG,BIOSMEM_PAGE_SIZE,(uint16_t)CurMode->plength);
 	real_writew(BIOSMEM_SEG,BIOSMEM_CRTC_ADDRESS,((CurMode->mode==7 )|| (CurMode->mode==0x0f)) ? 0x3b4 : 0x3d4);
 
-	if (IS_EGAVGA_ARCH) {
+	/* NTS: According to the IBM PS/2 BIOS interface Technical Reference (1987), BIOS DATA area fields
+	 *      for number of rows and so on DO exist even for MCGA. */
+	if (IS_EGAVGA_ARCH || machine == MCH_MCGA) {
 		real_writeb(BIOSMEM_SEG,BIOSMEM_NB_ROWS,(uint8_t)(CurMode->theight-1));
 		real_writew(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT,(uint16_t)CurMode->cheight);
 		real_writeb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL,(0x60|(clearmem?0:0x80)));
@@ -932,7 +942,7 @@ bool INT10_SetVideoMode_OTHER(uint16_t mode,bool clearmem) {
 				LOG(LOG_INT10,LOG_ERROR)("Trying to set illegal mode %X",mode);
 				return false;
 			}
-			break;
+            break;
 		case MCH_MCGA:
 			if (!SetCurMode(ModeList_MCGA,mode)) {
 				LOG(LOG_INT10,LOG_ERROR)("Trying to set illegal mode %X",mode);
@@ -1063,8 +1073,13 @@ bool INT10_SetVideoMode_OTHER(uint16_t mode,bool clearmem) {
 		case MCH_HERC:
 			IO_WriteB(0x3b8,0x28);	// TEXT mode and blinking characters
 
-			Herc_Palette();
-			VGA_DAC_CombineColor(0,0);
+			if (hercCard >= HERC_InColor) {
+				VGA_ATTR_SetEGAMonitorPalette(EGA);
+			}
+			else {
+				Herc_Palette();
+				VGA_DAC_CombineColor(0,0);
+			}
 
 			real_writeb(BIOSMEM_SEG,BIOSMEM_CURRENT_MSR,0x29); // attribute controls blinking
 			break;
@@ -1837,6 +1852,8 @@ bool INT10_SetVideoMode(uint16_t mode) {
 				case 0x10:
 				case 0x12: 
 					goto att_text16;
+				case 0x75: 
+					if(IS_J3100) goto att_text16;
 				default:
 					if ( CurMode->type == M_LIN4 )
 						goto att_text16;
@@ -2309,7 +2326,6 @@ VideoModeBlock ModeList_DOSV[]={
 /* mode  ,type     ,sw  ,sh  ,tw ,th ,cw,ch ,pt,pstart  ,plength,htot,vtot,hde,vde special flags */
 { 0x003  ,M_EGA    ,640 ,480 ,80 ,25 ,8 ,19 ,1 ,0xA0000 ,0xA000 ,100 ,525 ,80 ,480 ,0	},
 { 0x070  ,M_EGA    ,640 ,480 ,80 ,30 ,8 ,16 ,1 ,0xA0000 ,0xA000 ,100 ,525 ,80 ,480 ,0	},
-{ 0x072  ,M_EGA    ,640 ,480 ,80 ,25 ,8 ,19 ,1 ,0xA0000 ,0xA000 ,100 ,525 ,80 ,480 ,0	},
 };
 
 VideoModeBlock ModeList_DOSV_SVGA[]={

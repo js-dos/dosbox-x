@@ -150,14 +150,13 @@ public:
     };
 
     struct vfdentry {
-        uint8_t         track,head,sector;
-        uint16_t        sector_size;
+        uint8_t         track = 0,head = 0,sector = 0;
+        uint16_t        sector_size = 0;
 
-        uint32_t        data_offset;
-        uint32_t        entry_offset; // offset of the 12-byte entry this came from (if nonzero)
+        uint32_t        data_offset = 0;
+        uint32_t        entry_offset = 0; // offset of the 12-byte entry this came from (if nonzero)
 
-        vfdentry() : track(0), head(0), sector(0), sector_size(0), data_offset(0), entry_offset(0) {
-        }
+        vfdentry() {}
 
         uint16_t getSectorSize(void) const {
             return sector_size;
@@ -180,14 +179,13 @@ public:
 	virtual ~imageDiskNFD();
 
     struct vfdentry {
-        uint8_t         track,head,sector;
-        uint16_t        sector_size;
+        uint8_t         track = 0,head = 0,sector = 0;
+        uint16_t        sector_size = 0;
 
-        uint32_t        data_offset;
-        uint32_t        entry_offset; // offset of the 12-byte entry this came from (if nonzero)
+        uint32_t        data_offset = 0;
+        uint32_t        entry_offset = 0; // offset of the 12-byte entry this came from (if nonzero)
 
-        vfdentry() : track(0), head(0), sector(0), sector_size(0), data_offset(0), entry_offset(0) {
-        }
+        vfdentry() {}
 
         uint16_t getSectorSize(void) const {
             return sector_size;
@@ -210,14 +208,13 @@ public:
 	virtual ~imageDiskVFD();
 
     struct vfdentry {
-        uint8_t         track,head,sector,sizebyte;
-        uint8_t         fillbyte;
+        uint8_t         track = 0,head = 0,sector = 0,sizebyte = 0;
+        uint8_t         fillbyte = 0xFF;
 
-        uint32_t        data_offset;
-        uint32_t        entry_offset; // offset of the 12-byte entry this came from (if nonzero)
+        uint32_t        data_offset = 0;
+        uint32_t        entry_offset = 0; // offset of the 12-byte entry this came from (if nonzero)
 
-        vfdentry() : track(0), head(0), sector(0), sizebyte(0), fillbyte(0xFF), data_offset(0), entry_offset(0) {
-        }
+        vfdentry() {}
 
         bool hasSectorData(void) const {
             return fillbyte == 0xFF && data_offset != 0xFFFFFFFFUL;
@@ -281,6 +278,8 @@ public:
 		INVALID_MATCH = 4,
 		INVALID_DATE = 5,
 		UNSUPPORTED_WRITE = 6,
+        UNSUPPORTED_SIZE = 7,
+        ERROR_WRITING = 8,
 		PARENT_ERROR = 0x10,
 		ERROR_OPENING_PARENT = 0x11,
 		PARENT_INVALID_DATA = 0x12,
@@ -295,42 +294,65 @@ public:
 		VHD_TYPE_DYNAMIC = 3,
 		VHD_TYPE_DIFFERENCING = 4
 	};
+    struct Geometry {
+        uint16_t cylinders;
+        uint8_t heads;
+        uint8_t sectors;
+    };
+    struct VHDFooter {
+        char cookie[8];
+        uint32_t features;
+        uint32_t fileFormatVersion;
+        uint64_t dataOffset;
+        uint32_t timeStamp;
+        char creatorApp[4];
+        uint32_t creatorVersion;
+        uint32_t creatorHostOS;
+        uint64_t originalSize;
+        uint64_t currentSize;
+        Geometry geometry;
+        VHDTypes diskType;
+        uint32_t checksum;
+        char uniqueId[16];
+        char savedState;
+        char reserved[427];
+
+        void SwapByteOrder();
+        uint32_t CalculateChecksum();
+        bool IsValid();
+        void SetDefaults();
+    };
+    struct VHDInfo {
+        uint32_t allocatedBlocks;
+        uint32_t totalBlocks;
+        uint32_t blockSize;
+        float vhdSizeMB;
+        uint32_t vhdType;
+        VHDInfo *parentInfo = NULL;
+        std::string diskname;
+    };
     VHDTypes vhdType = VHD_TYPE_NONE;
 	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
 	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
 	static ErrorCodes Open(const char* fileName, const bool readOnly, imageDisk** disk);
 	static VHDTypes GetVHDType(const char* fileName);
 	VHDTypes GetVHDType(void) const;
-	virtual ~imageDiskVHD();
+    static uint32_t GetInfo(const char* filename, VHDInfo** info);
+    uint32_t GetInfo(VHDInfo* info);
+    static uint32_t CreateFixed(const char* filename, uint64_t size); //dummy
+    static uint32_t ConvertFixed(const char* filename);
+    static uint32_t CreateDynamic(const char* filename, uint64_t size);
+    static uint32_t CreateDifferencing(const char* filename, const char* basename);
+    uint32_t CreateSnapshot();
+    void DetectGeometry(Bitu sizes[]);
+    static uint64_t scanMBR(uint8_t* mbr, Bitu sizes[], uint64_t disksize=0);
+    bool MergeSnapshot(uint32_t* totalSectorsMerged, uint32_t* totalBlocksUpdated);
+    static void SizeToCHS(uint64_t size, uint16_t* c, uint8_t* h, uint8_t* s);
+    bool UpdateUUID();
+    static void mk_uuid(uint8_t* buf);
+    virtual ~imageDiskVHD();
 
 private:
-	struct Geometry {
-		uint16_t cylinders;
-		uint8_t heads;
-		uint8_t sectors;
-	};
-	struct VHDFooter {
-		char cookie[8];
-		uint32_t features;
-		uint32_t fileFormatVersion;
-		uint64_t dataOffset;
-		uint32_t timeStamp;
-		char creatorApp[4];
-		uint32_t creatorVersion;
-		uint32_t creatorHostOS;
-		uint64_t originalSize;
-		uint64_t currentSize;
-		Geometry geometry;
-		VHDTypes diskType;
-		uint32_t checksum;
-		char uniqueId[16];
-		char savedState;
-		char reserved[427];
-
-		void SwapByteOrder();
-		uint32_t CalculateChecksum();
-		bool IsValid();
-	};
 	struct ParentLocatorEntry {
 		uint32_t platformCode;
 		uint32_t platformDataSpace;
@@ -356,15 +378,19 @@ private:
 		void SwapByteOrder();
 		uint32_t CalculateChecksum();
 		bool IsValid();
-	};
+        void SetDefaults();
+    };
 
 	imageDiskVHD() : imageDisk(ID_VHD) { }
     static ErrorCodes TryOpenParent(const char* childFileName, const ParentLocatorEntry& entry, const uint8_t* data, const uint32_t dataLength, imageDisk** disk, const uint8_t* uniqueId);
 	static ErrorCodes Open(const char* fileName, const bool readOnly, imageDisk** disk, const uint8_t* matchUniqueId);
 	virtual bool loadBlock(const uint32_t blockNumber);
 	static bool convert_UTF16_for_fopen(std::string &string, const void* data, const uint32_t dataLength);
+    bool is_zeroed_sector(const void* data);
+	bool is_block_allocated(uint32_t blockNumber);
 
     imageDisk* parentDisk = NULL;
+    imageDisk* fixedDisk = NULL;
 	uint64_t footerPosition = 0;
     VHDFooter footer = {};
     VHDFooter originalFooter = {};
@@ -403,13 +429,9 @@ public:
         (void)data;//UNUSED
         return 0x05; /* fail, read only */
     }
-    imageDiskElToritoFloppy(unsigned char new_CDROM_drive,unsigned long new_cdrom_sector_offset,unsigned char floppy_emu_type) : imageDisk((FILE *)NULL,NULL,0,false) {
+    imageDiskElToritoFloppy(unsigned char new_CDROM_drive,unsigned long new_cdrom_sector_offset,unsigned char floppy_emu_type) : imageDisk((FILE *)NULL,NULL,0,false), CDROM_drive(new_CDROM_drive), cdrom_sector_offset(new_cdrom_sector_offset), floppy_type(floppy_emu_type) {
         diskimg = NULL;
         sector_size = 512;
-        CDROM_drive = new_CDROM_drive;
-        cdrom_sector_offset = new_cdrom_sector_offset;
-        floppy_type = floppy_emu_type;
-
         class_id = ID_EL_TORITO_FLOPPY;
 
         if (floppy_emu_type == 1) { /* 1.2MB */

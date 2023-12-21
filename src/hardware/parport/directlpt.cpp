@@ -16,9 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#include "dosbox.h"
+#include "config.h"
 
-#include "directlpt.h" // for HAS_CDIRECTLPT
 #if HAS_CDIRECTLPT
 #include <SDL.h>
 #ifdef LINUX
@@ -29,9 +28,12 @@
 #include <linux/parport.h>
 #include <linux/ppdev.h>
 #include <sys/ioctl.h>
+#elif defined BSD
+#include <unistd.h>
 #endif
 #include "libs/passthroughio/passthroughio.h"
 #include "callback.h"
+#include "directlpt.h"
 #include "logging.h"
 
 #define PPORT_CON_IRQ 0x10
@@ -83,6 +85,10 @@ CDirectLPT::CDirectLPT(Bitu nr, uint8_t initIrq, CommandLine* cmd)
 			LOG_MSG("parallel%d: ecpbase (raw I/O) requires root privileges. Pass-through I/O disabled.", (int)nr + 1);
 			return;
 		}
+#ifdef BSD
+		LOG_MSG("parallel%d: Raw I/O requires root privileges. Pass-through I/O disabled.", (int)nr + 1);
+		return;
+#endif
 	}
 #endif
 #endif // x86{_64}
@@ -103,8 +109,9 @@ CDirectLPT::CDirectLPT(Bitu nr, uint8_t initIrq, CommandLine* cmd)
 			return;
 		}
 
-		if(ioctl(porthandle, PPCLAIM, NULL) == -1) {
+		if(ioctl(porthandle, PPCLAIM) == -1) {
 			LOG_MSG("parallel%d: Failed to claim parallel port. Pass-through I/O disabled.", (int)nr + 1);
+			close(porthandle);
 			return;
 		}
 

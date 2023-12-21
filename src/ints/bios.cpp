@@ -63,6 +63,8 @@ extern bool PS1AudioCard;
 # include <emscripten.h>
 #endif
 
+#include <output/output_ttf.h>
+
 #if defined(_MSC_VER)
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 # pragma warning(disable:4305) /* truncation from double to float */
@@ -134,6 +136,7 @@ bool APM_PowerButtonSendsSuspend = true;
 
 bool bochs_port_e9 = false;
 bool isa_memory_hole_512kb = false;
+bool isa_memory_hole_15mb = false;
 bool int15_wait_force_unmask_irq = false;
 
 int unhandled_irq_method = UNHANDLED_IRQ_SIMPLE;
@@ -2595,14 +2598,16 @@ static bool RtcUpdateDone () {
 }
 
 static void InitRtc () {
-    WriteCmosByte(0x0a, 0x26);      // default value (32768Hz, 1024Hz)
-
-    // leave bits 6 (pirq), 5 (airq), 0 (dst) untouched
-    // reset bits 7 (freeze), 4 (uirq), 3 (sqw), 2 (bcd)
-    // set bit 1 (24h)
-    WriteCmosByte(0x0b, (ReadCmosByte(0x0b) & 0x61u) | 0x02u);
-
-    ReadCmosByte(0x0c);             // clear any bits set
+    // Change the RTC to return BCD and set the 24h bit. Clear the SET bit.
+    // That's it. Do not change any other bits.
+    //
+    // Some games ("The Tales of Peter Rabbit") use the RTC clock periodic
+    // interrupt for timing and music at rates other than 1024Hz and we must
+    // not change that rate nor clear any interrupt enable bits. Do not clear
+    // pending interrupts, either! The periodic interrupt does not affect reading
+    // the RTC clock. The point of this function and INT 15h code calling this
+    // function is to read the clock.
+    WriteCmosByte(0x0b, (ReadCmosByte(0x0b) & 0x7du/*clear=SET[7]|DM[2]*/) | 0x03u/*set=24/12[1]|DSE[0]*/);
 }
 
 static Bitu INT1A_Handler(void) {
@@ -2621,67 +2626,60 @@ static Bitu INT1A_Handler(void) {
         mem_writed(BIOS_TIMER,((unsigned int)reg_cx<<16u)|reg_dx);
         break;
     case 0x02:  /* GET REAL-TIME CLOCK TIME (AT,XT286,PS) */
-        if(date_host_forced) {
-            InitRtc();                          // make sure BCD and no am/pm
-            if (RtcUpdateDone()) {              // make sure it's safe to read
-                reg_ch = ReadCmosByte(0x04);    // hours
-                reg_cl = ReadCmosByte(0x02);    // minutes
-                reg_dh = ReadCmosByte(0x00);    // seconds
-                reg_dl = ReadCmosByte(0x0b) & 0x01; // daylight saving time
-            }
-            CALLBACK_SCF(false);
-            break;
+        InitRtc();                          // make sure BCD and no am/pm
+        if (RtcUpdateDone()) {              // make sure it's safe to read
+            reg_ch = ReadCmosByte(0x04);    // hours
+            reg_cl = ReadCmosByte(0x02);    // minutes
+            reg_dh = ReadCmosByte(0x00);    // seconds
+            reg_dl = ReadCmosByte(0x0b) & 0x01; // daylight saving time
+	    /* 2023/10/06 - Let interrupts and CPU cycles catch up and the RTC clock a chance to tick. This is needed for
+	     * "Pizza Tycoon" which appears to start by running in a loop reading time from the BIOS and writing
+	     * time to INT 21h in a loop until the second value changes. */
+            for (unsigned int c=0;c < 4;c++) CALLBACK_Idle();
         }
-        IO_Write(0x70,0x04);        //Hours
-        reg_ch=IO_Read(0x71);
-        IO_Write(0x70,0x02);        //Minutes
-        reg_cl=IO_Read(0x71);
-        IO_Write(0x70,0x00);        //Seconds
-        reg_dh=IO_Read(0x71);
-        reg_dl=0;           //Daylight saving disabled
         CALLBACK_SCF(false);
         break;
     case 0x03:  // set RTC time
-        if(date_host_forced) {
-            InitRtc();                          // make sure BCD and no am/pm
+        InitRtc();                          // make sure BCD and no am/pm
+        if (RtcUpdateDone()) {              // make sure it's safe to read
             WriteCmosByte(0x0b, ReadCmosByte(0x0b) | 0x80u);     // prohibit updates
             WriteCmosByte(0x04, reg_ch);        // hours
             WriteCmosByte(0x02, reg_cl);        // minutes
             WriteCmosByte(0x00, reg_dh);        // seconds
             WriteCmosByte(0x0b, (ReadCmosByte(0x0b) & 0x7eu) | (reg_dh & 0x01u)); // dst + implicitly allow updates
+	    /* 2023/10/06 - Let interrupts and CPU cycles catch up and the RTC clock a chance to tick. This is needed for
+	     * "Pizza Tycoon" which appears to start by running in a loop reading time from the BIOS and writing
+	     * time to INT 21h in a loop until the second value changes. */
+            for (unsigned int c=0;c < 4;c++) CALLBACK_Idle();
         }
         break;
     case 0x04:  /* GET REAL-TIME ClOCK DATE  (AT,XT286,PS) */
-        if(date_host_forced) {
-            InitRtc();                          // make sure BCD and no am/pm
-            if (RtcUpdateDone()) {              // make sure it's safe to read
-                reg_ch = ReadCmosByte(0x32);    // century
-                reg_cl = ReadCmosByte(0x09);    // year
-                reg_dh = ReadCmosByte(0x08);    // month
-                reg_dl = ReadCmosByte(0x07);    // day
-            }
-            CALLBACK_SCF(false);
-            break;
+        InitRtc();                          // make sure BCD and no am/pm
+        if (RtcUpdateDone()) {              // make sure it's safe to read
+            reg_ch = ReadCmosByte(0x32);    // century
+            reg_cl = ReadCmosByte(0x09);    // year
+            reg_dh = ReadCmosByte(0x08);    // month
+            reg_dl = ReadCmosByte(0x07);    // day
+	    /* 2023/10/06 - Let interrupts and CPU cycles catch up and the RTC clock a chance to tick. This is needed for
+	     * "Pizza Tycoon" which appears to start by running in a loop reading time from the BIOS and writing
+	     * time to INT 21h in a loop until the second value changes. */
+            for (unsigned int c=0;c < 4;c++) CALLBACK_Idle();
         }
-        IO_Write(0x70,0x32);        //Centuries
-        reg_ch=IO_Read(0x71);
-        IO_Write(0x70,0x09);        //Years
-        reg_cl=IO_Read(0x71);
-        IO_Write(0x70,0x08);        //Months
-        reg_dh=IO_Read(0x71);
-        IO_Write(0x70,0x07);        //Days
-        reg_dl=IO_Read(0x71);
         CALLBACK_SCF(false);
         break;
     case 0x05:  // set RTC date
-        if(date_host_forced) {
-            InitRtc();                          // make sure BCD and no am/pm
+        InitRtc();                          // make sure BCD and no am/pm
+        if (RtcUpdateDone()) {              // make sure it's safe to read
             WriteCmosByte(0x0b, ReadCmosByte(0x0b) | 0x80);     // prohibit updates
             WriteCmosByte(0x32, reg_ch);    // century
             WriteCmosByte(0x09, reg_cl);    // year
             WriteCmosByte(0x08, reg_dh);    // month
             WriteCmosByte(0x07, reg_dl);    // day
             WriteCmosByte(0x0b, (ReadCmosByte(0x0b) & 0x7f));   // allow updates
+	    /* 2023/10/06 - Let interrupts and CPU cycles catch up and the RTC clock a chance to tick. This is needed for
+	     * "Pizza Tycoon" which appears to start by running in a loop reading time from the BIOS and writing
+	     * time to INT 21h in a loop until the second value changes. */
+            for (unsigned int c=0;c < 4;c++) CALLBACK_Idle();
         }
         break;
     case 0x80:  /* Pcjr Setup Sound Multiplexer */
@@ -5660,6 +5658,7 @@ static Bitu INT11_Handler(void) {
 #endif
 
 uint32_t BIOS_HostTimeSync(uint32_t ticks) {
+#if 0//DISABLED TEMPORARILY
     uint32_t milli = 0;
 #if defined(DB_HAVE_CLOCK_GETTIME) && ! defined(WIN32)
     struct timespec tp;
@@ -5707,6 +5706,8 @@ uint32_t BIOS_HostTimeSync(uint32_t ticks) {
         nticks = ticks;
 
     return nticks;
+#endif
+    return 0;
 }
 
 // TODO: make option
@@ -5758,6 +5759,10 @@ static Bitu INT8_PC98_Handler(void) {
     return CBRET_NONE;
 }
 
+
+extern bool cmos_sync_flag;
+extern uint8_t cmos_sync_sec,cmos_sync_min,cmos_sync_hour;
+
 extern bool sync_time, manualtime;
 bool sync_time_timerrate_warning = false;
 
@@ -5788,6 +5793,11 @@ static Bitu INT8_Handler(void) {
             BIOS_KEYBOARD_SetLEDs(should_be);
     }
 
+    if (sync_time && cmos_sync_flag) {
+        value = (uint32_t)((cmos_sync_hour*3600+cmos_sync_min*60+cmos_sync_sec)*(float)PIT_TICK_RATE/65536.0);
+        cmos_sync_flag = false;
+    }
+#if 0//DISABLED TEMPORARILY
     if (sync_time&&!manualtime) {
 #if DOSBOX_CLOCKSYNC
         static bool check = false;
@@ -5840,6 +5850,7 @@ static Bitu INT8_Handler(void) {
             }
         }
     }
+#endif
     mem_writed(BIOS_TIMER,value);
 
 	if(bootdrive>=0) {
@@ -7211,11 +7222,17 @@ void BIOS_ZeroExtendedSize(bool in) {
              * capacity does not include conventional memory below 1MB, nor any memory
              * above 16MB.
              *
-             * PC-98 systems may reserve the top 1MB, limiting the top to 15MB instead.
+             * PC-98 systems may reserve the top 1MB, limiting the top to 15MB instead,
+             * for the ISA memory hole needed for DOS games that use the 256-color linear framebuffer.
              *
              * 0x70 = 128KB * 0x70 = 14MB
              * 0x78 = 128KB * 0x70 = 15MB */
-            if (ext > 0x78) ext = 0x78;
+            if (isa_memory_hole_15mb) {
+                if (ext > 0x70) ext = 0x70;
+            }
+            else {
+                if (ext > 0x78) ext = 0x78;
+            }
 
             mem_writeb(0x401,ext);
         }
@@ -7864,6 +7881,11 @@ static Bitu pc98_default_stop_handler(void) {
 
     return CBRET_NONE;
 }
+
+static unsigned char BCD2BIN(unsigned char x) {
+	return ((x >> 4) * 10) + (x & 0xF);
+}
+
 
 /* NTS: Remember the 8259 is non-sentient, and the term "slave" is used in a computer programming context */
 static Bitu Default_IRQ_Handler_Cooperative_Slave_Pic(void) {
@@ -8755,8 +8777,19 @@ private:
 
             uint32_t value = 0;
 
-            /* Read date/time from host at start */
-            value = BIOS_HostTimeSync(value);
+            RtcUpdateDone();
+            IO_Write(0x70,0xB);
+            IO_Write(0x71,0x02); // BCD
+
+            /* set BIOS_TIMER according to time/date of RTC */
+            IO_Write(0x70,0);
+            const unsigned char sec = BCD2BIN(IO_Read(0x71));
+            IO_Write(0x70,2);
+            const unsigned char min = BCD2BIN(IO_Read(0x71));
+            IO_Write(0x70,4);
+            const unsigned char hour = BCD2BIN(IO_Read(0x71));
+
+            value = (uint32_t)(((hour * 3600.00) + (min * 60.00) + sec) * ((double)PIT_TICK_RATE/65536.0));
 
             mem_writed(BIOS_TIMER,value);
         }
@@ -9376,7 +9409,17 @@ startfunction:
                 card = "IBM Monochrome Display Adapter";
                 break;
             case MCH_HERC:
-                card = "Hercules Monochrome Graphics Adapter";
+                switch (hercCard) {
+                    case HERC_GraphicsCardPlus:
+                        card = "Hercules+ Graphics Adapter";
+                        break;
+                    case HERC_InColor:
+                        card = "Hercules InColor Graphics Adapter";
+                        break;
+                    default:
+                        card = "Hercules Graphics Adapter";
+                        break;
+                }
                 break;
             case MCH_EGA:
                 card = "IBM Enhanced Graphics Adapter";
@@ -9411,6 +9454,19 @@ startfunction:
                             case S3_Trio64V:    card = "S3 Trio64V+ SVGA"; break;
                             case S3_ViRGE:      card = "S3 ViRGE SVGA"; break;
                             case S3_ViRGEVX:    card = "S3 ViRGE VX SVGA"; break;
+                        }
+                        break;
+                    case SVGA_ATI:
+                        card = "ATI SVGA";
+                        switch (atiCard) {
+                            case ATI_EGAVGAWonder:     card = "ATI EGA/VGA Wonder"; break;
+                            case ATI_VGAWonder:        card = "ATI VGA Wonder"; break;
+                            case ATI_VGAWonderPlus:    card = "ATI VGA Wonder+"; break;
+                            case ATI_VGAWonderXL:      card = "ATI VGA WonderXL"; break;
+                            case ATI_VGAWonderXL24:    card = "ATI VGA WonderXL24"; break;
+                            case ATI_Mach8:            card = "ATI Mach8"; break;
+                            case ATI_Mach32:           card = "ATI Mach32"; break;
+                            case ATI_Mach64:           card = "ATI Mach64"; break;
                         }
                         break;
                     default:
@@ -9874,7 +9930,31 @@ public:
             bochs_port_e9 = section->Get_bool("bochs debug port e9");
 
             // TODO: motherboard init, especially when we get around to full Intel Triton/i440FX chipset emulation
-            isa_memory_hole_512kb = section->Get_bool("isa memory hole at 512kb");
+            {
+                std::string s = section->Get_string("isa memory hole at 512kb");
+
+                if (s == "true" || s == "1")
+                    isa_memory_hole_512kb = true;
+                else if (s == "false" || s == "0")
+                    isa_memory_hole_512kb = false;
+                else
+                    isa_memory_hole_512kb = false;
+            }
+
+            // TODO: motherboard init, especially when we get around to full Intel Triton/i440FX chipset emulation
+            {
+                std::string s = section->Get_string("isa memory hole at 15mb");
+
+                if (s == "true" || s == "1")
+                    isa_memory_hole_15mb = true;
+                else if (s == "false" || s == "0")
+                    isa_memory_hole_15mb = false;
+                else if (IS_PC98_ARCH)
+                    isa_memory_hole_15mb = true;
+ // For the sake of some DOS games, enable by default
+                else
+                    isa_memory_hole_15mb = false;
+            }
 
             // FIXME: Erm, well this couldv'e been named better. It refers to the amount of conventional memory
             //        made available to the operating system below 1MB, which is usually DOS.
@@ -10016,6 +10096,8 @@ public:
             Bitu end = ulimit/4;        /* end = 1KB to page round down */
             if (start < end) MEM_ResetPageHandler_Unmapped(start,end-start);
         }
+
+        if (isa_memory_hole_15mb) MEM_ResetPageHandler_Unmapped(0xf00,0x100); /* 0xF00000-0xFFFFFF */
 
         if (machine == MCH_TANDY) {
             /* Take 16KB off the top for video RAM.

@@ -390,11 +390,7 @@ static INLINE uint16_t DOS_PackDate(uint16_t year,uint16_t mon,uint16_t day) {
 
 
 /* Remains some classes used to access certain things */
-#ifdef JSDOS
-#define sOffset offsetof
-#else
-#define sOffset(s,m) ((char*)&(((s*)NULL)->m)-(char*)NULL)
-#endif
+#define sOffset(s,m) offsetof(s,m)
 #define sGet(s,m) GetIt(sizeof(((s *)&pt)->m),(PhysPt)sOffset(s,m))
 #define sSave(s,m,val) SaveIt(sizeof(((s *)&pt)->m),(PhysPt)sOffset(s,m),val)
 
@@ -426,7 +422,7 @@ protected:
 
 class DOS_PSP :public MemStruct {
 public:
-	DOS_PSP						(uint16_t segment)		{ SetPt(segment);seg=segment;};
+	DOS_PSP						(uint16_t segment):seg(segment)		{ SetPt(segment);};
 	void	MakeNew				(uint16_t mem_size);
 	void	CopyFileTable		(DOS_PSP* srcpsp,bool createchildpsp);
 	uint16_t	FindFreeFileEntry	(void);
@@ -526,7 +522,7 @@ public:
 
 class DOS_InfoBlock:public MemStruct {
 public:
-    DOS_InfoBlock() : seg(0) {};
+    DOS_InfoBlock() {};
 	void SetLocation(uint16_t  segment);
     void SetFirstDPB(uint32_t _first_dpb);
 	void SetFirstMCB(uint16_t _firstmcb);
@@ -542,6 +538,9 @@ public:
 	uint8_t	GetUMBChainState(void);
 	RealPt	GetPointer(void);
 	uint32_t GetDeviceChain(void);
+
+	void SetBootDrive(uint8_t drv) { sSave(sDIB,bootDrive,drv); }
+	uint8_t GetBootDrive(void) { return sGet(sDIB,bootDrive); }
 
 	#ifdef _MSC_VER
 	#pragma pack(1)
@@ -600,7 +599,7 @@ public:
 	#ifdef _MSC_VER
 	#pragma pack ()
 	#endif
-	uint16_t	seg;
+	uint16_t	seg = 0;
 };
 
 class DOS_DTA:public MemStruct{
@@ -780,10 +779,10 @@ struct DOS_Block {
     DOS_Version version = {};
     uint16_t firstMCB = 0;
     uint16_t errorcode = 0;
-    uint16_t psp();//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetPSP();};
-    void psp(uint16_t _seg);//{ DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetPSP(_seg);};
-    RealPt dta();//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetDTA();};
-    void dta(RealPt _dta);//{DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDTA(_dta);};
+    uint16_t psp() const;//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetPSP();};
+    void psp(uint16_t _seg) const;//{ DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetPSP(_seg);};
+    RealPt dta() const;//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetDTA();};
+    void dta(RealPt _dta) const;//{DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDTA(_dta);};
     uint8_t return_code = 0, return_mode = 0;
 
     uint8_t current_drive = 0;

@@ -270,7 +270,7 @@ void INT10_SetDACBlock(uint16_t index,uint16_t count,PhysPt data) {
 			IO_Write(VGAREG_DAC_DATA,blue);
 #if defined(USE_TTF)
             if (start==16) {
-                sprintf(value,"(%d,%d,%d)",red*255/63, green*255/63, blue*255/63);
+                sprintf(value,"(%d,%d,%d)",(red<<2|red>>4), (green<<2|green>>4), (blue<<2|blue>>4));
                 str+=std::string(value)+" ";
             }
 #endif
@@ -289,7 +289,7 @@ void INT10_SetDACBlock(uint16_t index,uint16_t count,PhysPt data) {
 			IO_Write(VGAREG_DAC_DATA,ic);
 #if defined(USE_TTF)
             if (start==16) {
-                sprintf(value,"(%d,%d,%d)",red*255/63, green*255/63, blue*255/63);
+                sprintf(value,"(%d,%d,%d)",(red<<2|red>>4), (green<<2|green>>4), (blue<<2|blue>>4));
                 str+=std::string(value);
             }
 #endif

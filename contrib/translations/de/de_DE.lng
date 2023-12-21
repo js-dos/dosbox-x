@@ -1,7 +1,129 @@
 :DOSBOX-X:LANGUAGE:German
-:DOSBOX-X:CODEPAGE:850
-:DOSBOX-X:VERSION:2022.12.26
+:DOSBOX-X:CODEPAGE:858
+:DOSBOX-X:VERSION:2023.10.06
 :DOSBOX-X:REMARK:
+:PROGRAM_BOOT_BOOTING
+Starte von Laufwerk 
+.
+:PROGRAM_IMGMAKE_BADSIZE
+Ungültige -size oder -chs Argumente.
+
+.
+:PROGRAM_VHDMAKE_WRITERR
+Konnte neues VHD-Image "%s" nicht schreiben, Abbruch.
+
+.
+:PROGRAM_VHDMAKE_REMOVEERR
+Konnte Datei "%s" nicht löschen.
+
+.
+:PROGRAM_VHDMAKE_RENAME
+Das neu erstellte VHD-Image muss manuell umbenannt werden.
+
+.
+:PROGRAM_VHDMAKE_SUCCESS
+Neues VHD-Image erfolgreich erstellt.
+Es kann mit ←[34;1mIMGMOUNT←[0m eingehangen werden.
+
+.
+:PROGRAM_VHDMAKE_ERROPEN
+Fehler, konnte Datei "%s" nicht öffnen.
+
+.
+:PROGRAM_VHDMAKE_BADSIZE
+Ungültige VHD-Größe erkannt, Abbruch!
+
+.
+:PROGRAM_VHDMAKE_FNEEDED
+Ein bereits existierendes VHD-Image kann ohne -f Option
+nicht still überschrieben werden!
+
+.
+:PROGRAM_VHDMAKE_BADPARENT
+Übergeordnetes VHD-Image "%s" kann nicht geöffnet werden, Abbruch!
+
+.
+:PROGRAM_VHDMAKE_NOINFO
+Keine Info für "%s" verfügbar.
+
+.
+:PROGRAM_VHDMAKE_BLOCKSTATS
+ mit %d/%d Blöcken alloziiert.
+
+.
+:PROGRAM_VHDMAKE_INFO
+VHD "%s" Typ ist %s.
+Die virtuelle Größe ist %.02f MB
+.
+:PROGRAM_VHDMAKE_CANTMERGE
+%s ist identisch, breche Zusammenfassung ab!
+
+.
+:PROGRAM_VHDMAKE_MERGEREPORT
+%d Sektoren in %d Blöcken von "%s"
+zu "%s" zusammengefasst.
+
+.
+:PROGRAM_VHDMAKE_MERGENODELETE
+Konnte Schnappschuss "%s" nicht löschen.
+Manueller Eingriff erforderlich!
+.
+:PROGRAM_VHDMAKE_MERGEOKDELETE
+Schnappschuss VHD zusammengefast und gelöscht.
+
+.
+:PROGRAM_VHDMAKE_MERGEFAILED
+Fehler beim Zusammenfassen, Abbruch!
+
+.
+:PROGRAM_VHDMAKE_MERGEWARNCORRUPTION
+ Inhalte des Übergeordneten "%s" könnten beschädigt werden!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_WIN
+Warnung: Ein absoluter Pfad zur übergeordneten Datei
+schränkt die Portabilität zu Windows ein.
+Ein relativer Pfad sollte bevorzugt werden!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_UX
+FEHLER: Ein absoluter Pfad zur übergeordneten Datei
+verhindert die Portabilität.
+Ein relativer Pfad sollte bevorzugt werden!
+
+.
+:PROGRAM_VHDMAKE_HELP
+Erstellt dynamische oder partielle VHD-Images, oder konvertiert
+rohe Images zu einer VHD mit fester Größe.
+←[32;1mVHDMAKE←[0m [-f] new.vhd size[BKMGT]
+←[32;1mVHDMAKE←[0m ←[34;1m-convert←[0m raw.hdd new.vhd
+←[32;1mVHDMAKE←[0m [-f] ←[34;1m-link←[0m parent.vhd new.vhd
+←[32;1mVHDMAKE←[0m ←[34;1m-merge←[0m delta.vhd
+←[32;1mVHDMAKE←[0m ←[34;1m-info←[0m a.vhd
+ -c | -convert  konvertiert ein rohes HD-Image in ein VHD fester Größe,
+                mit dem Namen new.vhd
+ -l | -link     erstellt ein partielles VHD new.vhd und verknüpft es mit
+                dem übergeordneten Image parent.vhd
+ -f | -force    erzwingt ein bereits existierendes Image zu überschreiben
+ -i | -info     zeigt Infos über das Image a.vhd
+ -m | -merge    fasst delta.vhd mit seinem übergeordneten Image
+                zusammen
+ new.vhd        Name des neuen dynamischen VHD-Images
+ size           Imagegröße (eventuell mit Einheit; Standard: Bytes)
+Beim Konvertieren eines rohen Images in ein VHD fester Größe sollte es mit
+MBR Schema paritioniert und im FAT-Format formatiert sein.
+Ein dynamisches VHD sollte eine Größe zwischen 3 MB und 2040 GB besitzen.
+Ein dynamisches VHD ist weder partitioniert noch formatiert: Um es direkt einem
+Buchstaben zuzuordnen, sollte es nicht mit ←[34;1mIMGMOUNT←[0m,
+sondern mit←[34;1mIMGMAKE←[0m eingehangen werden.
+Wird ein Schnappschuss erfolgreich mit einem VHD zusammengefasst,
+so wird der Schnappschuss automatisch gelöscht.
+
+.
+:PROGRAM_BOOT_IMAGE_MOUNTED
+Disketten-Image(s) bereits eingehangen.
+
+.
 :AUTOEXEC_CONFIGFILE_HELP
 Befehle in diesen Zeilen werden zum Start ausgeführt.
 Alle Befehle für MOUNT können hier eingefügt werden.
@@ -459,6 +581,14 @@ Laufwerk %c als %s eingehangen
 .
 :PROGRAM_MOUNT_STATUS_1
 Aktuell eingehängte Laufwerke:
+
+.
+:PROGRAM_MOUNT_NOT_FORMATTED
+Drive not formatted. Format it before accessing the drive.
+
+.
+:PROGRAM_MOUNT_UNSUPPORTED_EXT
+Unsupported extension %s: Mounted as raw IMG image.
 
 .
 :PROGRAM_IMGMOUNT_STATUS_FORMAT
@@ -3083,6 +3213,9 @@ Druckergeräte auflisten
 :MENU:show_console
 Zeige Log
 .
+:MENU:clear_console
+Lösche Log
+.
 :MENU:disable_logging
 Deaktiviere Log-Output
 .
@@ -3106,6 +3239,9 @@ Debugger-Option: Starte normal
 .
 :MENU:debugger_runwatch
 Debugger-Option: Beobachtung
+.
+:MENU:video_debug_overlay
+Video-Debug-Overlay
 .
 :MENU:HelpCommandMenu
 DOS-Kommandos
@@ -3188,11 +3324,17 @@ MIDI-Output aufnehmen
 :MENU:mapper_caprawopl
 FM (OPL) Output aufnehmen
 .
+:MENU:mapper_capnetrf
+Zeichne Netzwerk-Traffic auf
+.
 :MENU:mapper_video
 Video als AVI aufnehmen
 .
 :MENU:mapper_scrshot
 Bildschirmfoto machen
+.
+:MENU:mapper_rawscrshot
+Bildschirmfoto machen (roh)
 .
 :MENU:mapper_volup
 Lauter
@@ -3314,8 +3456,8 @@ Starte DOSBox-X-Instanz neu
 :MENU:restartconf
 Starte DOSBox-X mit Konfig-Datei neu...
 .
-:MENU:restartlang
-Starte DOSBox-X mit Sprachdatei neu...
+:MENU:loadlang
+Lade Sprachdatei...
 .
 :MENU:auto_lock_mouse
 Maus automatisch einfangen
@@ -3442,6 +3584,9 @@ Zeige IDE-Platten oder -CD-Status
 .
 :MENU:pc98_use_uskb
 Nutze US-Tastaturlayout
+.
+:MAPPER:capnetrf
+Zeichne Netzwerk-Traffic auf
 .
 :MAPPER:caprawopl
 FM/OPL Output aufnehmen

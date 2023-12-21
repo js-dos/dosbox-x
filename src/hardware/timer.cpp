@@ -29,6 +29,9 @@
 #include "setup.h"
 #include "control.h"
 
+extern bool VGA_PITsync;
+extern double vga_fps;
+
 // This is only set in PC-98 mode and only if emulating PC-9801.
 // There is at least one game (PC-98 port of Thexder) that depends on PC-9801 PIT 1
 // behavior where the counter cycles at all times whether or not the PC speaker is
@@ -92,6 +95,22 @@ struct PIT_Block {
 
         cntr_cur = new_cntr;
         delay = ((pic_tickindex_t)(1000ul * cntr_cur)) / PIT_TICK_RATE;
+
+        /* Make sure the new counter value is returned if read back even if the gate is off!
+         * Some games like to constantly reprogram PIT 2 with precise event timey stuff and
+         * might shut the PC speaker PIT gate off during that time.
+         *
+         * Previous versions of this code failed to update the last_counter value when the
+         * game wrote a new counter and the PIT gate was off, causing the game to read back a
+         * stale counter value that was wrong.
+         *
+         * This fixes "Tony & Friends in Kellogg's Land" which does some rather weird elaborate
+         * timing stuff with both PIT 0 (timer) and PIT 2 (PC speaker but the output is off) to
+         * do it's event timing and to modify the VGA DAC mask mid-frame precisely to do that
+         * effect of making the bottom half look like there is water.
+         * Ref: [https://github.com/joncampbell123/dosbox-x/issues/4467] */
+        last_counter.cycle = 0;
+        last_counter.counter = cntr_cur;
     }
     void latch_next_counter(void) {
         set_active_counter(cntr);
@@ -308,12 +327,25 @@ static bool latched_timerstatus_locked;
 
 unsigned long PIT_TICK_RATE = PIT_TICK_RATE_IBM;
 
+pic_tickindex_t VGA_PITSync_delay(void);
+
 static void PIT0_Event(Bitu /*val*/) {
 	PIC_ActivateIRQ(0);
 	/* NTS: "Days of Thunder" leaves PIT 0 in mode 1 for some reason, which triggers once and then stops. "start" does not advance in that mode.
 	 *      For any non-periodic mode, this code would falsely detect an ever increasing error and act badly. */
 	if (pit[0].mode == 2 || pit[0].mode == 3) {
 		pit[0].track_time(PIC_FullIndex());
+
+		/* If enabled option and VGA refresh rate is close to PIT 0 timer tick rate,
+		 * make them line up so that demos that use PIT0 for vsync can run without
+		 * shearing artifacts */
+		if (VGA_PITsync) {
+			pic_tickindex_t vga_delay = 1000.0 / vga_fps;
+			if (fabs(vga_delay - pit[0].delay) < (vga_delay * 0.05)) {
+				PIC_AddEvent(PIT0_Event,VGA_PITSync_delay());
+				return;
+			}
+		}
 
 		/* event timing error checking */
 		pic_tickindex_t err = PIC_GetCurrentEventTime() - pit[0].start;

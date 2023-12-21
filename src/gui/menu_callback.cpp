@@ -16,6 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include <assert.h>
+
 #include "dosbox.h"
 #include "menu.h"
 #include "menudef.h"
@@ -44,6 +46,9 @@
 #endif
 #include <sys/types.h>
 #include <sys/stat.h>
+
+#include <output/output_opengl.h>
+#include <output/output_ttf.h>
 
 int oldblinkc = -1;
 std::string savefilename = "";
@@ -2173,7 +2178,7 @@ int GetNumScreen() {
     int numscreen = 1;
 #if defined(C_SDL2)
     numscreen = SDL_GetNumVideoDisplays();
-#elif defined(WIN32) && !defined(HX_DOS)
+#elif defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
     xyp xy={0};
     xy.x=-1;
     xy.y=-1;
@@ -2331,7 +2336,7 @@ bool video_frameskip_common_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::it
 bool show_console_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-#if !defined(C_EMSCRIPTEN) && defined(WIN32) && !defined(HX_DOS)
+#if !defined(C_EMSCRIPTEN) && defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 #if C_DEBUG
     bool DEBUG_IsDebuggerConsoleVisible(void);
     if (DEBUG_IsDebuggerConsoleVisible())

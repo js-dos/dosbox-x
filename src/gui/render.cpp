@@ -49,6 +49,9 @@
 #include <emmintrin.h>
 #endif
 
+#include <output/output_tools_xbrz.h>
+#include <output/output_opengl.h>
+
 extern bool video_debug_overlay;
 
 Render_t                                render;
@@ -201,7 +204,7 @@ static inline bool RENDER_DrawLine_scanline_cacheHit(const void *s) {
         const Bitu *src = (Bitu*)s;
         Bitu *cache = (Bitu*)(render.scale.cacheRead);
         Bits count = (Bits)render.src.start;
-#if defined(__SSE__) && !(defined(_M_AMD64) || defined(__amd64__) || defined(__e2k__))
+#if defined(__SSE__) && !(defined(_M_AMD64) || defined(__amd64__) || defined(__e2k__) || defined(_WIN32_WINDOWS))
 #define MY_SIZEOF_INT_P sizeof(*src)
         if (GCC_LIKELY(avx2_available)) {
             if (!cacheHit_AVX2(src, cache, count))
@@ -890,8 +893,9 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
     // figure out doublewidth/height values
     bool dblw = false;
     bool dblh = false;
+    bool do_not_dblh = (IS_VGA_ARCH && vga.draw.doublescan_set) || machine == MCH_MDA || machine == MCH_HERC;
     double ratio = (((double)width)/((double)height))/scrn_ratio;
-    if(ratio > 1.6) {
+    if(ratio > 1.6 && !do_not_dblh) {
         dblh=true;
         ratio /= 2.0;
     } else if(ratio < 0.75) {
@@ -918,8 +922,14 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
 		width += 8*32;
 		width += 4;
 	}
-	else if (machine == MCH_MDA || machine == MCH_HERC) {
-		/* add nothing, nothing to show at this time */
+	else if (machine == MCH_MDA) {
+		height += 8*1;
+	}
+	else if (machine == MCH_HERC) {
+		if (hercCard >= HERC_InColor)
+			height += 8*2;
+		else
+			height += 8*1;
 	}
 	else if (machine == MCH_PC98) {
 		height += 8*6;

@@ -53,13 +53,15 @@ static MEM_Callout_t lfb_mmio_cb = MEM_Callout_t_none;
 
 class MEM_callout_vector : public std::vector<MEM_CalloutObject> {
 public:
-    MEM_callout_vector() : std::vector<MEM_CalloutObject>(), getcounter(0), alloc_from(0) { };
+    MEM_callout_vector() : std::vector<MEM_CalloutObject>() { };
 public:
-    unsigned int getcounter;
-    unsigned int alloc_from;
+    unsigned int getcounter = 0;
+    unsigned int alloc_from = 0;
 };
 
 static MEM_callout_vector MEM_callouts[MEM_callouts_max];
+
+extern bool isa_memory_hole_15mb;
 
 bool a20_guest_changeable = true;
 bool a20_fake_changeable = false;
@@ -76,13 +78,11 @@ extern bool VIDEO_BIOS_always_carry_14_high_font;
 extern bool VIDEO_BIOS_always_carry_16_high_font;
 
 static struct MemoryBlock {
-    MemoryBlock() : pages(0), handler_pages(0), reported_pages(0), phandlers(NULL), mhandles(NULL), mem_alias_pagemask(0), mem_alias_pagemask_active(0), address_bits(0) { }
-
-    Bitu pages;
-    Bitu handler_pages;
-    Bitu reported_pages;
-    PageHandler * * phandlers;
-    MemHandle * mhandles;
+    Bitu pages = 0;
+    Bitu handler_pages = 0;
+    Bitu reported_pages = 0;
+    PageHandler * * phandlers = NULL;
+    MemHandle * mhandles = NULL;
     struct {
         Bitu        start_page;
         Bitu        end_page;
@@ -99,9 +99,9 @@ static struct MemoryBlock {
         bool enabled;
         uint8_t controlport;
     } a20 = {};
-    uint32_t mem_alias_pagemask;
-    uint32_t mem_alias_pagemask_active;
-    uint32_t address_bits;
+    uint32_t mem_alias_pagemask = 0;
+    uint32_t mem_alias_pagemask_active = 0;
+    uint32_t address_bits = 0;
 } memory;
 
 uint32_t MEM_get_address_bits() {
@@ -281,8 +281,13 @@ static PageHandler *MEM_SlowPath(Bitu page) {
 
     /* TEMPORARY, REMOVE LATER. SHOULD NOT HAPPEN. */
     if (page < memory.reported_pages) {
-        LOG(LOG_MISC,LOG_WARN)("MEM_SlowPath called within system RAM at page %x",(unsigned int)page);
-        f = (PageHandler*)(&ram_page_handler);
+        if (page >= 0xf00 && page <= 0xfff && isa_memory_hole_15mb) { /* 0xF00000-0xFFFFFF (15MB-16MB) */
+            /* ignore, ISA memory hole */
+        }
+        else {
+            LOG(LOG_MISC,LOG_WARN)("MEM_SlowPath called within system RAM at page %x",(unsigned int)page);
+            f = (PageHandler*)(&ram_page_handler);
+        }
     }
 
     /* check motherboard devices (ROM BIOS, system RAM, etc.) */
@@ -1887,6 +1892,12 @@ void Init_RAM() {
     for (;i < memory.handler_pages;i++)
         memory.phandlers[i] = NULL;//&illegal_page_handler;
 
+    /* ISA 15MB memory hole? */
+    if (isa_memory_hole_15mb) {
+        for (i=0xf00;i <= 0xfff && i < memory.handler_pages;i++)
+            memory.phandlers[i] = NULL;//&illegal_page_handler;
+    }
+
     /* FIXME: VGA emulation will selectively respond to 0xA0000-0xBFFFF according to the video mode,
      *        what we want however is for the VGA emulation to assign illegal_page_handler for
      *        address ranges it is not responding to when mapping changes. */
@@ -2061,6 +2072,11 @@ void Init_MemHandles() {
 
     for (i = 0;i < memory.pages;i++)
         memory.mhandles[i] = 0;             //Set to 0 for memory allocation
+
+    // ISA memory hole awareness (15MB region). Block off 0xF00000-0xFFFFFF with a dummy handle.
+    if (isa_memory_hole_15mb) {
+        for (i=0xF00;i<=0xFFF && i < memory.pages;i++) memory.mhandles[i] = 0x7FFFFFFF;
+    }
 }
 
 void Init_MemoryAccessArray() {

@@ -74,14 +74,17 @@ Bitu INT10_Handler(void) {
 	case 0x00:								/* Set VideoMode */
 		Mouse_BeforeNewVideoMode(true);
 		SetTrueVideoMode(reg_al);
-		if(IS_DOSV && IS_DOS_CJK && (reg_al == 0x03 || reg_al == 0x70 || reg_al == 0x72 || reg_al == 0x78)) {
-			uint8_t mode = reg_al;
-			if(reg_al == 0x03 || reg_al == 0x72) {
+		if(IS_DOSV && IS_DOS_CJK && (reg_al == 0x03 || (reg_al >= 0x70 && reg_al <= 0x73) || reg_al == 0x78)) {
+			uint8_t mode = 0x03;
+			if(reg_al == 0x03 || reg_al == 0x72 || reg_al == 0x73) {
 				INT10_SetVideoMode(0x12);
 				INT10_SetDOSVModeVtext(mode, DOSV_VGA);
-			} else if(reg_al == 0x70 || reg_al == 0x78) {
+				if(reg_al == 0x72 || reg_al == 0x73) {
+					real_writeb(BIOSMEM_SEG, BIOSMEM_CURRENT_MODE, reg_al);
+				}
+			} else if(reg_al == 0x70 || reg_al == 0x71 || reg_al == 0x78) {
 				mode = 0x70;
-				enum DOSV_VTEXT_MODE vtext_mode = DOSV_GetVtextMode((reg_al == 0x70) ? 0 : 1);
+				enum DOSV_VTEXT_MODE vtext_mode = DOSV_GetVtextMode((reg_al == 0x78) ? 1 : 0);
 				if(vtext_mode == DOSV_VTEXT_XGA || vtext_mode == DOSV_VTEXT_XGA_24) {
 					if(svgaCard == SVGA_TsengET4K) {
 						INT10_SetVideoMode(0x37);
@@ -102,6 +105,9 @@ Bitu INT10_Handler(void) {
 				} else {
 					INT10_SetVideoMode(0x12);
 					INT10_SetDOSVModeVtext(mode, DOSV_VTEXT_VGA);
+				}
+				if(reg_al == 0x71) {
+					real_writeb(BIOSMEM_SEG, BIOSMEM_CURRENT_MODE, reg_al);
 				}
 			}
 			DOSV_FillScreen();
@@ -430,6 +436,47 @@ graphics_chars:
 	case 0x12:								/* alternate function select */
 		if (!IS_EGAVGA_ARCH && machine != MCH_MCGA)
 			break;
+
+		if (reg_bh == 0x55 && IS_VGA_ARCH && svgaCard == SVGA_ATI) { /* ATI VGA ALTERNATE FUNC SELECT ENHANCED FEATURES */
+			/* NTS: When WHATVGA detects an ATI chipset, all modesetting within the program REQUIRES this function or
+			 *      else it does not change the video mode. This function is heavily relied on by WHATVGA to detect
+			 *      whether or not the video mode exists, INCLUDING the base VGA standard modes! */
+			if (!IS_VGA_ARCH) break;
+			if (svgaCard!=SVGA_ATI) break;
+			if (reg_bl > 6) break;
+
+			switch (reg_bl) {
+				case 0x02: /*get status*/
+					reg_al = 0x08/*enhanced features enabled*/ | (2/*multisync monitor*/ << 5u);
+					break;
+				case 0x06: { /*get mode table*/
+					unsigned char video_mode = reg_al;
+					/* entry: AL = video mode
+					 * exit:  If mode valid: ES:BP = pointer to parameter table (ATI mode table), ES:SI = pointer to parameter table supplement
+					 *        If mode invalid: ES and BP unchanged, SI unchanged
+					 *
+					 * Also DI == 0? [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20IBM%20compatible/Video/VGA/SVGA/ATI%2c%20Array%20Technology%20Inc/ATI%20Mach64%20BIOS%20Kit%20Technical%20Reference%20Manuals%20PN%20BIO%2dC012XX1%2d05%20%281994%29%20v5%2epdf] */
+					/* FIXME! Need to return pointers to REAL table data!
+					 *        This satisfies WHATVGA for now which only cares that this interrupt call signals the mode exists,
+					 *        although the video mode info it shows is understandably weird and wacky. */
+					/* TODO: Scan an actual parameter table, including one that includes the vendor specific INT 10h modes for SVGA, here */
+					LOG(LOG_INT10,LOG_DEBUG)("ATI VGA INT 12h Get Mode Table for mode 0x%2x",video_mode);
+					if ((video_mode >= 0 && video_mode <= 7) || (video_mode >= 13 && video_mode <= 19)) {//standard VGA for now!
+						SegSet16(es,0xABCD);
+						reg_bp = 0x1234;
+					}
+					} break;
+				case 0x00: /*disable enhanced features*/
+				case 0x01: /*enable enhanced features*/
+				case 0x03: /*disable register trapping (CGA emulation)*/
+				case 0x04: /*enable register trapping*/
+				case 0x05: /*program mode described by table at ES:BP*/
+				default:
+					LOG(LOG_INT10,LOG_DEBUG)("Unhandled ATI VGA INT 12h function: AX=%04x BX=%04x",reg_ax,reg_bx);
+					break;
+			}
+		}
+
 		switch (reg_bl) {
 		case 0x10:							/* Get EGA Information */
             if (machine != MCH_MCGA) {
@@ -1053,8 +1100,8 @@ CX	640x480	800x600	  1024x768/1280x1024
 			break;
 		}
 		break;
-	case 0x82:// Set/Read the scroll mode when the video mode is JEGA graphic mode
-		if (J3_IsJapanese()) {
+		case 0x82:// Set/Read the scroll mode when the video mode is JEGA graphic mode
+		if (J3_IsJapanese() || (IS_J3100 && GetTrueVideoMode() == 0x75)) {
 			if(reg_al == 0x00) {
 				// scroll mode
 				reg_al = real_readb(BIOSMEM_J3_SEG, BIOSMEM_J3_SCROLL);

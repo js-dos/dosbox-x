@@ -419,6 +419,25 @@ typedef struct {
 	uint8_t mode_control;
 	uint8_t enable_bits;
 	bool blend;
+
+	// Plus and InColor
+	uint8_t xMode;
+	uint8_t underline;
+	uint8_t strikethrough;
+
+	// InColor
+	uint8_t exception;
+	uint8_t planemask_protect;
+	uint8_t planemask_visible;
+	uint8_t maskpolarity;
+	uint8_t write_mode;
+	uint8_t dont_care;
+	uint8_t bgcolor;
+	uint8_t fgcolor;
+	uint8_t latchprotect;
+	uint8_t palette_index;
+	uint8_t palette[16];
+	uint32_t latch;
 } VGA_HERC;
 
 typedef struct {
@@ -609,7 +628,7 @@ enum {
 };
 
 // optimization tracking, the "complexity" of the arrangement.
-typedef union {
+typedef struct VGA_Complexity_t {
 	unsigned int	flags = 0;
 
 	INLINE unsigned int setf(unsigned int flag) {
@@ -629,6 +648,12 @@ typedef union {
 			return clearf(flag);
 	}
 } VGA_Complexity;
+
+typedef struct VGA_Override_t {
+	bool			enable = false;
+	bool			start_sum = false;
+	uint32_t		start = ~uint32_t(0u);
+} VGA_Override;
 
 typedef struct VGA_Type_t {
     VGAModes mode = {};                              /* The mode the vga system is in */
@@ -653,6 +678,7 @@ typedef struct VGA_Type_t {
     VGA_Memory mem;
     VGA_LFB lfb = {};
     VGA_Complexity complexity = {};
+    VGA_Override overopts = {};
 } VGA_Type;
 
 

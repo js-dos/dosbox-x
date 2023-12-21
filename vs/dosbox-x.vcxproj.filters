@@ -516,6 +516,9 @@
     <ClCompile Include="..\src\hardware\vga_pc98_gdc.cpp">
       <Filter>Sources\hardware</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\vga_ati.cpp">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\vga_s3.cpp">
       <Filter>Sources\hardware</Filter>
     </ClCompile>
@@ -664,6 +667,9 @@
       <Filter>Sources\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\ethernet_slirp.cpp">
+      <Filter>Sources\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\ethernet_nothing.cpp">
       <Filter>Sources\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\regionalloctracking.cpp">
@@ -1602,6 +1608,12 @@
     <ClCompile Include="..\src\gamelink\gamelink.cpp" />
     <ClCompile Include="..\src\gamelink\gamelink_term.cpp" />
     <ClCompile Include="..\src\output\output_gamelink.cpp" />
+    <ClCompile Include="..\src\hardware\imfc_rom.c">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\imfc.cpp">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\aviwriter\avi.h">
@@ -1725,6 +1737,9 @@
       <Filter>Sources\hardware</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\dbopl.h">
+      <Filter>Sources\hardware</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\hardopl.h">
       <Filter>Sources\hardware</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\nukedopl.h">

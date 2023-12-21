@@ -18,10 +18,10 @@ jobs:
         shell: pwsh
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.12.0
         with:
           access_token: ${{ github.token }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Prepare HX-DOS
         shell: bash
         run: |
@@ -81,8 +81,13 @@ jobs:
           cd $top/package/
           $top/vs/tool/zip.exe -r -9 $top/dosbox-x-mingw-hx-dos-${{ env.timestamp }}.zip *
           cd $top
+      - name: Wait for VS 32bit build to finish (Release only)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          sleep 40m
       - name: Download Windows build
-        uses: robinraju/release-downloader@v1.7
+        uses: robinraju/release-downloader@v1.8
         with:
           repository: "joncampbell123/dosbox-x"
           latest: true
@@ -91,7 +96,7 @@ jobs:
         shell: bash
         run: |
           top=`pwd`
-          $top/vs/tool/unzip.exe -o dosbox-x-vsbuild-win32-*.zip bin/Win32/Release/dosbox-x.*
+          $top/vs/tool/unzip.exe -n "dosbox-x-vsbuild-win32-*.zip" "bin/Win32/Release/dosbox-x.*"
           cp $top/package/dosbox-x.ref $top/hxdos.cfg
           echo mount b ..>>$top/hxdos.cfg
           echo "echo success>b:\SUCCESS.TXT">>$top/hxdos.cfg
@@ -99,7 +104,7 @@ jobs:
           cat $top/OUTPUT.TXT
           test -f $top/SUCCESS.TXT || (echo The HX-DOS build did not run successfully && exit 1)
       - name: Upload preview package
-        uses: actions/upload-artifact@v3.1.2
+        uses: actions/upload-artifact@v4.0.0
         with:
           name: dosbox-x-mingw-hx-dos-${{ env.timestamp }}
           path: ${{ github.workspace }}/package/

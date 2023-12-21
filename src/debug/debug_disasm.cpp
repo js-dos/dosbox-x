@@ -290,7 +290,7 @@ static char const *second[] = {
   "%x0",              "%x0",             "%x0",            "%x0",
   "%x0",              "%x0",             "%x0",            "%x0",
 /* 3 */
-  0,                  "rdtsc",           0,                0,
+  "wrmsr",            "rdtsc",           "rdmsr",          0,
   "sysenter",         "sysexit",         0,                0,
   0,                  0,                 0,                0,
   0,                  0,                 0,                0,
@@ -1046,7 +1046,7 @@ static void percent(char type, char subtype)
 
   switch (type) {
   case 'A':                          /* direct address */
-       outhex(subtype, extend, 0, addrsize, 0);
+       outhex(subtype, extend, 0, opsize, 0);
        break;
 
   case 'C':                          /* reg(r/m) picks control reg */

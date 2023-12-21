@@ -16,6 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include <assert.h>
 #include <set>
 
 #include "dosbox.h"
@@ -40,6 +41,8 @@
 #if defined (WIN32)
 #include <windows.h>
 #endif
+
+#include <output/output_ttf.h>
 
 int lastcp = 0;
 void DOSBox_SetSysMenu(void);
@@ -1400,6 +1403,32 @@ Bitu DOS_SwitchKeyboardLayout(const char* new_layout, int32_t& tried_cp) {
 	} else return 0xff;
 }
 
+
+Bitu DOS_ChangeKeyboardLayout(const char* layoutname, int32_t codepage) {
+    keyboard_layout* temp_layout = new keyboard_layout();
+    // try to read the layout for the specified codepage
+    Bitu kerrcode = temp_layout->read_keyboard_file(layoutname, codepage);
+    if(kerrcode) {
+        delete temp_layout;
+        return kerrcode;
+    }
+    // Everything went fine, switch to new layout
+    loaded_layout = temp_layout;
+    return KEYB_NOERROR;
+}
+
+Bitu DOS_ChangeCodepage(int32_t codepage, const char* codepagefile) {
+    keyboard_layout* temp_layout = new keyboard_layout();
+    // try to read the layout for the specified codepage
+    Bitu kerrcode = temp_layout->read_codepage_file(codepagefile, codepage);
+    if(kerrcode) {
+        delete temp_layout;
+        return kerrcode;
+    }
+    // Everything went fine
+    return KEYB_NOERROR;
+}
+
 // get currently loaded layout name (NULL if no layout is loaded)
 const char* DOS_GetLoadedLayout(void) {
 	if (loaded_layout) {
@@ -1683,7 +1712,7 @@ public:
 			}
 		}
         if (tocp && !IS_PC98_ARCH) {
-            if(dos.loaded_codepage == 932 && !strcmp(layoutname, "jp106")) loaded_layout->read_keyboard_file(layoutname, dos.loaded_codepage);
+            if((dos.loaded_codepage == 932 || tocp == 932) && (!strcmp(layoutname, "jp106") || !strcmp(layoutname, "jp"))) loaded_layout->read_keyboard_file(layoutname, 932);
 
             uint16_t cpbak = dos.loaded_codepage;
 #if defined(USE_TTF)

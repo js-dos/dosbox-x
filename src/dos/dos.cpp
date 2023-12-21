@@ -25,6 +25,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "control.h"
 #include "dosbox.h"
@@ -53,7 +54,7 @@
 #include "sdlmain.h"
 #if defined(WIN32)
 #include "../dos/cdrom.h"
-#if !defined(HX_DOS)
+#if !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 #include <process.h>
 #include <shellapi.h>
 #include <shlwapi.h>
@@ -62,6 +63,8 @@
 #else
 #include <unistd.h>
 #endif
+
+#include <output/output_ttf.h>
 
 static bool first_run=true;
 bool sync_time = false, manualtime = false;
@@ -82,6 +85,7 @@ int customcp = 0, altcp = 0;
 unsigned long totalc, freec;
 uint16_t countryNo = 0;
 Bitu INT29_HANDLER(void);
+Bitu INT28_HANDLER(void);
 bool isDBCSCP();
 uint32_t BIOS_get_PC98_INT_STUB(void);
 uint16_t GetDefaultCP(void);
@@ -257,7 +261,7 @@ DOS_InfoBlock dos_infoblock;
 extern int bootdrive;
 extern bool force_sfn, dos_kernel_disabled;
 
-uint16_t DOS_Block::psp() {
+uint16_t DOS_Block::psp() const {
 	if (dos_kernel_disabled) {
 		LOG_MSG("BUG: DOS kernel is disabled (booting a guest OS), and yet somebody is still asking for DOS's current PSP segment\n");
 		return 0x0000;
@@ -266,7 +270,7 @@ uint16_t DOS_Block::psp() {
 	return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetPSP();
 }
 
-void DOS_Block::psp(uint16_t _seg) {
+void DOS_Block::psp(uint16_t _seg) const {
 	if (dos_kernel_disabled) {
 		LOG_MSG("BUG: DOS kernel is disabled (booting a guest OS), and yet somebody is still attempting to change DOS's current PSP segment\n");
 		return;
@@ -275,7 +279,7 @@ void DOS_Block::psp(uint16_t _seg) {
 	DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetPSP(_seg);
 }
 
-RealPt DOS_Block::dta() {
+RealPt DOS_Block::dta() const {
 	if (dos_kernel_disabled) {
 		LOG_MSG("BUG: DOS kernel is disabled (booting a guest OS), and yet somebody is still asking for DOS's DTA (disk transfer address)\n");
 		return 0;
@@ -284,7 +288,7 @@ RealPt DOS_Block::dta() {
 	return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetDTA();
 }
 
-void DOS_Block::dta(RealPt _dta) {
+void DOS_Block::dta(RealPt _dta) const {
 	if (dos_kernel_disabled) {
 		LOG_MSG("BUG: DOS kernel is disabled (booting a guest OS), and yet somebody is still attempting to change DOS's DTA (disk transfer address)\n");
 		return;
@@ -604,6 +608,24 @@ char appname[DOSNAMEBUF+2+DOS_NAMELENGTH_ASCII], appargs[CTBUF];
 bool dos_program_running = false;
 bool DOS_BreakINT23InProgress = false;
 
+void DOS_InitClock() {
+    if (IS_PC98_ARCH) {
+        /* TODO */
+    }
+    else {
+        /* initialize date from BIOS */
+        reg_ah = 4;
+        reg_cx = reg_dx = 0;
+        CALLBACK_RunRealInt(0x1a);
+        dos.date.year=BCD2BIN(reg_cl);
+        dos.date.month=BCD2BIN(reg_dh);
+        dos.date.day=BCD2BIN(reg_dl);
+        if (reg_ch >= 0x19 && reg_ch <= 0x20) dos.date.year += BCD2BIN(reg_ch) * 100;
+        else dos.date.year += 1900;
+        if (dos.date.year < 1980) dos.date.year += 100;
+    }
+}
+
 void DOS_PrintCBreak() {
 	/* print ^C <newline> */
 	uint16_t n = 4;
@@ -621,11 +643,11 @@ bool DOS_BreakTest(bool print=true) {
 		if (print) DOS_PrintCBreak();
 
 		DOS_BreakFlag = false;
-        DOS_BreakConioFlag = false;
+		DOS_BreakConioFlag = false;
 
 		offv = mem_readw((0x23*4)+0);
 		segv = mem_readw((0x23*4)+2);
-		if (offv != 0 && segv != 0) { /* HACK: DOSBox's shell currently does not assign INT 23h */
+		if (segv != 0) {
 			/* NTS: DOS calls are allowed within INT 23h! */
 			Bitu save_sp = reg_sp;
 
@@ -639,6 +661,11 @@ bool DOS_BreakTest(bool print=true) {
 			 *      termination completes!
 			 *
 			 *      This fixes: PC Mix compiler PCL.EXE
+			 *
+			 *      2023/09/28: Some basic debugging with MS-DOS 6.22 shows the INT 23h handler
+			 *                  installed by COMMAND.COM does the same thing (INT 21h AH=0x4C)
+			 *                  which is normally still there unless the DOS application itself
+			 *                  replaces the vector.
 			 *
 			 *      FIXME: This is an ugly hack! */
 			try {
@@ -671,6 +698,12 @@ bool DOS_BreakTest(bool print=true) {
 
 				if (reg_sp != save_sp) reg_sp += 2;
 			}
+		}
+		else {
+			/* Old comment: "HACK: DOSBox's shell currently does not assign INT 23h"
+			 * 2023/09/28: The DOSBox command shell now installs a handler, therefore
+			 *             a null vector is now something to warn about. */
+			LOG_MSG("WARNING: INT 23h CTRL+C vector is NULL\n");
 		}
 
 		if (terminate) {
@@ -795,7 +828,7 @@ const char * TranslateHostPath(const char * arg, bool next = false) {
     return result;
 }
 
-#if defined (WIN32) && !defined(HX_DOS)
+#if defined (WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 intptr_t hret=0;
 void EndRunProcess() {
     if(hret) {
@@ -1013,7 +1046,6 @@ static Bitu DOS_21Handler(void) {
     char name1[DOSNAMEBUF+2+DOS_NAMELENGTH_ASCII];
     char name2[DOSNAMEBUF+2+DOS_NAMELENGTH_ASCII];
     
-    static Bitu time_start = 0; //For emulating temporary time changes.
     if (reg_ah!=0x4c&&reg_ah!=0x51) {packerr=false;reqwin=false;}
     switch (reg_ah) {
         case 0x00:      /* Terminate Program */
@@ -1442,109 +1474,96 @@ static Bitu DOS_21Handler(void) {
             LOG(LOG_FCB,LOG_NORMAL)("DOS:29:FCB Parse Filename, result:al=%d",reg_al);
             break;
         case 0x2a:      /* Get System Date */
-            {
-                if(date_host_forced || IS_PC98_ARCH) {
-                    // use BIOS to get system date
-                    if (IS_PC98_ARCH) {
-                        CPU_Push16(reg_ax);
-                        CPU_Push16(reg_bx);
-                        CPU_Push16(SegValue(es));
-                        reg_sp -= 6;
+            // use BIOS to get system date
+            if (IS_PC98_ARCH) {
+                CPU_Push16(reg_ax);
+                CPU_Push16(reg_bx);
+                CPU_Push16(SegValue(es));
+                reg_sp -= 6;
 
-                        reg_ah = 0;     // get time
-                        reg_bx = reg_sp;
-                        SegSet16(es,SegValue(ss));
-                        CALLBACK_RunRealInt(0x1c);
+                reg_ah = 0;     // get time
+                reg_bx = reg_sp;
+                SegSet16(es,SegValue(ss));
+                CALLBACK_RunRealInt(0x1c);
 
-                        uint32_t memaddr = ((uint32_t)SegValue(es) << 4u) + reg_bx;
+                uint32_t memaddr = ((uint32_t)SegValue(es) << 4u) + reg_bx;
 
-                        reg_sp += 6;
-                        SegSet16(es,CPU_Pop16());
-                        reg_bx = CPU_Pop16();
-                        reg_ax = CPU_Pop16();
+                reg_sp += 6;
+                SegSet16(es,CPU_Pop16());
+                reg_bx = CPU_Pop16();
+                reg_ax = CPU_Pop16();
 
-                        reg_cx = 1900u + BCD2BIN(mem_readb(memaddr+0u));                  // year
-                        if (reg_cx < 1980u) reg_cx += 100u;
-                        reg_dh = BCD2BIN((unsigned int)mem_readb(memaddr+1) >> 4u);
-                        reg_dl = BCD2BIN(mem_readb(memaddr+2));
-                        reg_al = BCD2BIN(mem_readb(memaddr+1) & 0xFu);
-                    }
-                    else {
-                        CPU_Push16(reg_ax);
-                        reg_ah = 4;     // get RTC date
-                        CALLBACK_RunRealInt(0x1a);
-                        reg_ax = CPU_Pop16();
+                reg_cx = 1900u + BCD2BIN(mem_readb(memaddr+0u));                  // year
+                if (reg_cx < 1980u) reg_cx += 100u;
+                reg_dh = BCD2BIN((unsigned int)mem_readb(memaddr+1) >> 4u);
+                reg_dl = BCD2BIN(mem_readb(memaddr+2));
+                reg_al = BCD2BIN(mem_readb(memaddr+1) & 0xFu);
 
-                        reg_ch = BCD2BIN(reg_ch);       // century
-                        reg_cl = BCD2BIN(reg_cl);       // year
-                        reg_cx = reg_ch * 100u + reg_cl; // compose century + year
-                        reg_dh = BCD2BIN(reg_dh);       // month
-                        reg_dl = BCD2BIN(reg_dl);       // day
+                dos.date.year=reg_cx;
+                dos.date.month=reg_dh;
+                dos.date.day=reg_dl;
+            }
+            else {
+                // Real hardware testing: DOS appears to read the CMOS once at startup and then the date
+                // is stored and counted internally. It does not read via INT 1Ah. This means it is possible
+                // for DOS and the BIOS 1Ah/CMOS to have totally different time and date!
+                reg_cx = dos.date.year;
+                reg_dh = dos.date.month;
+                reg_dl = dos.date.day;
 
-                        // calculate day of week (we could of course read it from CMOS, but never mind)
-                        unsigned int a = (14u - reg_dh) / 12u;
-                        unsigned int y = reg_cl - a;
-                        unsigned int m = reg_dh + 12u * a - 2u;
-                        reg_al = (reg_dl + y + (y / 4u) - (y / 100u) + (y / 400u) + (31u * m) / 12u) % 7u;
-                    }
-                } else {
-                    reg_ax=0; // get time
-                    CALLBACK_RunRealInt(0x1a);
-                    if(reg_al) DOS_AddDays(reg_al);
-                    int a = (14 - dos.date.month)/12;
-                    int y = dos.date.year - a;
-                    int m = dos.date.month + 12*a - 2;
-                    reg_al=(dos.date.day+y+(y/4)-(y/100)+(y/400)+(31*m)/12) % 7;
-                    reg_cx=dos.date.year;
-                    reg_dh=dos.date.month;
-                    reg_dl=dos.date.day;
+                // calculate day of week (we could of course read it from CMOS, but never mind)
+                /* Use Zeller's congruence */
+                uint16_t year = reg_cx, month = reg_dh, day = reg_dl;
+                int8_t weekday;
+                if(month <= 2) {
+                    year--;
+                    month += 12;
                 }
+                weekday = (year + year / 4u  - year / 100u + year / 400u + (13u * month + 8u) / 5u + day) % 7;
+                reg_al = weekday < 0 ? weekday + 7 : weekday;
+                /* Sunday=0, Monday=1, ... */
             }
             break;
         case 0x2b:      /* Set System Date */
-            if(date_host_forced) {
+            {
                 // unfortunately, BIOS does not return whether succeeded
                 // or not, so do a sanity check first
 
-                int maxday[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+                int maxday[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}; /* cannot be const, see maxday[1]++ increment below! */
 
                 if (reg_cx % 4 == 0 && (reg_cx % 100 != 0 || reg_cx % 400 == 0))
                     maxday[1]++;
 
-                if (reg_cx < 1980 || reg_cx > 9999 || reg_dh < 1 || reg_dh > 12 ||
-                        reg_dl < 1 || reg_dl > maxday[reg_dh])
+                if (reg_cx < 1980 || reg_cx > 9999 || reg_dh < 1 || reg_dh > 12 || reg_dl < 1 || reg_dl > maxday[reg_dh - 1])
                 {
                     reg_al = 0xff;              // error!
                     break;                      // done
                 }
 
-                uint16_t cx = reg_cx;
+                if (IS_PC98_ARCH) {
+                    /* TODO! */
+                }
+                else {
+                    uint16_t cx = reg_cx;
 
-                CPU_Push16(reg_ax);
-                CPU_Push16(reg_cx);
-                CPU_Push16(reg_dx);
+                    CPU_Push16(reg_ax);
+                    CPU_Push16(reg_cx);
+                    CPU_Push16(reg_dx);
 
-                reg_al = 5;
-                reg_ch = BIN2BCD(cx / 100);     // century
-                reg_cl = BIN2BCD(cx % 100);     // year
-                reg_dh = BIN2BCD(reg_dh);       // month
-                reg_dl = BIN2BCD(reg_dl);       // day
+                    reg_ah = 5;
+                    reg_ch = BIN2BCD(cx / 100);     // century
+                    reg_cl = BIN2BCD(cx % 100);     // year
+                    reg_dh = BIN2BCD(reg_dh);       // month
+                    reg_dl = BIN2BCD(reg_dl);       // day
 
-                CALLBACK_RunRealInt(0x1a);
+                    CALLBACK_RunRealInt(0x1a);
 
-                reg_dx = CPU_Pop16();
-                reg_cx = CPU_Pop16();
-                reg_ax = CPU_Pop16();
+                    reg_dx = CPU_Pop16();
+                    reg_cx = CPU_Pop16();
+                    reg_ax = CPU_Pop16();
 
-                reg_al = 0;                     // OK
-                break;
-            }
-            if (reg_cx<1980) { reg_al=0xff;break;}
-            if ((reg_dh>12) || (reg_dh==0)) { reg_al=0xff;break;}
-            if (reg_dl==0) { reg_al=0xff;break;}
-            if (reg_dl>GetMonthDays(reg_dh)) {
-                if(!((reg_dh==2)&&(reg_cx%4 == 0)&&(reg_dl==29))) // february pass
-                { reg_al=0xff;break; }
+                    reg_al = 0;                     // OK
+                }
             }
             dos.date.year=reg_cx;
             dos.date.month=reg_dh;
@@ -1553,66 +1572,51 @@ static Bitu DOS_21Handler(void) {
             if (sync_time) {manualtime=true;mainMenu.get_item("sync_host_datetime").check(false).refresh_item(mainMenu);}
             break;
         case 0x2c: {    /* Get System Time */
-            if(date_host_forced || IS_PC98_ARCH) {
-                // use BIOS to get RTC time
-                if (IS_PC98_ARCH) {
-                    CPU_Push16(reg_ax);
-                    CPU_Push16(reg_bx);
-                    CPU_Push16(SegValue(es));
-                    reg_sp -= 6;
+            // use BIOS to get RTC time
+            if (IS_PC98_ARCH) {
+                CPU_Push16(reg_ax);
+                CPU_Push16(reg_bx);
+                CPU_Push16(SegValue(es));
+                reg_sp -= 6;
 
-                    reg_ah = 0;     // get time
-                    reg_bx = reg_sp;
-                    SegSet16(es,SegValue(ss));
-                    CALLBACK_RunRealInt(0x1c);
+                reg_ah = 0;     // get time
+                reg_bx = reg_sp;
+                SegSet16(es,SegValue(ss));
+                CALLBACK_RunRealInt(0x1c);
 
-                    uint32_t memaddr = ((PhysPt)SegValue(es) << 4u) + reg_bx;
+                uint32_t memaddr = ((PhysPt)SegValue(es) << 4u) + reg_bx;
 
-                    reg_sp += 6;
-                    SegSet16(es,CPU_Pop16());
-                    reg_bx = CPU_Pop16();
-                    reg_ax = CPU_Pop16();
+                reg_sp += 6;
+                SegSet16(es,CPU_Pop16());
+                reg_bx = CPU_Pop16();
+                reg_ax = CPU_Pop16();
 
-                    reg_ch = BCD2BIN(mem_readb(memaddr+3));     // hours
-                    reg_cl = BCD2BIN(mem_readb(memaddr+4));     // minutes
-                    reg_dh = BCD2BIN(mem_readb(memaddr+5));     // seconds
+                reg_ch = BCD2BIN(mem_readb(memaddr+3));     // hours
+                reg_cl = BCD2BIN(mem_readb(memaddr+4));     // minutes
+                reg_dh = BCD2BIN(mem_readb(memaddr+5));     // seconds
 
-                    reg_dl = 0;
-                }
-                else {
-                    CPU_Push16(reg_ax);
-
-                    reg_ah = 2;     // get RTC time
-                    CALLBACK_RunRealInt(0x1a);
-
-                    reg_ax = CPU_Pop16();
-
-                    reg_ch = BCD2BIN(reg_ch);       // hours
-                    reg_cl = BCD2BIN(reg_cl);       // minutes
-                    reg_dh = BCD2BIN(reg_dh);       // seconds
-
-                    // calculate milliseconds (% 20 to prevent overflow, .55ms has period of 20)
-                    // directly read BIOS_TIMER, don't want to destroy regs by calling int 1a
-                    reg_dl = (uint8_t)((mem_readd(BIOS_TIMER) % 20) * 55 % 100);
-                }
-                break;
+                reg_dl = 0;
             }
-            reg_ax=0; // get time
-            CALLBACK_RunRealInt(0x1a);
-            if(reg_al) DOS_AddDays(reg_al);
-            reg_ah=0x2c;
+            else {
+                // It turns out according to real hardware, that DOS reads the date and time once on startup
+                // and then relies on the BIOS_TIMER counter after that for time, and caches the date. So
+                // the code prior to the April 2023 change was correct after all.
+                reg_ax=0; // get time
+                CALLBACK_RunRealInt(0x1a);
+                if(reg_al) DOS_AddDays(reg_al);
+                reg_ah=0x2c;
 
-            Bitu ticks=((Bitu)reg_cx<<16)|reg_dx;
-            if(time_start<=ticks) ticks-=time_start;
-            Bitu time=(Bitu)((100.0/((double)PIT_TICK_RATE/65536.0)) * (double)ticks);
+                Bitu ticks=((Bitu)reg_cx<<16)|reg_dx;
+                Bitu time=(Bitu)((100.0/((double)PIT_TICK_RATE/65536.0)) * (double)ticks);
 
-            reg_dl=(uint8_t)((Bitu)time % 100); // 1/100 seconds
-            time/=100;
-            reg_dh=(uint8_t)((Bitu)time % 60); // seconds
-            time/=60;
-            reg_cl=(uint8_t)((Bitu)time % 60); // minutes
-            time/=60;
-            reg_ch=(uint8_t)((Bitu)time % 24); // hours
+                reg_dl=(uint8_t)((Bitu)time % 100); // 1/100 seconds
+                time/=100;
+                reg_dh=(uint8_t)((Bitu)time % 60); // seconds
+                time/=60;
+                reg_cl=(uint8_t)((Bitu)time % 60); // minutes
+                time/=60;
+                reg_ch=(uint8_t)((Bitu)time % 24); // hours
+            }
 
             //Simulate DOS overhead for timing-sensitive games
             //Robomaze 2
@@ -1620,7 +1624,7 @@ static Bitu DOS_21Handler(void) {
             break;
         }
         case 0x2d:      /* Set System Time */
-            if(date_host_forced) {
+            {
                 // unfortunately, BIOS does not return whether succeeded
                 // or not, so do a sanity check first
                 if (reg_ch > 23 || reg_cl > 59 || reg_dh > 59 || reg_dl > 99)
@@ -1629,48 +1633,41 @@ static Bitu DOS_21Handler(void) {
                     break;              // done
                 }
 
-                // timer ticks every 55ms
-                uint32_t ticks = ((((reg_ch * 60u + reg_cl) * 60u + reg_dh) * 100u) + reg_dl) * 10u / 55u;
+                if (IS_PC98_ARCH) {
+                    /* TODO! */
+                }
+                else {
+                    // timer ticks every 55ms
+                    const uint32_t csec = (((((reg_ch * 60u) + reg_cl) * 60u + reg_dh) * 100u) + reg_dl);
+                    const uint32_t ticks = (uint32_t)((double)csec * ((double)PIT_TICK_RATE/6553600.0));
 
-                CPU_Push16(reg_ax);
-                CPU_Push16(reg_cx);
-                CPU_Push16(reg_dx);
+                    CPU_Push16(reg_ax);
+                    CPU_Push16(reg_cx);
+                    CPU_Push16(reg_dx);
 
-                // use BIOS to set RTC time
-                reg_ah = 3;     // set RTC time
-                reg_ch = BIN2BCD(reg_ch);       // hours
-                reg_cl = BIN2BCD(reg_cl);       // minutes
-                reg_dh = BIN2BCD(reg_dh);       // seconds
-                reg_dl = 0;                     // no DST
+                    // use BIOS to set RTC time
+                    reg_ah = 3;     // set RTC time
+                    reg_ch = BIN2BCD(reg_ch);       // hours
+                    reg_cl = BIN2BCD(reg_cl);       // minutes
+                    reg_dh = BIN2BCD(reg_dh);       // seconds
+                    reg_dl = 0;                     // no DST
 
-                CALLBACK_RunRealInt(0x1a);
+                    CALLBACK_RunRealInt(0x1a);
 
-                // use BIOS to update clock ticks to sync time
-                // could set directly, but setting is safer to do via dedicated call (at least in theory)
-                reg_ah = 1;     // set system time
-                reg_cx = (uint16_t)(ticks >> 16);
-                reg_dx = (uint16_t)(ticks & 0xffff);
+                    // use BIOS to update clock ticks to sync time
+                    // could set directly, but setting is safer to do via dedicated call (at least in theory)
+                    reg_ah = 1;     // set system time
+                    reg_cx = (uint16_t)(ticks >> 16);
+                    reg_dx = (uint16_t)(ticks & 0xffff);
 
-                CALLBACK_RunRealInt(0x1a);
+                    CALLBACK_RunRealInt(0x1a);
 
-                reg_dx = CPU_Pop16();
-                reg_cx = CPU_Pop16();
-                reg_ax = CPU_Pop16();
+                    reg_dx = CPU_Pop16();
+                    reg_cx = CPU_Pop16();
+                    reg_ax = CPU_Pop16();
 
-                reg_al = 0;                     // OK
-                break;
-            }
-            //Check input parameters nonetheless
-            if( reg_ch > 23 || reg_cl > 59 || reg_dh > 59 || reg_dl > 99 )
-                reg_al = 0xff; 
-            else { //Allow time to be set to zero. Restore the original time for all other parameters. (QuickBasic)
-                if (reg_cx == 0 && reg_dx == 0) {time_start = mem_readd(BIOS_TIMER);LOG_MSG("Warning: game messes with DOS time!");}
-                else time_start = 0;
-				uint32_t ticks=(uint32_t)(((double)(reg_ch*3600+
-												reg_cl*60+
-												reg_dh))*18.206481481);
-				mem_writed(BIOS_TIMER,ticks);
-                reg_al = 0;
+                    reg_al = 0;                     // OK
+                }
             }
             if (sync_time) {manualtime=true;mainMenu.get_item("sync_host_datetime").check(false).refresh_item(mainMenu);}
             break;
@@ -1758,7 +1755,7 @@ static Bitu DOS_21Handler(void) {
                 case 4: /* Set cpsw */
                        LOG(LOG_DOSMISC,LOG_ERROR)("Someone playing with cpsw %x",reg_ax);
                        break;
-                case 5:reg_dl=3;break;//TODO should be z                        /* Always boot from c: :) */
+		case 5:reg_dl=3;break; /* Drive C: (TODO: Make configurable, or else initially set to Z: then re-set to the first drive mounted */
                 case 6:                                         /* Get true version number */
                        reg_bl=dos.version.major;
                        reg_bh=dos.version.minor;
@@ -2330,7 +2327,7 @@ static Bitu DOS_21Handler(void) {
                 result_errorcode = 0;
             }
             if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
-#if defined (WIN32) && !defined(HX_DOS)
+#if defined (WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
             if (winautorun&&reqwin&&*appname&&!control->SecureMode())
                 HostAppRun();
             reqwin=false;
@@ -2573,7 +2570,7 @@ static Bitu DOS_21Handler(void) {
             break;
         }
         case 0x5f:                  /* Network redirection */
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
             switch(reg_al)
             {
                 case    0x34:   //Set pipe state
@@ -2736,7 +2733,7 @@ static Bitu DOS_21Handler(void) {
                         else len = mem_strlen(data); /* Is limited to 1024 */
 
                         if(len > DOS_COPYBUFSIZE - 1) E_Exit("DOS:0x65 Buffer overflow");
-                        if(len) {
+                        else if(len) {
                             MEM_BlockRead(data,dos_copybuf,len);
                             dos_copybuf[len] = 0;
                             //No upcase as String(0x21) might be multiple asciz strings
@@ -2761,9 +2758,9 @@ static Bitu DOS_21Handler(void) {
                             else
                                 c = reg_dl; // SBCS
 
-                            if (tolower(c) == 'y')
+                            if (tolower(c) == MSG_Get("INT21_6523_YESNO_CHARS")[0])
                                 reg_ax = 1;/*yes*/
-                            else if (tolower(c) == 'n')
+                            else if (tolower(c) == MSG_Get("INT21_6523_YESNO_CHARS")[1])
                                 reg_ax = 0;/*no*/
                             else
                                 reg_ax = 2;/*neither*/
@@ -4254,8 +4251,23 @@ public:
         DOS_IHSEG = DOS_GetMemory(1,"DOS_IHSEG");
 
         /* DOS_INFOBLOCK_SEG contains the entire List of Lists, though the INT 21h call returns seg:offset with offset nonzero */
-        DOS_INFOBLOCK_SEG = DOS_GetMemory(0xC0,"DOS_INFOBLOCK_SEG");	// was 0x80
-
+	/* NTS: DOS_GetMemory() allocation sizes are in PARAGRAPHS (16-byte units) not bytes */
+	/* NTS: DOS_INFOBLOCK_SEG must be 0x20 paragraphs, CONDRV_SEG 0x08 paragraphs, and CONSTRING_SEG 0x0A paragraphs.
+	 *      The total combined size of INFOBLOCK+CONDRV+CONSTRING must be 0x32 paragraphs.
+	 *      SDA_SEG must be located at INFOBLOCK_SEG+0x32, so that the current PSP segment parameter is exactly at
+	 *      memory location INFOBLOCK_SEG:0x330. The reason for this has to do with Microsoft "Genuine MS-DOS detection"
+	 *      code in QuickBasic 7.1 and other programs designed to thwart DR-DOS at the time.
+	 *
+	 *      This is probably why DOSBox SVN hardcoded segments in the first place.
+	 *
+	 *      See also:
+	 *
+	 *      [https://www.os2museum.com/wp/how-to-void-your-valuable-warranty/]
+         *      [https://www.os2museum.com/files/drdos_detect.txt]
+         *      [https://www.os2museum.com/wp/about-that-warranty/]
+         *      [https://github.com/joncampbell123/dosbox-x/issues/3626]
+	 */
+        DOS_INFOBLOCK_SEG = DOS_GetMemory(0x20,"DOS_INFOBLOCK_SEG");	// was 0x80
         DOS_CONDRV_SEG = DOS_GetMemory(0x08,"DOS_CONDRV_SEG");		// was 0xA0
         DOS_CONSTRING_SEG = DOS_GetMemory(0x0A,"DOS_CONSTRING_SEG");	// was 0xA8
         DOS_SDA_SEG = DOS_GetMemory(DOS_SDA_SEG_SIZE>>4,"DOS_SDA_SEG");		// was 0xB2  (0xB2 + 0x56 = 0x108)
@@ -4293,11 +4305,11 @@ public:
 		callback[4].Install(DOS_27Handler,CB_IRET,"DOS Int 27");
 		callback[4].Set_RealVec(0x27);
 
-        if (section->Get_bool("dos idle api")) {
-            callback[5].Install(NULL,CB_INT28,"DOS idle");
-        } else {
-            callback[5].Install(NULL,CB_IRET,"DOS idle");
-        }
+		if (section->Get_bool("dos idle api")) {
+			callback[5].Install(INT28_HANDLER,CB_INT28,"DOS idle");
+		} else {
+			callback[5].Install(NULL,CB_IRET,"DOS idle");
+		}
 		callback[5].Set_RealVec(0x28);
 
 		if (IS_PC98_ARCH) {
@@ -4616,7 +4628,7 @@ public:
 	}
 	~DOS(){
 		infix=-1;
-#if defined(WIN32) && !defined(HX_DOS)
+#if defined(WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
 		if (startwait) {
 			void EndStartProcess();
 			EndStartProcess();
@@ -5294,11 +5306,22 @@ void DOS_Int21_71a1(const char *name1, const char *name2) {
 		CALLBACK_SCF(false);
 }
 
+void set_dword(char *buff, uint32_t data)
+{
+	*buff++ = (char)data;
+	data >>= 8;
+	*buff++ = (char)data;
+	data >>= 8;
+	*buff++ = (char)data;
+	data >>= 8;
+	*buff = (char)data;
+}
+
 void DOS_Int21_71a6(const char *name1, const char *name2) {
     (void)name1;
     (void)name2;
 	char buf[64];
-	unsigned long serial_number=0x1234,st=0,cdate=0,ctime=0,adate=0,atime=0,mdate=0,mtime=0;
+	unsigned long serial_number=0x1234;
     uint8_t entry = (uint8_t)reg_bx;
     uint8_t handle = 0;
 	if (entry>=DOS_FILES) {
@@ -5307,7 +5330,7 @@ void DOS_Int21_71a6(const char *name1, const char *name2) {
 		return;
 	}
 	DOS_PSP psp(dos.psp());
-	for (unsigned int i=0;i<=DOS_FILES;i++)
+	for (unsigned int i=0;i<DOS_FILES;i++)
 		if (Files[i] && psp.FindEntryByHandle(i)==entry)
 			handle=i;
 	if (handle < DOS_FILES && Files[handle] && Files[handle]->name!=NULL) {
@@ -5326,35 +5349,42 @@ void DOS_Int21_71a6(const char *name1, const char *name2) {
 		}
 		struct stat status;
 		if (DOS_GetFileAttrEx(Files[handle]->name, &status, Files[handle]->GetDrive())) {
-#if !defined(HX_DOS)
-			time_t ttime;
-			const struct tm * ltime;
-			ttime=status.st_ctime;
-			if ((ltime=localtime(&ttime))!=0) {
-				ctime=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
-				cdate=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
-			}
-			ttime=status.st_atime;
-			if ((ltime=localtime(&ttime))!=0) {
-				atime=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
-				adate=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
-			}
-			ttime=status.st_mtime;
-			if ((ltime=localtime(&ttime))!=0) {
-				mtime=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
-				mdate=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
+			int64_t ff;
+			unsigned long st;
+
+			if(status.st_mode & S_IFDIR) st = DOS_ATTR_DIRECTORY;
+			else st = DOS_ATTR_ARCHIVE;
+
+			/* Win32 stat() will not return the correct file size of a file open for writing */
+#if defined (WIN32)
+			if (Files[handle]->IsOpen())
+			{
+				Files[handle]->Flush();
+				uint32_t oldPos = Files[handle]->GetSeekPos();
+				uint32_t newPos = 0;
+				Files[handle]->Seek(&newPos, DOS_SEEK_END);
+				status.st_size = Files[handle]->GetSeekPos();
+				Files[handle]->Seek(&oldPos, DOS_SEEK_SET);
 			}
 #endif
-			sprintf(buf,"%-4s%-4s%-4s%-4s%-4s%-4s%-4s%-4s%-4s%-4s%-4s%-4s%-4s",(char*)&st,(char*)&ctime,(char*)&cdate,(char*)&atime,(char*)&adate,(char*)&mtime,(char*)&mdate,(char*)&serial_number,(char*)&st,(char*)&st,(char*)&st,(char*)&st,(char*)&handle);
-			for (int i=32;i<36;i++) buf[i]=0;
-			buf[36]=(char)((uint32_t)status.st_size%256);
-			buf[37]=(char)(((uint32_t)status.st_size%65536)/256);
-			buf[38]=(char)(((uint32_t)status.st_size%16777216)/65536);
-			buf[39]=(char)((uint32_t)status.st_size/16777216);
-			buf[40]=(char)status.st_nlink;
-			for (int i=41;i<47;i++) buf[i]=0;
-			buf[52]=0;
-			MEM_BlockWrite(SegPhys(ds)+reg_dx,buf,53);
+
+			memset(buf, 0, 52);
+			set_dword(buf, st);
+			// 116444736000000000LL = FILETIME 1970/01/01 00:00:00
+			ff = 116444736000000000LL + (int64_t)status.st_ctime * 10000000LL;
+			set_dword(&buf[4], (uint32_t)ff);
+			set_dword(&buf[8], (uint32_t)(ff >> 32));
+			ff = 116444736000000000LL + (int64_t)status.st_atime * 10000000LL;
+			set_dword(&buf[12], (uint32_t)ff);
+			set_dword(&buf[16], (uint32_t)(ff >> 32));
+			ff = 116444736000000000LL + (int64_t)status.st_mtime * 10000000LL;
+			set_dword(&buf[20], (uint32_t)ff);
+			set_dword(&buf[24], (uint32_t)(ff >> 32));
+			set_dword(&buf[28], serial_number);
+			set_dword(&buf[36], status.st_size);
+			set_dword(&buf[40], status.st_nlink);
+			set_dword(&buf[48], handle);
+			MEM_BlockWrite(SegPhys(ds)+reg_dx,buf,52);
 			reg_ax=0;
 			CALLBACK_SCF(false);
 		} else {
@@ -5372,22 +5402,36 @@ void DOS_Int21_71a7(const char *name1, const char *name2) {
     (void)name2;
 	switch (reg_bl) {
 			case 0x00:
-					reg_cl=mem_readb(SegPhys(ds)+reg_si);	//not yet a proper implementation,
-					reg_ch=mem_readb(SegPhys(ds)+reg_si+1);	//but MS-DOS 7 and 4DOS DIR should
-					reg_dl=mem_readb(SegPhys(ds)+reg_si+4);	//show date/time correctly now
-					reg_dh=mem_readb(SegPhys(ds)+reg_si+5);
-					reg_bh=0;
-					reg_ax=0;
+				{
+					int64_t ff = ((int64_t)mem_readd(SegPhys(ds) + reg_si + 4) << 32) | mem_readd(SegPhys(ds) + reg_si);
+					time_t tt = (time_t)((ff - 116444736000000000LL) / 10000000LL);
+					struct tm *ftm = localtime(&tt);
+					if(ftm != NULL) {
+						reg_cx = DOS_PackTime((uint16_t)ftm->tm_hour, (uint16_t)ftm->tm_min, (uint16_t)ftm->tm_sec);
+						reg_dx = DOS_PackDate((uint16_t)(ftm->tm_year + 1900), (uint16_t)(ftm->tm_mon + 1), (uint16_t)ftm->tm_mday);
+						reg_bh = (ff / 100000LL) % 200;
+					}
+					reg_ax = 0;
 					CALLBACK_SCF(false);
-					break;
+				}
+				break;
 			case 0x01:
-					mem_writeb(SegPhys(es)+reg_di,reg_cl);
-					mem_writeb(SegPhys(es)+reg_di+1,reg_ch);
-					mem_writeb(SegPhys(es)+reg_di+4,reg_dl);
-					mem_writeb(SegPhys(es)+reg_di+5,reg_dh);
-					reg_ax=0;
+				{
+					struct tm ftm = {0};
+					ftm.tm_year = ((reg_dx >> 9) & 0x7f) + 80;
+					ftm.tm_mon = ((reg_dx >> 5) & 0x0f) - 1;
+					ftm.tm_mday = (reg_dx & 0x1f);
+					ftm.tm_hour = (reg_cx >> 11) & 0x1f;
+					ftm.tm_min = (reg_cx >> 5) & 0x3f;
+					ftm.tm_sec = (reg_cx & 0x1f) * 2;
+					ftm.tm_isdst = -1;
+					int64_t ff = 116444736000000000LL + (int64_t)mktime(&ftm) * 10000000LL + reg_bh * 100000LL;
+					mem_writed(SegPhys(es) + reg_di, (uint32_t)ff);
+					mem_writed(SegPhys(es) + reg_di + 4, (uint32_t)(ff >> 32));
+					reg_ax = 0;
 					CALLBACK_SCF(false);
-					break;
+				}
+				break;
 			default:
 					E_Exit("DOS:Illegal LFN TimeConv call %2X",reg_bl);
 	}
