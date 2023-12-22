@@ -80,7 +80,7 @@
 #include "keyboard.h"
 #include "clockdomain.h"
 
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
 # include <emscripten.h>
 #endif
 
