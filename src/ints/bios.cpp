@@ -59,7 +59,7 @@ extern bool PS1AudioCard;
 #include <sys/timeb.h>
 #endif
 
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
 # include <emscripten.h>
 #endif
 
@@ -9551,7 +9551,7 @@ startfunction:
             BIOS_Int10RightJustifiedPrint(x,y,"ISA Plug & Play BIOS active\n");
         }
 
-#if !defined(C_EMSCRIPTEN)
+#if !defined(JSDOS)
         BIOS_Int10RightJustifiedPrint(x,y,"\nHit SPACEBAR to pause at this screen\n", false, true);
         BIOS_Int10RightJustifiedPrint(x,y,"\nPress DEL to enter BIOS setup screen\n", false, true);
         y--; /* next message should overprint */

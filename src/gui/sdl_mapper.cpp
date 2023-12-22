@@ -58,8 +58,8 @@
 #include "shell.h"
 #include "jfont.h"
 
-#if C_EMSCRIPTEN
-# include <emscripten.h>
+#ifdef JSDOS
+#include <jsdos-asyncify.h>
 #endif
 
 #include <map>
@@ -4961,13 +4961,13 @@ void BIND_MappingEvents(void) {
     if (GUI_JoystickCount()>0) SDL_JoystickUpdate();
     MAPPER_UpdateJoysticks();
 
-#if C_EMSCRIPTEN
-    emscripten_sleep(0);
+#if JSDOS
+    asyncify_sleep(0);
 #endif
 
     while (SDL_PollEvent(&event)) {
-#if C_EMSCRIPTEN
-        emscripten_sleep(0);
+#if JSDOS
+        asyncify_sleep(0);
 #endif
 
         switch (event.type) {
@@ -5402,8 +5402,8 @@ void MAPPER_RunInternal() {
     SDL_JoystickEventState(SDL_ENABLE);
 #endif
     while (!mapper.exit) {
-#if C_EMSCRIPTEN
-        emscripten_sleep(0);
+#if JSDOS
+        asyncify_sleep(0);
 #endif
 
         if (mapper.redraw) {
