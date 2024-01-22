@@ -255,7 +255,7 @@ int CMscdex::AddDrive(uint16_t _drive, char* physicalPath, uint8_t& subUnit)
 	switch (CDROM_GetMountType(physicalPath,forceCD)) {
 	case 0x00: {	
 		LOG(LOG_MISC,LOG_NORMAL)("MSCDEX: Mounting physical cdrom: %s"	,physicalPath);
-#if defined (WIN32)
+#if defined (WIN32) && !defined(JSDOS)
 		// Check OS
 		OSVERSIONINFO osi;
 		osi.dwOSVersionInfoSize = sizeof(osi);

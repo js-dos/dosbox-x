@@ -41,7 +41,7 @@ void retrowave_init_dosbox(const std::string& bus, const std::string& path, cons
 		rc = retrowave_init_posix_serialport(&retrowave_global_context, buf);
 #endif
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(JSDOS)
 		rc = retrowave_init_win32_serialport(&retrowave_global_context, path.c_str());
 #endif
 	} else if (bus == "spi") {
