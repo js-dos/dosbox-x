@@ -74,12 +74,14 @@
 #include <sys/time.h>
 #endif
 
+#ifndef WIN32
 #if HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
 
 #if HAVE_NETINET_IN_H
 #include <netinet/in.h>
+#endif
 #endif
 
 #if HAVE_NETINET_TCP_H
