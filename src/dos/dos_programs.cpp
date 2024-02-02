@@ -3080,7 +3080,7 @@ public:
         if(o->hEvent != INVALID_HANDLE_VALUE) CloseHandle(o->hEvent);
     }
 
-    bool StartReadDisk(HANDLE f, OVERLAPPED* o, uint8_t* buffer, Bitu offset, Bitu size) { 
+    bool StartReadDisk(HANDLE f, OVERLAPPED* o, uint8_t* buffer, Bitu offset, Bitu size) {
         o->Offset = (DWORD)offset;
         if (!ReadFile(f, buffer, (DWORD)size, NULL, o) &&
             (GetLastError()==ERROR_IO_PENDING)) return true;
@@ -4862,7 +4862,7 @@ public:
     void Run(void) {
         //Hack To allow long commandlines
         ChangeToLongCmd();
-        /* In secure mode don't allow people to change imgmount points. 
+        /* In secure mode don't allow people to change imgmount points.
          * Neither mount nor unmount */
         if(control->SecureMode()) {
             WriteOut(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
@@ -4973,7 +4973,7 @@ public:
         std::string fstype="fat";
         bool rfstype=cmd->FindString("-fs",fstype,true);
 		std::transform(fstype.begin(), fstype.end(), fstype.begin(), ::tolower);
-        
+
         Bitu sizes[4] = { 0,0,0,0 };
         int reserved_cylinders=0;
         std::string reservecyl;
@@ -5019,7 +5019,7 @@ public:
         } else if (type=="iso") {
             //str_size=="2048,1,60000,0";   // ignored, see drive_iso.cpp (AllocationInfo)
             fstype = "iso";
-        } 
+        }
 
         //load the size parameter
         //auto detect hard drives if not specified
@@ -5101,7 +5101,7 @@ public:
 #endif
             if (paths.size() == 0) {
                 if (strcasecmp(temp_line.c_str(), "-u")&&!qmount) WriteOut(MSG_Get("PROGRAM_IMGMOUNT_SPECIFY_FILE"));
-                return; 
+                return;
             }
 			if (!rtype&&!rfstype&&fstype!="none"&&paths[0].length()>4) {
 				char ext[5];
@@ -5205,6 +5205,13 @@ public:
             else {
                 if (AttachToBiosAndIdeByIndex(newImage, (unsigned char)driveIndex, (unsigned char)ide_index, ide_slave)) {
                     WriteOut(MSG_Get("PROGRAM_IMGMOUNT_MOUNT_NUMBER"), drive - '0', (!paths.empty()) ? (wpcolon&&paths[0].length()>1&&paths[0].c_str()[0]==':'?paths[0].c_str()+1:paths[0].c_str()) : (el_torito != ""?"El Torito floppy drive":(type == "ram"?"RAM drive":"-")));
+						const char *ext = paths.size() ? strrchr(paths[0].c_str(), '.') : nullptr;
+						if (ext != NULL) {
+							if ((!IS_PC98_ARCH && strcasecmp(ext,".img") && strcasecmp(ext,".ima") && strcasecmp(ext,".vhd") && strcasecmp(ext,".qcow2")) ||
+								(IS_PC98_ARCH && strcasecmp(ext,".hdi") && strcasecmp(ext,".nhd") && strcasecmp(ext,".img") && strcasecmp(ext,".ima"))){
+								WriteOut(MSG_Get("PROGRAM_MOUNT_UNSUPPORTED_EXT"), ext);
+							}
+						}
                     if (swapInDisksSpecificDrive == driveIndex || swapInDisksSpecificDrive == -1) {
                         for (size_t si=0;si < MAX_SWAPPABLE_DISKS;si++) {
                             if (diskSwap[si] != NULL) {
@@ -5784,7 +5791,7 @@ private:
         }
 
         bool imgsizedetect = isHardDrive && sizes[0] == 0;
-        
+
         std::vector<DOS_Drive*> imgDisks;
         std::vector<std::string>::size_type i;
         std::vector<DOS_Drive*>::size_type ct;
@@ -5848,21 +5855,21 @@ private:
                                 }
                                 break;
                             }
-                            case imageDiskVHD::ERROR_OPENING: 
+                            case imageDiskVHD::ERROR_OPENING:
                                 errorMessage = MSG_Get("VHD_ERROR_OPENING"); break;
-                            case imageDiskVHD::INVALID_DATA: 
+                            case imageDiskVHD::INVALID_DATA:
                                 errorMessage = MSG_Get("VHD_INVALID_DATA"); break;
-                            case imageDiskVHD::UNSUPPORTED_TYPE: 
+                            case imageDiskVHD::UNSUPPORTED_TYPE:
                                 errorMessage = MSG_Get("VHD_UNSUPPORTED_TYPE"); break;
-                            case imageDiskVHD::ERROR_OPENING_PARENT: 
+                            case imageDiskVHD::ERROR_OPENING_PARENT:
                                 errorMessage = MSG_Get("VHD_ERROR_OPENING_PARENT"); break;
-                            case imageDiskVHD::PARENT_INVALID_DATA: 
+                            case imageDiskVHD::PARENT_INVALID_DATA:
                                 errorMessage = MSG_Get("VHD_PARENT_INVALID_DATA"); break;
-                            case imageDiskVHD::PARENT_UNSUPPORTED_TYPE: 
+                            case imageDiskVHD::PARENT_UNSUPPORTED_TYPE:
                                 errorMessage = MSG_Get("VHD_PARENT_UNSUPPORTED_TYPE"); break;
-                            case imageDiskVHD::PARENT_INVALID_MATCH: 
+                            case imageDiskVHD::PARENT_INVALID_MATCH:
                                 errorMessage = MSG_Get("VHD_PARENT_INVALID_MATCH"); break;
-                            case imageDiskVHD::PARENT_INVALID_DATE: 
+                            case imageDiskVHD::PARENT_INVALID_DATE:
                                 errorMessage = MSG_Get("VHD_PARENT_INVALID_DATE"); break;
                             default: break;
                             }
@@ -6056,7 +6063,7 @@ private:
         }
         DriveManager::InitializeDrive(drive - 'A');
 
-        // Set the correct media byte in the table 
+        // Set the correct media byte in the table
         mem_writeb(Real2Phys(dos.tables.mediaid) + ((unsigned int)drive - 'A') * dos.tables.dpb_size, mediaid);
 
         /* Command uses dta so set it to our internal dta */
@@ -6148,7 +6155,7 @@ private:
         if (!yet_detected) {
             yet_detected = DetectBximagePartition(fcsize, sizes);
         }
-        
+
         uint8_t ptype = buf[0x1c2]; // Location of DOS 3.3+ partition type
 	bool assume_lba = false;
 
@@ -6274,7 +6281,7 @@ private:
         }
         return false;
     }
-    
+
     bool DetectBximagePartition(uint32_t fcsize, Bitu sizes[]) {
         // Try bximage disk geometry
         uint32_t cylinders = fcsize / (16 * 63);
@@ -6286,7 +6293,7 @@ private:
         }
         return false;
     }
-    
+
     bool MountIso(const char drive, const std::vector<std::string> &paths, const signed char ide_index, const bool ide_slave) {
         //mount cdrom
         if (Drives[drive - 'A']) {
@@ -6329,7 +6336,7 @@ private:
         DriveManager::InitializeDrive(drive - 'A');
         DOS_EnableDriveMenu(drive);
 
-        // Set the correct media byte in the table 
+        // Set the correct media byte in the table
         mem_writeb(Real2Phys(dos.tables.mediaid) + ((unsigned int)drive - 'A') * dos.tables.dpb_size, mediaid);
 
         // If instructed, attach to IDE controller as ATAPI CD-ROM device
