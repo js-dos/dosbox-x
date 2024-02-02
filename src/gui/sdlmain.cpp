@@ -196,8 +196,8 @@ typedef enum PROCESS_DPI_AWARENESS {
 } PROCESS_DPI_AWARENESS;
 #endif
 
-#if C_EMSCRIPTEN
-# include <emscripten.h>
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
 #endif
 
 #include "../src/libs/gui_tk/gui_tk.h"
@@ -1348,7 +1348,9 @@ void PauseDOSBoxLoop(Bitu /*unused*/) {
         }
 
 #if C_EMSCRIPTEN
+#ifdef EMSCRIPTEN
         emscripten_sleep(0);
+#endif
         SDL_PollEvent(&event);
 #elif C_GAMELINK
         // Keep GameLink ticking over.
@@ -2926,7 +2928,7 @@ void GFX_OpenGLRedrawScreen(void) {
 }
 
 void GFX_EndUpdate(const uint16_t *changedLines) {
-#if C_EMSCRIPTEN
+#ifdef EMSCRIPTEN
     emscripten_sleep(0);
 #endif
 
@@ -4562,7 +4564,7 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button, SDL_MouseMotionEven
 
                 /* fall into another loop to process the menu */
                 while (runloop) {
-#if C_EMSCRIPTEN
+#if EMSCRIPTEN
                     emscripten_sleep(0);
                     if (!SDL_PollEvent(&event)) continue;
 #else
@@ -5405,7 +5407,7 @@ void GFX_Events() {
 
     GFX_EventsMouse();
 
-#if C_EMSCRIPTEN
+#ifdef EMSCRIPTEN
     emscripten_sleep(0);
 #endif
 
@@ -5574,7 +5576,9 @@ void GFX_Events() {
 
                     while (paused) {
 #if C_EMSCRIPTEN
+#ifdef EMSCRIPTEN
                         emscripten_sleep(0);
+#endif
                         SDL_PollEvent(&ev);
 #else
                         // WaitEvent waits for an event rather than polling, so CPU usage drops to zero
