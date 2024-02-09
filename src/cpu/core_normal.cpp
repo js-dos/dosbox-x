@@ -174,7 +174,6 @@ Bits CPU_Core_Normal_Run(void) {
 	    return CBRET_NONE;
 
 	while (CPU_Cycles-->0) {
-        jsdos::incCycles();
 		LOADIP;
 		last_prefix=MP_NONE;
 		core.opcode_index=cpu.code.big*(Bitu)0x200u;
