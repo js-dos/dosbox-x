@@ -217,7 +217,7 @@ CDROM_Interface_Image::AudioFile::~AudioFile()
 /**
  *  Seek takes in a Redbook CD-DA byte offset relative to the track's start
  *  time and returns true if the seek succeeded.
- * 
+ *
  *  When dealing with a raw bin/cue file, this requested byte position maps
  *  one-to-one with the bytes in raw binary image, as we see used in the
  *  BinaryTrack::seek() function.  However, when dealing with codec-based
@@ -665,7 +665,7 @@ bool CDROM_Interface_Image::PlayAudioSector(unsigned long start, unsigned long l
             // Hack: sometimes games points to the sector close to the end of previous track
             //       rather than the start of target track, so go to the target track in such case.
         }
-    
+
         is_playable = trackFile->seek(offset);
 		// only initialize the player elements if our track is playable
 		if (is_playable) {
@@ -1551,10 +1551,14 @@ void CDROM_Interface_Image::ClearTracks()
 }
 
 void CDROM_Image_ShutDown(Section* /*sec*/) {
+#ifndef JSDOS
 	Sound_Quit();
+#endif
 }
 
 void CDROM_Image_Init() {
+#ifndef JSDOS
 	Sound_Init();
 	AddExitFunction(AddExitFunctionFuncPair(CDROM_Image_ShutDown));
+#endif
 }
