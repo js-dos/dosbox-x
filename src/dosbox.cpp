@@ -387,7 +387,9 @@ static Bitu Normal_Loop(void) {
                 dosbox_allow_nonrecursive_page_fault = true;
                 auto cycles = CPU_Cycles;
                 ret = (*cpudecoder)();
+#ifdef JSDOS_X
                 jsdos::incCycles(cycles - CPU_Cycles);
+#endif
                 dosbox_allow_nonrecursive_page_fault = saved_allow;
 
                 if (GCC_UNLIKELY(ret<0))
