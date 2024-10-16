@@ -23,6 +23,11 @@
 #include "callback.h"
 #include "bios.h"
 #include "bios_disk.h"
+
+#ifdef JSDOS_X
+#include <jsdos-drive.h>
+#endif
+
 #include "timer.h"
 #include "regs.h"
 #include "mem.h"
@@ -1920,7 +1925,13 @@ static Bitu INT13_DiskHandler(void) {
         segat = SegValue(es);
         bufptr = reg_bx;
         for(i=0;i<reg_al;i++) {
+#ifdef JSDOS_X
+        	jsdos::SockDrive::asyncRead = true;
+#endif
             last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)((reg_cl & 63)+i), sectbuf);
+#ifdef JSDOS_X
+        	jsdos::SockDrive::asyncRead = false;
+#endif
 
             if (drivenum < 2)
                 diskio_delay(512, 0); // Floppy
@@ -2217,7 +2228,13 @@ static Bitu INT13_DiskHandler(void) {
         segat = dap.seg;
         bufptr = dap.off;
         for(i=0;i<dap.num;i++) {
+#ifdef JSDOS_X
+        	jsdos::SockDrive::asyncRead = true;
+#endif
             last_status = imageDiskList[drivenum]->Read_AbsoluteSector(dap.sector+i, sectbuf);
+#ifdef JSDOS_X
+        	jsdos::SockDrive::asyncRead = false;
+#endif
 
             if(drivenum < 2)
                 diskio_delay(512, 0); // Floppy

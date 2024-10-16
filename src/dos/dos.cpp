@@ -522,6 +522,24 @@ void DOS_AddDays(uint8_t days) {
 int disk_data_rate = 2100000;    // 2.1MBytes/sec mid 1990s IDE PIO hard drive without SMARTDRV
 int floppy_data_rate;
 
+#ifdef JSDOS_X
+void sockdrive_delay() {
+    double scalar;
+    double endtime;
+
+    scalar = (double)512 / 2100000;
+    endtime = PIC_FullIndex() + (scalar * 1000);
+
+    /* MS-DOS will most likely enable interrupts in the course of
+        * performing disk I/O */
+    CPU_STI();
+
+    do {
+        CALLBACK_Idle();
+    } while (PIC_FullIndex() < endtime);
+}
+#endif
+
 void diskio_delay(Bits value/*bytes*/, int type = -1) {
 #ifndef JSDOS
     if ((type == 0 && floppy_data_rate != 0) || (type != 0 && disk_data_rate != 0)) {
