@@ -5182,13 +5182,21 @@ public:
 #if defined(JSDOS)
             else if (sockdrive) {
                 std::string url;
-                std::string owner;
-                std::string name;
-                if (!cmd->FindCommand(2, url) || !cmd->FindCommand(3, owner) || !cmd->FindCommand(4, name)) {
-                    WriteOut("Wrong syntax, command should be: imgmount n sockdrive host:port owner drive\n");
+                if (!cmd->FindCommand(2, url)) {
+                    WriteOut("Wrong syntax, command should be: imgmount n sockdrive <url>\n");
                     return;
                 }
-                newImage = jsdos::SockDrive::create(url, owner, name);
+                if (url.find("wss://") != std::string::npos || url.find("ws://") != std::string::npos) {
+                  std::string owner;
+                  std::string name;
+                  if (!cmd->FindCommand(3, owner) || !cmd->FindCommand(4, name)) {
+                    WriteOut("Wrong syntax, command should be: imgmount n sockdrive host:port owner drive\n");
+                    return;
+                  }
+
+                  url += "/" + owner + "/" + name;
+                }
+                newImage = jsdos::SockDrive::create(url);
             }
 #endif
             else {
