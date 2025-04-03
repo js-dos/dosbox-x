@@ -1743,7 +1743,7 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 				// The string is big Endian UCS-16, convert to host Endian UCS-16
 				for (size_t i=0;((const uint16_t*)de->ident)[i] != 0;i++) ((uint16_t*)de->ident)[i] = be16toh(((uint16_t*)de->ident)[i]);
 				// finally, convert from UCS-16 to local code page, using C++ string construction to make a copy first
-				CodePageHostToGuestUTF16((char*)de->ident,std::basic_string<uint16_t>((const uint16_t*)de->ident).c_str());
+				CodePageHostToGuestUTF16((char*)de->ident,(const uint16_t*)std::u16string((const char16_t*)de->ident).c_str());
 			}
 		}
 	} else {
@@ -1765,7 +1765,7 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 			// The string is big Endian UCS-16, convert to host Endian UCS-16
 			for (size_t i=0;((const uint16_t*)de->ident)[i] != 0;i++) ((uint16_t*)de->ident)[i] = be16toh(((uint16_t*)de->ident)[i]);
 			// finally, convert from UCS-16 to local code page, using C++ string construction to make a copy first
-			CodePageHostToGuestUTF16((char*)de->ident,std::basic_string<uint16_t>((const uint16_t*)de->ident).c_str());
+			CodePageHostToGuestUTF16((char*)de->ident,(const uint16_t*)std::u16string((const char16_t*)de->ident).c_str());
 		}
 		else {
 			// remove any file version identifiers as there are some cdroms that don't have them
