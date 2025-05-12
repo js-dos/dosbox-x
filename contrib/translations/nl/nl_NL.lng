@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Nederlands (Nederland)
 :DOSBOX-X:CODEPAGE:858
-:DOSBOX-X:VERSION:2023.10.06
+:DOSBOX-X:VERSION:2024.03.01
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Lijnen in dit gedeelte worden uitgevoerd bij opstarten.
@@ -817,7 +817,6 @@ dosbox-x [naam] [-exit] [-version] [-fastlaunch] [-fullscreen]
 
 Voor informatie over basiskoppelen typt u ←[34;1mintro mount←[0m
 Voor informatie over cd-rom-ondersteuning typt u ←[34;1mintro cdrom←[0m
-Voor informatie over speciale toetsen typt u ←[34;1mintro special←[0m
 Voor informatie over gebruik typt u ←[34;1mintro gebruik←[0m
 
 Ga voor de nieuwste versie van DOSBox-X naar de startpagina:←[34;1m

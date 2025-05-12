@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:English (United States)
 :DOSBOX-X:CODEPAGE:437
-:DOSBOX-X:VERSION:2023.10.06
+:DOSBOX-X:VERSION:2024.03.01
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Lines in this section will be run at startup.
@@ -817,7 +817,6 @@ dosbox-x [name] [-exit] [-version] [-fastlaunch] [-fullscreen]
 
 For information about basic mount, type ←[34;1mintro mount←[0m
 For information about CD-ROM support, type ←[34;1mintro cdrom←[0m
-For information about special keys, type ←[34;1mintro special←[0m
 For information about usage, type ←[34;1mintro usage←[0m
 
 For the latest version of DOSBox-X, go to its homepage:←[34;1m

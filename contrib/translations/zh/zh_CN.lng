@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Simplified Chinese
 :DOSBOX-X:CODEPAGE:936
-:DOSBOX-X:VERSION:2023.10.06
+:DOSBOX-X:VERSION:2024.03.01
 :DOSBOX-X:REMARK:建议将国家和代码页设为 86,936 并搭配中文字体; 或使用 chs 或 cn 中文 DOS/V 模式以直接支持中文显示和打印
 :AUTOEXEC_CONFIGFILE_HELP
 Lines in this section will be run at startup.
@@ -808,7 +808,6 @@ dosbox-x [名称] [-exit] [-version] [-fastlaunch] [-fullscreen]
 
 关于基本挂载的信息, 请输入 [34;1mintro mount[0m
 关于光驱支持的信息, 请输入 [34;1mintro cdrom[0m
-关于特殊按键的信息, 请输入 [34;1mintro special[0m
 关于使用的信息, 请输入 [34;1mintro usage[0m
 
 关于最新版本的 DOSBox-X, 请访问其主页:[34;1m

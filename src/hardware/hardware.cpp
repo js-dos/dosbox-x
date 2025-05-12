@@ -32,6 +32,7 @@
 #include "mem.h"
 #include "mapper.h"
 #include "pic.h"
+#include "vga.h"
 #include "mixer.h"
 #include "render.h"
 #include "cross.h"
@@ -793,6 +794,13 @@ void CAPTURE_VideoStop() {
 #endif
 }
 
+#ifdef PNG_pHYs_SUPPORTED
+static inline unsigned long math_gcd_png_uint_32(const png_uint_32 a,const png_uint_32 b) {
+        if (b) return math_gcd_png_uint_32(b,a%b);
+        return a;
+}
+#endif
+
 void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, uint8_t * data, uint8_t * pal) {
 #if (C_SSHOT)
 	Bitu i;
@@ -837,7 +845,17 @@ void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags,
 		png_set_compression_window_bits(png_ptr, 15);
 		png_set_compression_method(png_ptr, 8);
 		png_set_compression_buffer_size(png_ptr, 8192);
-	
+
+#ifdef PNG_pHYs_SUPPORTED
+		if (width >= 8 && height >= 8) {
+			png_uint_32 x=0,y=0,g;
+			x = (png_uint_32)(4 * height);
+			y = (png_uint_32)(3 * width);
+			g = math_gcd_png_uint_32(x,y);
+			png_set_pHYs(png_ptr, info_ptr, x/g, y/g, PNG_RESOLUTION_UNKNOWN);
+		}
+#endif
+
 		if (bpp==8) {
 			png_set_IHDR(png_ptr, info_ptr, (png_uint_32)width, (png_uint_32)height,
 				8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE,
@@ -2243,7 +2261,7 @@ void HARDWARE_Destroy(Section * sec) {
 void HARDWARE_Init() {
 	LOG(LOG_MISC,LOG_DEBUG)("HARDWARE_Init: initializing");
 
-	/* TODO: Hardware init. We moved capture init to it's own function. */
+	/* TODO: Hardware init. We moved capture init to its own function. */
 	AddExitFunction(AddExitFunctionFuncPair(HARDWARE_Destroy),true);
 }
 

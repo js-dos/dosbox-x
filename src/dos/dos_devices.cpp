@@ -759,7 +759,7 @@ uint8_t DOS_FindDevice(char const * name) {
 	static char com[5] = { 'C','O','M','1',0 };
 	static char lpt[5] = { 'L','P','T','1',0 };
 	// AUX is alias for COM1 and PRN for LPT1
-	// A bit of a hack. (but less then before).
+	// A bit of a hack. (but less than before).
 	// no need for casecmp as makename returns uppercase
 	if (strcmp(name_part, "AUX") == 0) name_part = com;
 	if (strcmp(name_part, "PRN") == 0) name_part = lpt;
@@ -953,6 +953,26 @@ void INTDC_CL10h_AH08h(uint16_t count) {
 void INTDC_CL10h_AH09h(uint16_t count) {
     if (DOS_CON != NULL)
         DOS_CON->INTDC_CL10h_AH09h(count);
+}
+
+void INTDC_CL10h_AH0Ah(uint16_t pattern) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Ah(pattern);
+}
+
+void INTDC_CL10h_AH0Bh(uint16_t pattern) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Bh(pattern);
+}
+
+void INTDC_CL10h_AH0Ch(uint16_t count) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Ch(count);
+}
+
+void INTDC_CL10h_AH0Dh(uint16_t count) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Dh(count);
 }
 
 /* The CB_INT28 handler calls this callback then executes STI+HLT.

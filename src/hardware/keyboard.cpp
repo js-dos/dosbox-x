@@ -1240,6 +1240,7 @@ void pc98_kana_toggle(void);
 void pc98_numlock_toggle(void);
 void pc98_keyboard_send(const unsigned char b);
 bool pc98_force_ibm_layout = false;
+bool pc98_force_jis_layout = false;
 
 /* this version sends to the PC-98 8251 emulation NOT the AT 8042 emulation */
 void KEYBOARD_PC98_AddKey(KBD_KEYS keytype,bool pressed) {
@@ -2252,14 +2253,15 @@ uint8_t p7fd9_8255_mouse_latch = 0;
 uint8_t p7fd8_8255_mouse_int_enable = 0;
 
 void pc98_mouse_movement_apply(int x,int y) {
-    x += p7fd9_8255_mouse_x;
-    if (x < -128) x = -128;
-    if (x > 127) x = 127;
-    y += p7fd9_8255_mouse_y;
-    if (y < -128) y = -128;
-    if (y > 127) y = 127;
-    p7fd9_8255_mouse_x = (int8_t)x;
-    p7fd9_8255_mouse_y = (int8_t)y;
+    /* NTS: Contrary to initial impressions, bus mice do not clip
+     *      the counter values to stay within signed integer range,
+     *      they just count.
+     *
+     *      According to Nanshiki: [https://github.com/joncampbell123/dosbox-x/pull/4697]
+     *
+     *      -- 2023/12/21 J.C. */
+    p7fd9_8255_mouse_x += x;
+    p7fd9_8255_mouse_y += y;
 }
 
 unsigned int pc98_mouse_rate_hz = 120;
@@ -2525,6 +2527,9 @@ void KEYBOARD_OnEnterPC98(Section *sec) {
             KeyboardLayoutDetect();
         if (pc98_force_ibm_layout)
             LOG_MSG("Forcing PC-98 keyboard to use IBM US-English like default layout");
+        pc98_force_jis_layout = pc98_section->Get_bool("pc-98 force JIS keyboard layout") & !pc98_force_ibm_layout;
+        if (pc98_force_jis_layout)
+            LOG_MSG("Forcing PC-98 keyboard to use JIS (JP106) layout");
     }
 
     if (!IS_PC98_ARCH) {

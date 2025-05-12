@@ -219,8 +219,8 @@ uint32_t DOS_HMA_GET_FREE_SPACE() {
 void DOS_HMA_CLAIMED(uint16_t bytes) {
 	uint32_t limit = DOS_HMA_LIMIT();
 
-	if (limit == 0) E_Exit("HMA allocatiom bug: Claim function called when HMA allocation is not enabled");
-	if (dos_hma_allocator == 0) E_Exit("HMA allocatiom bug: Claim function called without having determined start");
+	if (limit == 0) E_Exit("HMA allocation bug: Claim function called when HMA allocation is not enabled");
+	if (dos_hma_allocator == 0) E_Exit("HMA allocation bug: Claim function called without having determined start");
 	dos_hma_allocator += bytes;
 	if (dos_hma_allocator > limit) E_Exit("HMA allocation bug: Exceeded limit");
 }
@@ -518,7 +518,7 @@ void DOS_AddDays(uint8_t days) {
 //       Drive A: can be as slow as a 3.5" 1.44MB floppy disk
 //
 // This fixes MS-DOS games that crash or malfunction if the disk I/O is too fast.
-// This also fixes "380 volt" and prevents the "city animation" from loading too fast for it's music timing (and getting stuck)
+// This also fixes "380 volt" and prevents the "city animation" from loading too fast for its music timing (and getting stuck)
 int disk_data_rate = 2100000;    // 2.1MBytes/sec mid 1990s IDE PIO hard drive without SMARTDRV
 int floppy_data_rate;
 
@@ -983,14 +983,14 @@ void HostAppRun() {
 /* called by shell to flush keyboard buffer right before executing the program to avoid
  * having the Enter key in the buffer to confuse programs that act immediately on keyboard input. */
 void DOS_FlushSTDIN(void) {
-	LOG_MSG("Flush STDIN");
-	uint8_t handle=RealHandle(STDIN);
-	if (handle!=0xFF && Files[handle] && Files[handle]->IsName("CON")) {
-		uint8_t c;uint16_t n;
-		while (DOS_GetSTDINStatus()) {
-			n=1; DOS_ReadFile(STDIN,&c,&n);
-		}
-	}
+    LOG(LOG_DOSMISC, LOG_DEBUG)("Flush STDIN");
+    uint8_t handle=RealHandle(STDIN);
+    if (handle!=0xFF && Files[handle] && Files[handle]->IsName("CON")) {
+	    uint8_t c;uint16_t n;
+	    while (DOS_GetSTDINStatus()) {
+		    n=1; DOS_ReadFile(STDIN,&c,&n);
+	    }
+    }
 }
 
 static Bitu DOS_21Handler(void) {
@@ -1697,11 +1697,11 @@ static Bitu DOS_21Handler(void) {
             // Important: This service does not set the carry flag!
             //
             // Fix for PC-98 game "Yu No". One of the TSRs used by the game, PLAY6.EXE,
-            // frees it's own PSP segment before using this TSR system call to remain
+            // frees its own PSP segment before using this TSR system call to remain
             // resident in memory. On real PC-98 MS-DOS, INT 21h AH=31h appears to
             // change the freed segment back into an allocated segment before resizing
             // as directed by the number of paragraphs in DX. In order for PLAY6.EXE to
-            // do it's job properly without crashing the game we have to do the same.
+            // do its job properly without crashing the game we have to do the same.
             //
             // [Issue #3452]
             //
@@ -1712,7 +1712,7 @@ static Bitu DOS_21Handler(void) {
                 DOS_MCB psp_mcb(dos.psp()-1);
                 if (psp_mcb.GetPSPSeg() == 0/*free block?*/) {
                     /* say so in the log, and then change it into an allocated block */
-                    LOG(LOG_DOSMISC,LOG_DEBUG)("Calling program asking to terminate and stay resident has apparently freed it's own PSP segment");
+                    LOG(LOG_DOSMISC,LOG_DEBUG)("Calling program asking to terminate and stay resident has apparently freed its own PSP segment");
                     psp_mcb.SetPSPSeg(dos.psp());
                 }
             }
@@ -2007,7 +2007,7 @@ static Bitu DOS_21Handler(void) {
                  *
                  * This is needed for "Dark Purpose" to read it's DAT file
                  * correctly, which calls INT 21h AH=3Fh with DX=0004h and CX=FFFFh
-                 * and will mis-render it's fonts, images, and color palettes
+                 * and will mis-render its fonts, images, and color palettes
                  * if we do not do this.
                  *
                  * Ref: http://files.scene.org/get/mirrors/hornet/demos/1995/d/darkp.zip */
@@ -2515,7 +2515,24 @@ static Bitu DOS_21Handler(void) {
             break;
             }
         case 0x5d:                  /* Network Functions */
-            if(reg_al == 0x06) {
+            if(reg_al == 0x00) {
+                LOG(LOG_DOSMISC,LOG_NORMAL)("DOS:5D:00:Remote Server Call");
+                /* Remote Server Call
+                 * From FeeDOS inthndlr.c line 1276:
+                 * DS:DX point to remote register content to be used with this handler
+                 * ax, bx, cx, dx, si, di, ds, es */
+                unsigned short int temp_ds = mem_readw(SegPhys(ds)+reg_dx+12);
+                unsigned short int temp_dx = mem_readw(SegPhys(ds)+reg_dx+6);
+                reg_ax = mem_readw(SegPhys(ds)+reg_dx);
+                reg_bx = mem_readw(SegPhys(ds)+reg_dx+2);
+                reg_cx = mem_readw(SegPhys(ds)+reg_dx+4);
+                reg_si = mem_readw(SegPhys(ds)+reg_dx+8);
+                reg_di = mem_readw(SegPhys(ds)+reg_dx+10);
+                SegSet16(es,mem_readw(SegPhys(ds)+reg_dx+14));
+                SegSet16(ds,temp_ds);
+                reg_dx = temp_dx;
+                DOS_21Handler();
+            } else if(reg_al == 0x06) {
                 /* FIXME: I'm still not certain, @emendelson, why this matters so much
                  *        to WordPerfect 5.1 and 6.2 and why it causes problems otherwise.
                  *        DOSBox and DOSBox-X only use the first 0x1A bytes anyway. */
@@ -2727,7 +2744,7 @@ static Bitu DOS_21Handler(void) {
                         CALLBACK_SCF(false);
                         break;
                     case 0x21: /* Capitalize String (cx=length) */
-                    case 0x22: /* Capatilize ASCIZ string */
+                    case 0x22: /* Capitalize ASCIZ string */
                         data = SegPhys(ds) + reg_dx;
                         if(reg_al == 0x21) len = reg_cx; 
                         else len = mem_strlen(data); /* Is limited to 1024 */
@@ -3051,9 +3068,16 @@ static Bitu DOS_21Handler(void) {
 			} else if (reg_al==3) {
 				/* Get extended free disk space */
 				MEM_StrCopy(SegPhys(ds)+reg_dx,name1,reg_cx);
-				if (name1[1]==':'&&name1[2]=='\\')
-					reg_dl=name1[0]-'A'+1;
-				else {
+                if(name1[1] == ':' && name1[2] == '\\') {
+                    name1[0] = toupper(name1[0]);
+                    if((name1[0] < 'A') || (name1[0] > 'Z')) {
+                        reg_ax = 0x15; // Invalid drive letter
+                        CALLBACK_SCF(true);
+                        break;
+                    }
+                    reg_dl = name1[0] - 'A' + 1; // Drive A = 1, B = 2, ...
+                }
+                else {
 					reg_ax=0xffff;
 					CALLBACK_SCF(true);
 					break;
@@ -3636,6 +3660,26 @@ static Bitu DOS_29Handler(void)
 					col--;
 				}
 			} else {
+				if(isDBCSCP() && isKanji1(reg_al) && col == ncols - 1) {
+					col = 0;
+					if(row < nrows) {
+						row++;
+					} else {
+						uint8_t tmp_al = reg_al;
+						reg_bh = 0x07;
+						reg_ax = 0x0601;
+						reg_cx = 0x0000;
+						reg_dl = (uint8_t)(ncols - 1);
+						reg_dh = (uint8_t)nrows;
+						CALLBACK_RunRealInt(0x10);
+						reg_al = tmp_al;
+					}
+					reg_ah = 0x02;
+					reg_bh = page;
+					reg_dl = col;
+					reg_dh = row;
+					CALLBACK_RunRealInt(0x10);
+				}
 				reg_ah = 0x09;
 				reg_bh = page;
 				reg_bl = int29h_data.ansi.attr;

@@ -1264,7 +1264,7 @@ bool DOS_GetFreeDiskSpace32(uint8_t drive,uint32_t * bytes,uint32_t * sectors,ui
 }
 
 bool DOS_DuplicateEntry(uint16_t entry,uint16_t * newentry) {
-	// Dont duplicate console handles
+	// Don't duplicate console handles
 /*	if (entry<=STDPRN) {
 		*newentry = entry;
 		return true;
@@ -2366,7 +2366,7 @@ void unmount(int lcv) {
         if (cdrom) IDE_CDROM_Detach(lcv);
         Drives[lcv]=0;
         DOS_EnableDriveMenu('A'+lcv);
-        mem_writeb(Real2Phys(dos.tables.mediaid)+(unsigned int)'A'+lcv*dos.tables.dpb_size,0);
+        mem_writeb(Real2Phys(dos.tables.mediaid)+lcv*dos.tables.dpb_size,0);
     }
 }
 

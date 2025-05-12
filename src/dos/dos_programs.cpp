@@ -378,7 +378,7 @@ void MountHelper(char drive, const char drive2[DOS_PATHLENGTH], std::string cons
 	if (!newdrive) E_Exit("DOS:Can't create drive");
 	Drives[drive-'A']=newdrive;
 	DOS_EnableDriveMenu(drive);
-	mem_writeb(Real2Phys(dos.tables.mediaid)+(drive-'A')*2,mediaid);
+	mem_writeb(Real2Phys(dos.tables.mediaid)+(drive-'A')*dos.tables.dpb_size,mediaid);
 	if(drive_type=="CDROM")
 		LOG_MSG("GUI: Drive %c is mounted as CD-ROM",drive);
 	else
@@ -493,7 +493,7 @@ void MenuMountDrive(char drive, const char drive2[DOS_PATHLENGTH]) {
 	if(error && (type==DRIVE_CDROM)) return;
 	Drives[drive-'A']=newdrive;
 	DOS_EnableDriveMenu(drive);
-	mem_writeb(Real2Phys(dos.tables.mediaid)+(drive-'A')*2,mediaid);
+	mem_writeb(Real2Phys(dos.tables.mediaid)+(drive-'A')*dos.tables.dpb_size,mediaid);
     if(type == DRIVE_CDROM) LOG_MSG("GUI: Drive %c is mounted as CD-ROM %c:\\", drive, drive);
     else LOG_MSG("GUI: Drive %c is mounted as local directory %c:\\", drive, drive);
     if(drive == drive2[0] && strlen(drive2) == 3) {
@@ -603,8 +603,8 @@ void MenuBrowseFDImage(char drive, int num, int type) {
     getcwd(Temp_CurrentDir, 512);
     char const * lTheOpenFileName;
     std::string files="", fname="";
-    const char *lFilterPatterns[] = {"*.ima","*.img","*.fdi","*.nfd","*.d88","*.IMA","*.IMG","*.FDI", "*.NFD", "*.D88"};
-    const char *lFilterDescription = "Floppy image files (*.ima, *.img, *.fdi, *.nfd, *.d88)";
+    const char *lFilterPatterns[] = {"*.ima","*.img","*.xdf","*.fdi","*.hdm","*.nfd","*.d88","*.IMA","*.IMG","*.XDF","*.FDI","*.HDM","*.NFD","*.D88"};
+    const char *lFilterDescription = "Floppy image files (*.ima, *.img, *.xdf, *.fdi, *.hdm, *.nfd, *.d88)";
 #ifdef JSDOS
     lTheOpenFileName = "floppy_image";
 #else
@@ -673,8 +673,8 @@ void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple) {
 #endif
         if (lTheOpenFileName) fname = GetNewStr(lTheOpenFileName);
     } else {
-        const char *lFilterPatterns[] = {"*.ima","*.img","*.vhd","*.fdi","*.hdi","*.nfd","*.nhd","*.d88","*.iso","*.cue","*.bin","*.chd","*.mdf","*.gog","*.ins","*.IMA","*.IMG","*.VHD","*.FDI","*.HDI","*.NFD","*.NHD","*.D88","*.ISO","*.CUE","*.BIN","*.CHD","*.MDF","*.GOG","*.INS"};
-        const char *lFilterDescription = "Disk/CD image files (*.ima, *.img, *.vhd, *.fdi, *.hdi, *.nfd, *.nhd, *.d88, *.iso, *.cue, *.bin, *.chd, *.mdf, *.gog, *.ins)";
+        const char *lFilterPatterns[] = {"*.ima","*.img","*.vhd","*.fdi","*.hdi","*.nfd","*.nhd","*.d88","*.hdm","*.xdf","*.iso","*.cue","*.bin","*.chd","*.mdf","*.gog","*.ins","*.IMA","*.IMG","*.VHD","*.FDI","*.HDI","*.NFD","*.NHD","*.D88","*.HDM","*.XDF","*.ISO","*.CUE","*.BIN","*.CHD","*.MDF","*.GOG","*.INS"};
+        const char *lFilterDescription = "Disk/CD image files";
 #ifdef JSDOS
         lTheOpenFileName = "image";
 #else
@@ -731,7 +731,21 @@ void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple) {
 		strcat(mountstring,files.size()?files.c_str():fname.c_str());
         if(!multiple) strcat(mountstring, "\"");
         if(mountiro[drive - 'A']) strcat(mountstring, " -ro");
-        if(boot) strcat(mountstring, " -u");
+        if(boot) {
+            strcat(mountstring, " -u");
+            mountstring[0] = drive - 'A' + '0';
+            runImgmount(mountstring);   // mount by drive number
+            std::string bootstr = "-Q ";
+            bootstr += drive;
+            bootstr += ':';
+            runBoot(bootstr.c_str());
+            std::string drive_warn = "Drive " + std::string(1, drive) + ": failed to boot.";
+            systemmessagebox("Error", drive_warn.c_str(), "ok", "error", 1);
+            bootstr = "-u ";
+            bootstr += drive - 'A' + '0';
+            runImgmount(bootstr.c_str()); // unmount if boot failed
+            return;
+        }
         if(arc) {
             strcat(mountstring," -q");
             runMount(mountstring);
@@ -741,17 +755,11 @@ void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple) {
             qmount=false;
         }
 		chdir( Temp_CurrentDir );
-		if (!Drives[drive-'A']) {
+		if (!Drives[drive - 'A']) {
 			drive_warn="Drive "+str+": failed to mount.";
 			systemmessagebox("Error",drive_warn.c_str(),"ok","error", 1);
 			return;
-		} else if (boot) {
-			char str[] = "-Q A:";
-			str[3]=drive;
-			runBoot(str);
-			std::string drive_warn="Drive "+std::string(1, drive)+": failed to boot.";
-			systemmessagebox("Error",drive_warn.c_str(),"ok","error", 1);
-		} else if (multiple) {
+        } else if (multiple) {
 			systemmessagebox("Information",("Mounted disk images to Drive "+std::string(1,drive)+(dos.loaded_codepage==437?":\n"+files:".")+(mountiro[drive-'A']?"\n(Read-only mode)":"")).c_str(),"ok","info", 1);
 		} else if (lTheOpenFileName) {
 			systemmessagebox("Information",(std::string(arc?"Mounted archive":"Mounted disk image")+" to Drive "+std::string(1,drive)+":\n"+std::string(lTheOpenFileName)+(arc||mountiro[drive-'A']?"\n(Read-only mode)":"")).c_str(),"ok","info", 1);
@@ -1659,6 +1667,9 @@ static void CFGTOOL_ProgramStart(Program * * make) {
 }
 
 extern bool custom_bios;
+extern size_t custom_bios_image_size;
+extern Bitu custom_bios_image_offset;
+extern unsigned char *custom_bios_image;
 extern uint32_t floppytype;
 extern bool boot_debug_break;
 extern Bitu BIOS_bootfail_code_offset;
@@ -1704,7 +1715,7 @@ bool MEM_map_ROM_physmem(Bitu start,Bitu end);
 PageHandler &Get_ROM_page_handler(void);
 
 // Normal BIOS is in the BIOS memory area
-// ITF is in it's own buffer, served by mem_itf_rom
+// ITF is in its own buffer, served by mem_itf_rom
 void PC98_BIOS_Bank_Switch(void) {
     if (PC98_BANK_Select == 0x00) {
         MEM_RegisterHandler(0xF8,&mem_itf_rom,0x8);
@@ -2027,43 +2038,53 @@ public:
             Bitu segbase = 0x100000 - loadsz;
             LOG_MSG("Loading BIOS image %s to 0x%lx, 0x%lx bytes",bios.c_str(),(unsigned long)segbase,(unsigned long)loadsz);
             fseek(romfp, 0, SEEK_SET);
-            size_t readResult = fread(GetMemBase()+segbase,loadsz,1,romfp);
+
+            // To avoid crashes should any interrupt be called on the way to running the BIOS,
+            // don't actually map it in until it's good and ready to go.
+            if (custom_bios_image != NULL) delete[] custom_bios_image;
+            custom_bios_image_size = loadsz;
+            custom_bios_image_offset = segbase;
+            custom_bios_image = new unsigned char[custom_bios_image_size];
+
+            size_t readResult = fread(custom_bios_image,loadsz,1,romfp);
             fclose(romfp);
             if (readResult != 1) {
                 LOG(LOG_IO, LOG_ERROR) ("Reading error in Run\n");
                 return;
             }
 
-            // The PC-98 BIOS has a bank switching system where at least the last 32KB
-            // can be switched to an Initial Firmware Test BIOS, which initializes the
-            // system then switches back to the full 96KB visible during runtime.
-            //
-            // We can emulate the same if a file named ITF.ROM exists in the same directory
-            // as the BIOS image we were given.
-            //
-            // To enable multiple ITFs per ROM image, we first try <bios filename>.itf.rom
-            // before trying itf.rom, for the user's convenience.
-            FILE *itffp;
+            if (IS_PC98_ARCH) {
+                // The PC-98 BIOS has a bank switching system where at least the last 32KB
+                // can be switched to an Initial Firmware Test BIOS, which initializes the
+                // system then switches back to the full 96KB visible during runtime.
+                //
+                // We can emulate the same if a file named ITF.ROM exists in the same directory
+                // as the BIOS image we were given.
+                //
+                // To enable multiple ITFs per ROM image, we first try <bios filename>.itf.rom
+                // before trying itf.rom, for the user's convenience.
+                FILE *itffp;
 
-                               itffp = getFSFile((bios + ".itf.rom").c_str(), &isz1, &isz2);
-            if (itffp == NULL) itffp = getFSFile((bios + ".ITF.ROM").c_str(), &isz1, &isz2);
-            if (itffp == NULL) itffp = getFSFile("itf.rom", &isz1, &isz2);
-            if (itffp == NULL) itffp = getFSFile("ITF.ROM", &isz1, &isz2);
+                                   itffp = getFSFile((bios + ".itf.rom").c_str(), &isz1, &isz2);
+                if (itffp == NULL) itffp = getFSFile((bios + ".ITF.ROM").c_str(), &isz1, &isz2);
+                if (itffp == NULL) itffp = getFSFile("itf.rom", &isz1, &isz2);
+                if (itffp == NULL) itffp = getFSFile("ITF.ROM", &isz1, &isz2);
 
-            if (itffp != NULL && isz2 <= 0x8000ul) {
-                LOG_MSG("Found ITF (initial firmware test) BIOS image (0x%lx bytes)",(unsigned long)isz2);
+                if (itffp != NULL && isz2 <= 0x8000ul) {
+                    LOG_MSG("Found ITF (initial firmware test) BIOS image (0x%lx bytes)",(unsigned long)isz2);
 
-                memset(PC98_ITF_ROM,0xFF,sizeof(PC98_ITF_ROM));
-                readResult = fread(PC98_ITF_ROM,isz2,1,itffp);
-                fclose(itffp);
-                if (readResult != 1) {
-                    LOG(LOG_IO, LOG_ERROR) ("Reading error in Run\n");
-                    return;
+                    memset(PC98_ITF_ROM,0xFF,sizeof(PC98_ITF_ROM));
+                    readResult = fread(PC98_ITF_ROM,isz2,1,itffp);
+                    fclose(itffp);
+                    if (readResult != 1) {
+                        LOG(LOG_IO, LOG_ERROR) ("Reading error in Run\n");
+                        return;
+                    }
+                    PC98_ITF_ROM_init = true;
                 }
-                PC98_ITF_ROM_init = true;
-            }
 
-            IO_RegisterWriteHandler(0x43D,pc98_43d_write,IO_MB);
+                IO_RegisterWriteHandler(0x43D,pc98_43d_write,IO_MB);
+            }
 
             custom_bios = true;
 
@@ -2566,7 +2587,7 @@ public:
             extern const char* RunningProgram;
 
             if (max_seg < 0x0800) {
-                /* TODO: For the adventerous, add a configuration option or command line switch to "BOOT"
+                /* TODO: For the adventurous, add a configuration option or command line switch to "BOOT"
                  *       that allows us to boot the guest OS anyway in a manner that is non-standard. */
                 if (!quiet) WriteOut("32KB of RAM is required to boot a guest OS\n");
                 return;
@@ -4847,8 +4868,13 @@ bool AttachToBiosByLetter(imageDisk* image, const char drive) {
                 return AttachToBiosByIndex(image, index);
             }
         }
+        LOG_MSG("BIOS: Warning: Four hard drives (Disk no. 2-5) attached to BIOS already. Drive %c not attached", drive);
     }
+#if 0
     else if (IS_PC98_ARCH) {
+        // FIX_ME: This code is not correct. PC-98 boots from Drive 2 only if Drive 1 is empty.
+        //         Currently disable this code since DOSBox-X supports only Drive A (Drive 1) as floppy boot drive anyway.
+
         //for pc-98 machines, mount floppies at first available index
         for (int index = 0; index < 2; index++) {
             if (imageDiskList[index] == NULL) {
@@ -4856,6 +4882,7 @@ bool AttachToBiosByLetter(imageDisk* image, const char drive) {
             }
         }
     }
+#endif
     else if ((drive - 'A') < 2) {
         //for PCs, mount floppies only if A: or B: is specified, and then if so, at specified index
         return AttachToBiosByIndex(image, drive - 'A');
@@ -4871,22 +4898,29 @@ bool AttachToBiosAndIdeByLetter(imageDisk* image, const char drive, const unsign
                 return AttachToBiosAndIdeByIndex(image, index, ide_index, ide_slave);
             }
         }
+        LOG_MSG("BIOS: Warning: Four hard drives (Disk no. 2-5) attached to BIOS already. Drive %c not attached", drive);
     }
+#if 0
     else if (IS_PC98_ARCH) {
+        // FIX_ME: This code is not correct. PC-98 boots from Drive 2 only if Drive 1 is empty.
+        //         Currently disable this code since DOSBox-X supports only Drive A (Drive 1) as floppy boot drive anyway.
+
         //for pc-98 machines, mount floppies at first available index
         for (int index = 0; index < 2; index++) {
             if (imageDiskList[index] == NULL) {
                 return AttachToBiosByIndex(image, index);
             }
         }
-    } else if ((drive - 'A') < 2) {
+    }
+#endif
+    else if ((drive - 'A') < 2) {
         //for PCs, mount floppies only if A: or B: is specified, and then if so, at specified index
         return AttachToBiosByIndex(image, drive - 'A');
     }
     return false;
 }
 
-char * GetIDEPosition(unsigned char bios_disk_index);
+std::string GetIDEPosition(unsigned char bios_disk_index);
 class IMGMOUNT : public Program {
 	public:
 		std::vector<std::string> options;
@@ -4942,7 +4976,7 @@ class IMGMOUNT : public Program {
 					}
 					if (!swaps) swaps=1;
 					sprintf(swapstr, "%d / %d", swaps==1?1:swapPosition+1, swaps);
-					WriteOut(MSG_Get("PROGRAM_IMGMOUNT_STATUS_NUMBER_FORMAT"), std::to_string(index).c_str(), dynamic_cast<imageDiskElToritoFloppy *>(imageDiskList[index])!=NULL?"El Torito floppy drive":imageDiskList[index]->diskname.c_str(), GetIDEPosition(index), swapstr);
+					WriteOut(MSG_Get("PROGRAM_IMGMOUNT_STATUS_NUMBER_FORMAT"), std::to_string(index).c_str(), dynamic_cast<imageDiskElToritoFloppy *>(imageDiskList[index])!=NULL?"El Torito floppy drive":imageDiskList[index]->diskname.c_str(), GetIDEPosition(index).c_str(), swapstr);
 					none=false;
 				}
 			}
@@ -5082,7 +5116,6 @@ class IMGMOUNT : public Program {
 			if(isdigit(tdr) && tdr - '0' >= 2) { //Allocate to respective slots if drive number is specified
 				ide_index = (tdr - '2') / 2;     // Drive number 2 = 1m (index=0, slave=false), 3 = 1s (index=0, slave=true), ...
 				ide_slave = (tdr - '2') & 1 ? true : false;
-				LOG_MSG("IDE: index %d slave=%d", ide_index, ide_slave ? 1 : 0);
 			} else if(ideattach == "auto") {
 				//LOG_MSG("IDE: attach=auto type=%s", type);
 				if(type != "floppy") {
@@ -5093,13 +5126,11 @@ class IMGMOUNT : public Program {
 						}
 					}
 					if (ide_index < 0) IDE_Auto(ide_index, ide_slave);
-					LOG_MSG("IDE: index %d slave=%d", ide_index, ide_slave ? 1 : 0);
 				}
 			}
 			else if (ideattach != "none" && isdigit(ideattach[0]) && ideattach[0] > '0') { /* takes the form [controller]<m/s> such as: 1m for primary master */
 				ide_index = ideattach[0] - '1';
 				if (ideattach.length() >= 2) ide_slave = (ideattach[1] == 's');
-				LOG_MSG("IDE: index %d slave=%d",ide_index,ide_slave?1:0);
 			}
 
 			//if floppy, don't attach to ide controller
@@ -5212,7 +5243,7 @@ class IMGMOUNT : public Program {
 				if (!rtype&&!rfstype&&fstype!="none"&&paths[0].length()>4) {
 					const char *ext = strrchr(paths[0].c_str(), '.');
 					if (ext != NULL) {
-                        if (!strcasecmp(ext, ".iso")||!strcasecmp(ext, ".cue")||!strcasecmp(ext, ".bin")||!strcasecmp(ext, ".chd")||!strcasecmp(ext, ".mdf")||!strcasecmp(ext, ".gog")||!strcasecmp(ext, ".ins")) {
+                        if (!strcasecmp(ext, ".iso")||!strcasecmp(ext, ".cue")||!strcasecmp(ext, ".bin")||!strcasecmp(ext, ".chd")||!strcasecmp(ext, ".mdf")||!strcasecmp(ext, ".gog")||!strcasecmp(ext, ".ins")||!strcasecmp(ext, ".ccd")) {
                             type="iso";
                             fstype="iso";
                             if(ide_index < 0 || ideattach == "auto") {
@@ -5221,7 +5252,6 @@ class IMGMOUNT : public Program {
                                     ide_slave = false;
                                 }
                                 else IDE_Auto(ide_index, ide_slave);
-                                LOG_MSG("IDE: index %d slave=%d", ide_index, ide_slave ? 1 : 0);
                             }
                         } else if (!strcasecmp(ext, ".ima")) {
                             type="floppy";
@@ -5461,6 +5491,11 @@ class IMGMOUNT : public Program {
 						usedef=true;
 					}
 					else break;
+				}
+				if (commandLine == "empty") {
+					/* special name */
+					paths.push_back(commandLine);
+					continue;
 				}
 #if defined (WIN32) || defined(OS2)
 				// Windows: Workaround for LaunchBox
@@ -5923,13 +5958,15 @@ class IMGMOUNT : public Program {
 				bool ro=false;
 
 				//detect hard drive geometry
-				if (imgsizedetect) {
+				if (paths[i] == "empty") {
+					errorMessage = "empty file not supported for drive letter mount\n";
+				}
+				else if (imgsizedetect) {
 					bool skipDetectGeometry = false;
 					sizes[0] = 0;
 					sizes[1] = 0;
 					sizes[2] = 0;
 					sizes[3] = 0;
-
 
 					/* .HDI images contain the geometry explicitly in the header. */
 					if (str_size.size() == 0) {
@@ -6021,14 +6058,14 @@ class IMGMOUNT : public Program {
 									newImage = NULL;
 								}
 							}
-                            else if (!strcasecmp(ext,".img") || !strcasecmp(ext,".ima")){ // Raw MFM image format is typically .img or .ima
-                                unsupported_ext = false;
-                            }
-                            else {
-                                LOG_MSG("IMGMOUNT: Perhaps unsupported extension %s", ext);
-                                unsupported_ext = true;
-                                path_no = i;
-                            }
+							else if (!strcasecmp(ext,".img") || !strcasecmp(ext,".ima")){ // Raw MFM image format is typically .img or .ima
+								unsupported_ext = false;
+							}
+							else {
+								LOG_MSG("IMGMOUNT: Perhaps unsupported extension %s", ext);
+								unsupported_ext = true;
+								path_no = i;
+							}
 						}
 					}
 					if (!skipDetectGeometry && !DetectGeometry(NULL, paths[i].c_str(), sizes)) {
@@ -6050,7 +6087,7 @@ class IMGMOUNT : public Program {
 						strcat(newDrive->info, ro ? paths[i].c_str() + 1 : paths[i].c_str());
 						LOG_MSG("IMGMOUNT: qcow2 image mounted (experimental)");
 						LOG_MSG("IMGMOUNT: qcow2 SS,S,H,C: %u,%u,%u,%u",
-								(uint32_t)newImage->sector_size, (uint32_t)newImage->sectors, (uint32_t)newImage->heads, (uint32_t)newImage->cylinders);
+							(uint32_t)newImage->sector_size, (uint32_t)newImage->sectors, (uint32_t)newImage->heads, (uint32_t)newImage->cylinders);
 						newImage = NULL;
 					}
 					else {
@@ -6070,7 +6107,7 @@ class IMGMOUNT : public Program {
 						diskfiles[i]=fdrive->loadedDisk->diskimg;
 						if ((vhdImage&&ro)||roflag) fdrive->readonly=true;
 					}
-                    unformatted = fdrive->unformatted;
+					unformatted = fdrive->unformatted;
 				}
 				if (errorMessage) {
 					if (!qmount) WriteOut(errorMessage);
@@ -6090,17 +6127,17 @@ class IMGMOUNT : public Program {
 			}
 			lastmount = drive;
 			if (!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, tmp.c_str());
-            if (unformatted) {
-                if(!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_NOT_FORMATTED"));
-                LOG_MSG("IMGMOUNT: Drive %c not formatted", drive);
-            }
-            if (unsupported_ext) {
-                const char *ext = strrchr(paths[path_no].c_str(), '.');
-                if (ext != NULL) {
-                    if(!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_UNSUPPORTED_EXT"), ext);
-                    LOG_MSG("Unsupported extension %s: Mounted as raw IMG image.", ext);
-                }
-            }
+			if (unformatted) {
+				if(!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_NOT_FORMATTED"));
+				LOG_MSG("IMGMOUNT: Drive %c not formatted", drive);
+			}
+			if (unsupported_ext) {
+				const char *ext = strrchr(paths[path_no].c_str(), '.');
+				if (ext != NULL) {
+					if(!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_UNSUPPORTED_EXT"), ext);
+					LOG_MSG("Unsupported extension %s: Mounted as raw IMG image.", ext);
+				}
+			}
 			unsigned char driveIndex = drive-'A';
 			if (imgDisks.size() == 1 || (imgDisks.size() > 1 && driveIndex < 2 && (swapInDisksSpecificDrive == driveIndex || swapInDisksSpecificDrive == -1))) {
 				imageDisk* image = ((fatDrive*)imgDisks[0])->loadedDisk;
@@ -6471,22 +6508,42 @@ class IMGMOUNT : public Program {
 
 			// Print status message (success)
 			if (!qmount) WriteOut(MSG_Get("MSCDEX_SUCCESS"));
-			std::string tmp(wpcolon&&paths[0].length()>1&&paths[0].c_str()[0]==':'?paths[0].substr(1):paths[0]);
-			for (i = 1; i < paths.size(); i++) {
-				tmp += "; " + (wpcolon&&paths[i].length()>1&&paths[i].c_str()[0]==':'?paths[i].substr(1):paths[i]);
+			if (!paths.empty()) {
+				std::string tmp(wpcolon&&paths[0].length()>1&&paths[0].c_str()[0]==':'?paths[0].substr(1):paths[0]);
+				for (i = 1; i < paths.size(); i++) {
+					tmp += "; " + (wpcolon&&paths[i].length()>1&&paths[i].c_str()[0]==':'?paths[i].substr(1):paths[i]);
+				}
+				lastmount = drive;
+				if (!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, tmp.c_str());
 			}
-			lastmount = drive;
-			if (!qmount) WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, tmp.c_str());
+			else {
+				lastmount = drive;
+			}
 			return true;
 		}
 
 		imageDisk* MountImageNone(const char* fileName, FILE* file, const Bitu sizesOriginal[], const int reserved_cylinders, bool roflag) {
+			bool assumeHardDisk = false;
 			imageDisk* newImage = 0;
 			Bitu sizes[4];
 			sizes[0] = sizesOriginal[0];
 			sizes[1] = sizesOriginal[1];
 			sizes[2] = sizesOriginal[2];
 			sizes[3] = sizesOriginal[3];
+
+			if (!strcmp(fileName,"empty")) {
+				imageDiskEmptyDrive *emd = new imageDiskEmptyDrive();
+				if (sizes[0] != 0 && sizes[1] != 0 && sizes[2] != 0 && sizes[3] != 0) {
+					emd->sector_size = sizes[0];
+					emd->sectors = sizes[1];
+					emd->heads = sizes[2];
+					emd->cylinders = sizes[3];
+					emd->diskSizeK = ((sizes[0]*sizes[1]*sizes[2]*sizes[3])+512)/1024;
+					emd->UpdateFloppyType();
+				}
+				LOG_MSG("Mounted empty C/H/S/sz %u/%u/%u/%u %uKB",emd->cylinders,emd->heads,emd->sectors,emd->sector_size,emd->diskSizeK);
+				return emd;
+			}
 
 			//check for VHD files
 			if (sizes[0] == 0 /* auto detect size */) {
@@ -6508,6 +6565,9 @@ class IMGMOUNT : public Program {
 							default: break;
 						}
 						return newImage;
+					}
+					else if (!strcasecmp(ext, ".hdi")) {
+						assumeHardDisk = true; /* bugfix for HDI images smaller than 2.88MB so that the .hdi file is not mistaken for a floppy disk image */
 					}
 				}
 			}
@@ -6555,35 +6615,35 @@ class IMGMOUNT : public Program {
 					sectors = (uint64_t)ftello64(newDisk) / (uint64_t)sizes[0];
 					imagesize = (uint32_t)(sectors / 2); /* orig. code wants it in KBs */
 					setbuf(newDisk, NULL);
-					newImage = new imageDiskD88(newDisk, fname, imagesize, (imagesize > 2880));
+					newImage = new imageDiskD88(newDisk, fname, imagesize, false/*this is a FLOPPY image format*/);
 				}
 				else if (!memcmp(tmp, "VFD1.", 5)) { /* FDD files */
 					fseeko64(newDisk, 0L, SEEK_END);
 					sectors = (uint64_t)ftello64(newDisk) / (uint64_t)sizes[0];
 					imagesize = (uint32_t)(sectors / 2); /* orig. code wants it in KBs */
 					setbuf(newDisk, NULL);
-					newImage = new imageDiskVFD(newDisk, fname, imagesize, (imagesize > 2880));
+					newImage = new imageDiskVFD(newDisk, fname, imagesize, false/*this is a FLOPPY image format*/);
 				}
 				else if (!memcmp(tmp,"T98FDDIMAGE.R0\0\0",16)) {
 					fseeko64(newDisk, 0L, SEEK_END);
 					sectors = (uint64_t)ftello64(newDisk) / (uint64_t)sizes[0];
 					imagesize = (uint32_t)(sectors / 2); /* orig. code wants it in KBs */
 					setbuf(newDisk, NULL);
-					newImage = new imageDiskNFD(newDisk, fname, imagesize, (imagesize > 2880), 0);
+					newImage = new imageDiskNFD(newDisk, fname, imagesize, false/*this is a FLOPPY image format*/, 0);
 				}
 				else if (!memcmp(tmp,"T98FDDIMAGE.R1\0\0",16)) {
 					fseeko64(newDisk, 0L, SEEK_END);
 					sectors = (uint64_t)ftello64(newDisk) / (uint64_t)sizes[0];
 					imagesize = (uint32_t)(sectors / 2); /* orig. code wants it in KBs */
 					setbuf(newDisk, NULL);
-					newImage = new imageDiskNFD(newDisk, fname, imagesize, (imagesize > 2880), 1);
+					newImage = new imageDiskNFD(newDisk, fname, imagesize, false/*this is a FLOPPY image format*/, 1);
 				}
 				else {
 					fseeko64(newDisk, 0L, SEEK_END);
 					sectors = (uint64_t)ftello64(newDisk) / (uint64_t)sizes[0];
 					imagesize = (uint32_t)(sectors / 2); /* orig. code wants it in KBs */
 					setbuf(newDisk, NULL);
-					newImage = new imageDisk(newDisk, fname, imagesize, (imagesize > 2880));
+					newImage = new imageDisk(newDisk, fname, imagesize, (imagesize > 2880) || assumeHardDisk);
 				}
 			}
 
@@ -6611,7 +6671,7 @@ class IMGMOUNT : public Program {
 				sizes[3]/*cylinders*/ = (Bitu)((uint64_t)sectors / (uint64_t)sizes[2]/*heads*/ / (uint64_t)sizes[1]/*sectors/track*/);
 
 				if (IS_PC98_ARCH) {
-					/* TODO: PC-98 has it's own issues with a 4096-cylinder limit */
+					/* TODO: PC-98 has its own issues with a 4096-cylinder limit */
 				}
 				else {
 					/* INT 13h mapping, deal with 1024-cyl limit */
@@ -9317,7 +9377,6 @@ void DOS_SetupPrograms(void) {
         "\033[32;1mInformation:\033[0m\n\n"
         "For information about basic mount, type \033[34;1mintro mount\033[0m\n"
         "For information about CD-ROM support, type \033[34;1mintro cdrom\033[0m\n"
-        "For information about special keys, type \033[34;1mintro special\033[0m\n"
         "For information about usage, type \033[34;1mintro usage\033[0m\n\n"
         "For the latest version of DOSBox-X, go to its homepage:\033[34;1m\n"
         "\n"

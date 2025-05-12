@@ -53,6 +53,7 @@
 #include <dirent.h>
 #endif
 #include "build_timestamp.h"
+#include "version_string.h"
 
 extern bool shell_keyboard_flush;
 extern bool dos_shell_running_program, mountwarning, winautorun;
@@ -238,7 +239,7 @@ void AutoexecObject::Uninstall() {
 			char* buf2 = new char[n + 1];
 			safe_strncpy(buf2, buf.c_str(), n + 1);
 			bool stringset = false;
-			// If it's a environment variable remove it from there as well
+			// If it's an environment variable remove it from there as well
 			if ((strncasecmp(buf2,"set ",4) == 0) && (strlen(buf2) > 4)){
 				char* after_set = buf2 + 4;//move to variable that is being set
 				char* test2 = strpbrk(after_set,"=");
@@ -758,7 +759,7 @@ void GetExpandedPath(std::string &path) {
 void showWelcome(Program *shell) {
     /* Start a normal shell and check for a first command init */
     ansiinstalled = is_ANSI_installed(shell);
-    std::string verstr = "v"+std::string(VERSION)+", "+GetPlatform(false);
+    std::string verstr = "v"+std::string(VERSION)+", "+OS_PLATFORM_LONG+" "+SDL_STRING+" " + OS_BIT + "-bit";
     if (machine == MCH_PC98) {
         shell->WriteOut(ParseMsg("\x86\x52\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
@@ -766,7 +767,7 @@ void showWelcome(Program *shell) {
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x56\n"));
-        shell->WriteOut(ParseMsg((std::string("\x86\x46 \033[32m")+(MSG_Get("SHELL_STARTUP_TITLE")+std::string("             ")).substr(0,30)+std::string("  \033[33m%*s\033[37m \x86\x46\n")).c_str()),34,verstr.c_str());
+        shell->WriteOut(ParseMsg((std::string("\x86\x46 \033[32m")+(MSG_Get("SHELL_STARTUP_TITLE")+std::string("      ")).substr(0,22)+std::string("  \033[33m%*s\033[37m \x86\x46\n")).c_str()),42,verstr.c_str());
         shell->WriteOut(ParseMsg("\x86\x46                                                                    \x86\x46\n"));
         shell->WriteOut(ParseMsg((std::string("\x86\x46 ")+MSG_Get("SHELL_STARTUP_HEAD1_PC98")+std::string(" \x86\x46\n")).c_str()));
         shell->WriteOut(ParseMsg("\x86\x46                                                                    \x86\x46\n"));
@@ -1172,7 +1173,7 @@ public:
 
 		if (control->opt_prerun) RunAdditional();
 
-		/* add stuff from the configfile unless -noautexec or -securemode is specified. */
+		/* add stuff from the configfile unless -noautoexec or -securemode is specified. */
 		const char * extra = section->data.c_str();
 		if (extra && !secure && !control->opt_noautoexec) {
 			/* detect if "echo off" is the first line */
@@ -1248,7 +1249,7 @@ public:
 				if (access(buffer,F_OK)) continue;
 				autoexec[12].Install(std::string("MOUNT C \"") + buffer + "\"");
 				autoexec[13].Install("C:");
-				/* Save the non-modified filename (so boot and imgmount can use it (long filenames, case sensivitive)) */
+				/* Save the non-modified filename (so boot and imgmount can use it (long filenames, case sensitive)) */
 				strcpy(orig,name);
 				upcase(name);
 				if(strstr(name,".BAT") != 0) {

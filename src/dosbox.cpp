@@ -97,7 +97,7 @@
 
 #include <list>
 
-/*===================================TODO: Move to it's own file==============================*/
+/*===================================TODO: Move to its own file==============================*/
 #if defined(__SSE__) && !(defined(_M_AMD64) || defined(__e2k__))
 bool sse2_available = false;
 bool avx2_available = false;
@@ -853,7 +853,7 @@ void Init_VGABIOS() {
     }
 
     // log
-    LOG(LOG_MISC,LOG_DEBUG)("Init_VGABIOS: Initializing VGA BIOS and parsing it's settings");
+    LOG(LOG_MISC,LOG_DEBUG)("Init_VGABIOS: Initializing VGA BIOS and parsing its settings");
 
     // mem init must have already happened.
     // We can remove this once the device callout system is in place.
@@ -1100,7 +1100,7 @@ void DOSBOX_RealInit() {
     // TODO: should be parsed by...? perhaps at some point we support machine= for backwards compat
     //       but translate it into two separate params that specify what machine vs what video hardware.
     //       or better yet as envisioned, a possible dosbox-x.conf schema that allows a machine with no
-    //       base video of it's own, and then to specify an ISA or PCI card attached to the bus that
+    //       base video of its own, and then to specify an ISA or PCI card attached to the bus that
     //       provides video.
     std::string mtype(section->Get_string("machine"));
     hercCard = HERC_GraphicsCard;
@@ -1316,8 +1316,8 @@ void DOSBOX_SetupConfigSections(void) {
     const char *mt32reverbTimes[] = {"0", "1", "2", "3", "4", "5", "6", "7",0};
     const char *mt32reverbLevels[] = {"0", "1", "2", "3", "4", "5", "6", "7",0};
     const char* gustypes[] = { "classic", "classic37", "max", "interwave", 0 };
-    const char* sbtypes[] = { "sb1", "sb2", "sbpro1", "sbpro2", "sb16", "sb16vibra", "gb", "ess688", "reveal_sc400", "none", 0 };
-    const char* oplmodes[]={ "auto", "cms", "opl2", "dualopl2", "opl3", "opl3gold", "none", "hardware", "hardwaregb", 0};
+    const char* sbtypes[] = { "sb1", "sb2", "sbpro1", "sbpro2", "sb16", "sb16vibra", "gb", "ess688", "ess1688", "reveal_sc400", "none", 0 };
+    const char* oplmodes[]={ "auto", "cms", "opl2", "dualopl2", "opl3", "opl3gold", "none", "hardware", "hardwaregb", "esfm", 0};
     const char* serials[] = { "dummy", "disabled", "modem", "nullmodem", "serialmouse", "directserial", "log", "file", 0 };
     const char* acpi_rsd_ptr_settings[] = { "auto", "bios", "ebda", 0 };
     const char* cpm_compat_modes[] = { "auto", "off", "msdos2", "msdos5", "direct", 0 };
@@ -1351,7 +1351,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* irqssb[] = { "7", "5", "3", "9", "10", "11", "12", "0", "-1", 0 };
     const char* dmasgus[] = { "3", "0", "1", "5", "6", "7", 0 };
     const char* dmassb[] = { "1", "5", "0", "3", "6", "7", "-1", 0 };
-    const char* oplemus[] = { "default", "compat", "fast", "nuked", "mame", "opl2board", "opl3duoboard", "retrowave_opl3", 0 };
+    const char* oplemus[] = { "default", "compat", "fast", "nuked", "mame", "opl2board", "opl3duoboard", "retrowave_opl3", "esfmu", 0 };
     const char *qualityno[] = { "0", "1", "2", "3", 0 };
     const char* tandys[] = { "auto", "on", "off", 0};
     const char* ps1opt[] = { "on", "off", 0};
@@ -2147,6 +2147,9 @@ void DOSBOX_SetupConfigSections(void) {
     Phex = secprop->Add_hex("pc-98 fm board io port", Property::Changeable::WhenIdle,0);
     Phex->Set_help("If set, helps to determine the base I/O port of the FM board. A setting of zero means to auto-determine the port number.");
 
+    Pbool = secprop->Add_bool("pc-98 time stamp",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("Emulate the time stamp/hardware wait I/O ports at 5Ch and 5Eh. This is recommended.");
+
     Pbool = secprop->Add_bool("pc-98 sound bios",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("Set Sound BIOS enabled bit in MEMSW 4 for some games that require it.\n"
                     "TODO: Real emulation of PC-9801-26K/86 Sound BIOS");
@@ -2197,6 +2200,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("Enable PC-98 bus mouse emulation. Disabling this option does not disable INT 33h emulation.");
     Pbool->SetBasic(true);
 
+    Pbool = secprop->Add_bool("pc-98 nec mouse function",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, Use NEC mouse function in int 33h.");
+
     Pstring = secprop->Add_string("pc-98 video mode",Property::Changeable::WhenIdle,"");
     Pstring->Set_values(pc98videomodeopt);
     Pstring->Set_help("Specify the preferred PC-98 video mode.\n"
@@ -2238,6 +2244,11 @@ void DOSBOX_SetupConfigSections(void) {
                     "Will only work with apps and games using BIOS for keyboard.");
     Pstring->SetBasic(true);
 
+    Pbool = secprop->Add_bool("pc-98 force JIS keyboard layout",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("Force to use a default keyboard layout like JIS (JP106) for PC-98 emulation.\n"
+                    "Will only work with apps and games using BIOS for keyboard.");
+    Pbool->SetBasic(true);
+
     Pbool = secprop->Add_bool("pc-98 try font rom",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("If enabled, DOSBox-X will first try to load FONT.ROM as generated by T98Tools for PC-98 emulation.");
     Pbool->SetBasic(true);
@@ -2247,6 +2258,15 @@ void DOSBOX_SetupConfigSections(void) {
                       "By default DOSBox-X tries to load ANEX86.BMP followed by FREECG98.BMP after trying to load FONT.ROM.\n"
                       "If you specify a font here then it will be tried first, perhaps before FONT.ROM (see previous option).");
     Pstring->SetBasic(true);
+
+    Pstring = secprop->Add_path("pc-98 fontx sbcs",Property::Changeable::OnlyAtStart,"");
+    Pstring->Set_help("Specifies a FONTX2 file (8x16) to be used in PC-98 mode.\n"
+                      "This file has priority over ANEX86.BMP and FREECG98.BMP.");
+    Pstring = secprop->Add_path("pc-98 fontx dbcs",Property::Changeable::OnlyAtStart,"");
+    Pstring->Set_help("Specifies a FONTX2 file (16x16) to be used in PC-98 mode.\n"
+                      "This file has priority over ANEX86.BMP and FREECG98.BMP.");
+    Pbool = secprop->Add_bool("pc-98 fontx internal symbol",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, Use the internal data for hankaku symbols instead of the data in the FONTX2 file.");
 
     /* Explanation: NEC's mouse driver MOUSE.COM enables the graphics layer on startup and when INT 33h AX=0 is called.
      *              Some games by "Orange House" assume this behavior and do not make any effort on their
@@ -2440,6 +2460,12 @@ void DOSBOX_SetupConfigSections(void) {
             "  \n"
             "  4low behavior is default for ET4000 emulation.");
 
+    Pstring = secprop->Add_string("enable supermegazeux tweakmode", Property::Changeable::OnlyAtStart, "");
+    Pstring->Set_values(truefalseautoopt);
+    Pstring->Set_help("If set, allow old MegaZeux 256-color text tweakmode aka 'Super MegaZeux mode'. Not all cards support this tweakmode.\n"
+		      "The ones that do are not emulated yet by DOSBox-X. It is not known at this time whether S3 chipsets support the hack.\n"
+		      "On normal cards the tweakmode does nothing but halve the text mode resolution without any other effects.");
+
     Pbool = secprop->Add_bool("vga bios use rom image", Property::Changeable::OnlyAtStart, false);
     Pbool->Set_help("If set, load a VGA BIOS from a ROM image file. If clear, provide our own INT 10h emulation as normal.");
 
@@ -2483,7 +2509,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("sierra ramdac lock 565",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("When emulating High Sierra highcolor RAMDAC, assume 5:6:5 at all times if set. Else,\n"
             "bit 6 of the DAC command selects between 5:5:5 and 5:6:5. Set this option for demos or\n"
-            "games that got the command byte wrong (MFX Transgrassion 2) or any other demo that is\n"
+            "games that got the command byte wrong (MFX Transgression 2) or any other demo that is\n"
             "not rendering highcolor 16bpp correctly.");
 
     Pbool = secprop->Add_bool("vga fill active memory",Property::Changeable::WhenIdle,false);
@@ -2776,7 +2802,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("clear trap flag on unhandled int 1",Property::Changeable::Always,false);
     Pbool->Set_help("If set, the DOS kernel INT 01h handler will clear the trap flag when called.\n"
 		    "Normally a DOS program using INT 01h and the trap flag (usually for debugging)\n"
-		    "will provide it's own INT 01h handler. Some programs need this option set in\n"
+		    "will provide its own INT 01h handler. Some programs need this option set in\n"
 		    "order to not crash during startup due to possible bugs or anti debugger tricks\n"
 		    "that went terribly wrong.");
 
@@ -3461,7 +3487,7 @@ void DOSBOX_SetupConfigSections(void) {
      *     DS == CS. It uses the DS register to read local variables needed to manage the Sound Blaster card but
      *     it makes no attempt to push DS and then load the DS segment value it needs. While the demo may seem to
      *     run normally at first, eventually the interrupt is fired at just the right time to catch the demo in
-     *     the middle of it's graphics routines (DS=A000). Since the ISR uses DS to load the Sound Blaster DSP
+     *     the middle of its graphics routines (DS=A000). Since the ISR uses DS to load the Sound Blaster DSP
      *     I/O port, it reads some random value from *video RAM* and then hangs in a loop waiting for that I/O
      *     port to clear bit 7! Setting 'cs_equ_ds' works around that bug by instructing PIC emulation not to
      *     fire the interrupt unless segment registers CS and DS match. */
@@ -3503,7 +3529,7 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("enable asp",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, emulate the presence of the Sound Blaster 16 Advanced Sound Processor/Creative Sound Processor chip.\n"
-            "NOTE: This only emulates it's presence and the basic DSP commands to communicate with it. Actual ASP/CSP functions are not yet implemented.");
+            "NOTE: This only emulates its presence and the basic DSP commands to communicate with it. Actual ASP/CSP functions are not yet implemented.");
 
     Pbool = secprop->Add_bool("disable filtering",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("By default DOSBox-X filters Sound Blaster output to emulate lowpass filters and analog output limitations.\n"
@@ -3725,7 +3751,7 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("gus fixed render rate",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, Gravis Ultrasound audio output is rendered at a fixed sample rate specified by 'gusrate'. This can provide better quality than real hardware,\n"
-            "if desired. Else, Gravis Ultrasound emulation will change the sample rate of it's output according to the number of active channels, just like real hardware.\n"
+            "if desired. Else, Gravis Ultrasound emulation will change the sample rate of its output according to the number of active channels, just like real hardware.\n"
             "Note: DOSBox-X defaults to 'false', while mainline DOSBox SVN is currently hardcoded to render as if this setting is 'true'.");
 
     Pint = secprop->Add_int("gusmemsize",Property::Changeable::WhenIdle,-1);
@@ -4571,9 +4597,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->SetBasic(true);
 
     Pbool = secprop->Add_bool("int33 hide host cursor if interrupt subroutine",Property::Changeable::WhenIdle,true);
-    Pbool->Set_help("If set, the cursor on the host will be hidden if the DOS application provides it's own\n"
+    Pbool->Set_help("If set, the cursor on the host will be hidden if the DOS application provides its own\n"
                     "interrupt subroutine for the mouse driver to call, which is usually an indication that\n"
-                    "the DOS game wishes to draw the cursor with it's own support routines (DeluxePaint II).");
+                    "the DOS game wishes to draw the cursor with its own support routines (DeluxePaint II).");
 
     Pbool = secprop->Add_bool("int33 hide host cursor when polling",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, the cursor on the host will be hidden even if the DOS application has also\n"
@@ -4601,7 +4627,7 @@ void DOSBOX_SetupConfigSections(void) {
     /* bugfix for Yodel "mayday" demo */
     /* TODO: Set this option to default to "true" if it turns out most BIOSes unmask the IRQ during INT 15h AH=86 WAIT */
     Pbool = secprop->Add_bool("int15 wait force unmask irq",Property::Changeable::OnlyAtStart,true);
-    Pbool->Set_help("Some demos or games mistakingly use INT 15h AH=0x86 (WAIT) while leaving the IRQs needed for it masked.\n"
+    Pbool->Set_help("Some demos or games mistakenly use INT 15h AH=0x86 (WAIT) while leaving the IRQs needed for it masked.\n"
             "If this option is set (by default), the necessary IRQs will be unmasked when INT 15 AH=0x86 is used so that the game or demo does not hang.");
 
     Pbool = secprop->Add_bool("int15 mouse callback does not preserve registers",Property::Changeable::OnlyAtStart,false);
@@ -4770,7 +4796,7 @@ void DOSBOX_SetupConfigSections(void) {
 	                  "Notes:\n"
 	                  "  - If mapped ranges differ, the shorter range is extended to fit.\n"
 	                  "  - If conflicting host ports are given, only the first one is setup.\n"
-	                  "  - If conflicting guest ports are given, the latter rule takes predecent.");
+	                  "  - If conflicting guest ports are given, the latter rule takes precedent.");
 
 	Pstring = secprop->Add_string("udp_port_forwards", Property::Changeable::WhenIdle, "");
 	Pstring->Set_help("Forwards one or more UDP ports from the host into the DOS guest.\n"
@@ -4780,7 +4806,7 @@ void DOSBOX_SetupConfigSections(void) {
     for (size_t i=0;i < MAX_IDE_CONTROLLERS;i++) {
         secprop=control->AddSection_prop(ide_names[i],&Null_Init,false);//done
 
-        /* Primary and Secondary are on by default, Teritary and Quaternary are off by default.
+        /* Primary and Secondary are on by default, Tertiary and Quaternary are off by default.
          * Throughout the life of the IDE interface it was far more common for a PC to have just
          * a Primary and Secondary interface */
         Pbool = secprop->Add_bool("enable",Property::Changeable::OnlyAtStart,(i < 2) ? true : false);
@@ -5069,7 +5095,7 @@ extern "C" int __cdecl (*__MINGW_IMP_SYMBOL(_fstat64))(int,struct _stat64*) = in
 //win9x's default msvcrt.dll doesn't have strtoll/strtoull/strtoi64
 //libstdc++ (__USE_MINGW_ANSI_STDIO=1)
 //strtoll = _strtoi64
-//*scanf -> __mingw_*scanf -> strtoll 
+//*scanf -> __mingw_*scanf -> strtoll
 extern "C" long long  __cdecl strtoll(const char * __restrict__ str, char ** __restrict ptr, int base)
 {
     return strtol(str, ptr, base);

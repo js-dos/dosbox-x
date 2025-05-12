@@ -170,6 +170,9 @@ void VGA_CaptureStartNextFrame(void);
 void VGA_CaptureMarkError(void);
 bool VGA_CaptureValidateCurrentFrame(void);
 
+extern bool enable_supermegazeux_256colortext;
+extern bool pc98_timestamp5c;
+
 bool                                VGA_PITsync = false;
 
 unsigned int                        vbe_window_granularity = 0;
@@ -304,6 +307,31 @@ void pc98_egc4a0_write(Bitu port,Bitu val,Bitu iolen);
 Bitu pc98_egc4a0_read_warning(Bitu port,Bitu iolen);
 void pc98_egc4a0_write_warning(Bitu port,Bitu val,Bitu iolen);
 
+/* ARTIC (A Relative Time Indication Counter) I/O read.
+ * Ports 0x5C and 0x5E.
+ * This is required for some MS-DOS drivers such as the OAK CD-ROM driver
+ * in order for them to time out properly instead of infinitely hang.
+ *
+ * "A 24-bit binary counter that counts up at 307.2KHz" */
+Bitu pc98_read_artic(Bitu port,Bitu iolen) {
+	Bitu count = ((Bitu)(PIC_FullIndex()/*milliseconds*/ * 307.2)) & (Bitu)0xFFFFFFul/*mask at 24 bits*/;
+	Bitu r = ~0ul;
+
+	if ((port&0xFFFEul) == 0x5C) /* bits 15:0 */
+		r = count & 0xFFFFul;
+	else if ((port&0xFFFEul) == 0x5E) /* bits 23:8 */
+		r = (count >> 8u) & 0xFFFFul;
+
+	if (iolen == 1) {
+		if (port&1) r >>= 8;
+		r &= 0xFF;
+	}
+
+//	LOG_MSG("ARTIC port %x read %x iolen %u",(unsigned int)port,(unsigned int)r,(unsigned int)iolen);
+
+	return r;
+}
+
 void page_flip_debug_notify() {
     if (enable_page_flip_debugging_marker)
         vga_page_flip_occurred = true;
@@ -367,7 +395,7 @@ void VGA_DetermineMode(void) {
 //      display them just fine. The other is that checking for 2-color CGA mode entirely by
 //      whether video RAM is mapped to B8000h is a really lame way to go about it.
 //
-//      The only catch here is that a contributer (Wengier, I think?) tied a DOS/V CGA rendering
+//      The only catch here is that a contributor (Wengier, I think?) tied a DOS/V CGA rendering
 //      mode into M_CGA2 that we need to watch for.
 //
             else if ((vga.gfx.miscellaneous & 0x0c)==0x0c && J3_IsCga4Dcga()) VGA_SetMode(M_DCGA);
@@ -692,6 +720,14 @@ void VGA_Reset(Section*) {
 //    uint64_t cpu_max_addr = (uint64_t)1 << (uint64_t)cpu_addr_bits;
 
     LOG(LOG_MISC,LOG_DEBUG)("VGA_Reset() reinitializing VGA emulation");
+
+    str = section->Get_string("enable supermegazeux tweakmode");
+    if (str == "1" || str == "true")
+        enable_supermegazeux_256colortext = true;
+    else if (str == "0" || str == "false")
+        enable_supermegazeux_256colortext = false;
+    else
+        enable_supermegazeux_256colortext = false; // TODO: Default true if emulating a chipset that supports SuperMegazeux 256-color text mode
 
     GDC_display_plane_wait_for_vsync = pc98_section->Get_bool("pc-98 buffer page flip");
 
@@ -1437,6 +1473,16 @@ void VGA_OnEnterPC98_phase2(Section *sec) {
 
     /* GDC 2.5/5.0MHz setting is also reflected in BIOS data area and DIP switch registers */
     gdc_5mhz_mode_update_vars();
+
+    /* ARTIC (A Relative Time Indication Counter) at 0x5C and 0x5E */
+    if (pc98_timestamp5c) {
+        IO_RegisterReadHandler(0x5C,pc98_read_artic,IO_MB);
+        IO_RegisterReadHandler(0x5D,pc98_read_artic,IO_MB);
+        IO_RegisterReadHandler(0x5E,pc98_read_artic,IO_MB);
+        IO_RegisterReadHandler(0x5F,pc98_read_artic,IO_MB);
+        IO_RegisterReadHandler(0x5C,pc98_read_artic,IO_MW);
+        IO_RegisterReadHandler(0x5E,pc98_read_artic,IO_MW);
+    }
 
     /* delay I/O port at 0x5F (0.6us) */
     IO_RegisterWriteHandler(0x5F,pc98_wait_write,IO_MB);

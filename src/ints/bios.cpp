@@ -52,6 +52,7 @@ extern bool PS1AudioCard;
 #include "sdlmain.h"
 #include <time.h>
 #include <sys/stat.h>
+#include "version_string.h"
 
 #if defined(DB_HAVE_CLOCK_GETTIME) && ! defined(WIN32)
 //time.h is already included
@@ -96,6 +97,8 @@ extern bool en_bios_ps2mouse;
 extern bool rom_bios_8x8_cga_font;
 extern bool pcibus_enable;
 extern bool enable_fpu;
+
+bool pc98_timestamp5c = true; // port 5ch and 5eh "time stamp/hardware wait"
 
 uint32_t Keyb_ig_status();
 bool VM_Boot_DOSBox_Kernel();
@@ -146,6 +149,7 @@ unsigned int reset_post_delay = 0;
 Bitu call_irq_default = 0;
 uint16_t biosConfigSeg=0;
 
+Bitu BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION = ~0u;
 Bitu BIOS_DEFAULT_IRQ0_LOCATION = ~0u;       // (RealMake(0xf000,0xfea5))
 Bitu BIOS_DEFAULT_IRQ1_LOCATION = ~0u;       // (RealMake(0xf000,0xe987))
 Bitu BIOS_DEFAULT_IRQ07_DEF_LOCATION = ~0u;  // (RealMake(0xf000,0xff55))
@@ -509,7 +513,7 @@ void dosbox_integration_trigger_read() {
             dosbox_int_register = 0;
 #endif
             if (control->opt_securemode || control->SecureMode()) dosbox_int_register = 0;
-#if defined(_M_X64) || defined (_M_AMD64) || defined (_M_ARM64) || defined (_M_IA64) || defined(__ia64__) || defined(__LP64__) || defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__) || defined(__powerpc64__)
+#if OS_BIT_INT == 64
             dosbox_int_register += 0x20; // 64-bit
 #else
             dosbox_int_register += 0x10; // 32-bit
@@ -1740,7 +1744,7 @@ void ISAPNP_Cfg_Reset(Section *sec) {
         /* NTS: This is... kind of a terrible hack. It basically tricks Windows into executing our
          *      INT 15h handler as if the APM entry point. Except that instead of an actual INT 15h
          *      triggering the callback, a FAR CALL triggers the callback instead (CB_RETF not CB_IRET). */
-        /* TODO: We should really consider moving the APM BIOS code in INT15_Handler() out into it's
+        /* TODO: We should really consider moving the APM BIOS code in INT15_Handler() out into its
          *       own function, then having the INT15_Handler() call it as well as directing this callback
          *       directly to it. If you think about it, this hack also lets the "APM entry point" invoke
          *       other arbitrary INT 15h calls which is not valid. */
@@ -1756,7 +1760,7 @@ void ISAPNP_Cfg_Reset(Section *sec) {
          *      stack, thus, the cause of random crashes in Windows was simply that we were
          *      flipping flag bits in the middle of the return address on the stack. The other
          *      source of random crashes is that the CF/ZF manipulation in INT 15h wasn't making
-         *      it's way back to Windows, meaning that when APM BIOS emulation intended to return
+         *      its way back to Windows, meaning that when APM BIOS emulation intended to return
          *      an error (by setting CF), Windows didn't get the memo (CF wasn't set on return)
          *      and acted as if the call succeeded, or worse, CF happened to be set on entry and
          *      was never cleared by APM BIOS emulation.
@@ -2170,7 +2174,7 @@ static Bitu ISAPNP_Handler(bool protmode /* called from protected mode interface
      *
      * so the first argument on the stack is an int that we read to determine what the caller is asking
      *
-     * Dont forget in the real-mode world:
+     * Don't forget in the real-mode world:
      *    sizeof(int) == 16 bits
      *    sizeof(long) == 32 bits
      */    
@@ -3230,11 +3234,11 @@ void update_pc98_function_row(unsigned char setting,bool force_redraw) {
 
     if (pc98_function_row_mode == 2) {
         /* draw the function row.
-         * based on on real hardware:
+         * based on real hardware:
          *
          * The function key is 72 chars wide. 4 blank chars on each side of the screen.
          * It is divided into two halves, 36 chars each.
-         * Within each half, aligned to it's side, is 5 x 7 regions.
+         * Within each half, aligned to its side, is 5 x 7 regions.
          * 6 of the 7 are inverted. centered in the white block is the function key. */
         for (unsigned int i=0;i < 40;) {
             mem_writew(0xA0000+((o+i)*2),0x0000);
@@ -3256,11 +3260,11 @@ void update_pc98_function_row(unsigned char setting,bool force_redraw) {
     }
     else if (pc98_function_row_mode == 1) {
         /* draw the function row.
-         * based on on real hardware:
+         * based on real hardware:
          *
          * The function key is 72 chars wide. 4 blank chars on each side of the screen.
          * It is divided into two halves, 36 chars each.
-         * Within each half, aligned to it's side, is 5 x 7 regions.
+         * Within each half, aligned to its side, is 5 x 7 regions.
          * 6 of the 7 are inverted. centered in the white block is the function key. */
         for (unsigned int i=0;i < 40;) {
             mem_writew(0xA0000+((o+i)*2),0x0000);
@@ -3515,11 +3519,11 @@ static Bitu INT18_PC98_Handler(void) {
             IO_WriteB(0x43, 0x16);
             for (int i=0; i<0x20; i++) mem_writeb(0x502+i, 0);
             for (int i=0; i<0x13; i++) mem_writeb(0x528+i, 0);
-            mem_writew(0x522, 0x0e00);
+            mem_writew(0x522,(unsigned int)(Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION) - 0xFD800));
             mem_writew(0x524, 0x0502);
             mem_writew(0x526, 0x0502);
-            mem_writew(0x5c6, 0x0e00);
-            mem_writew(0x5c8, 0xfd80);
+            mem_writew(0x5C6,(unsigned int)(Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION) - 0xFD800));
+            mem_writew(0x5C8,0xFD80);
             break;
         case 0x04: /* Sense of key input state (キー入力状態のセンス) */
             reg_ah = mem_readb(0x52A + (unsigned int)(reg_al & 0x0Fu));
@@ -3607,7 +3611,18 @@ static Bitu INT18_PC98_Handler(void) {
         //       (Something to do with the buffer [https://ia801305.us.archive.org/8/items/PC9800TechnicalDataBookBIOS1992/PC-9800TechnicalDataBook_BIOS_1992_text.pdf])
         //       Neko Project is also unaware of such a call.
         case 0x0C: /* text layer enable */
-            if (pc98_gdc_vramop & (1u << VOPBIT_VGA)) {
+	    /* PROBLEM: Okay, so it's unclear when text layer is or is not allowed.
+             *          I was unable to turn on the text layer with this BIOS call on real PC-9821 hardware, so I believed that it did not allow it.
+             *
+             *          But PC-9821 CD-ROM game "Shamat, The Holy Circlet" expects to turn on the text layer in 640x400 256-color PEGC mode,
+             *          because it displays graphics in the background while scrolling Japanese text up over it, and if sound hardware is available,
+             *          plays a voice reading the text synchronized to it.
+             *
+             *          Perhaps in my case it was 640x480 256-color mode, not 640x400 256-color mode, but then, 640x480 also enables a text mode with
+             *          either more rows or a taller character cell which is apparently recognized by the MS-DOS console driver.
+             *
+             *          So then, what exactly decides whether or not to allow this call to enable the text layer? */
+            if (pc98_gdc_vramop & (1u << VOPBIT_VGA) && 0/*DISABLED*/) {
                /* NTS: According to tests on real PC-9821 hardware, you can't turn on the text layer in 256-color mode, at least through the BIOS. */
                /* FIXME: Is this a restriction imposed by the BIOS, or the hardware itself? */
                LOG_MSG("INT 18h: Attempt to turn on text layer in 256-color mode");
@@ -5505,6 +5520,31 @@ static Bitu INTDC_PC98_Handler(void) {
                 INTDC_CL10h_AH09h(reg_dx);
                 goto done;
             }
+            else if (reg_ah == 0x0a) { /* CL=0x10 AH=0x0A DL=pattern Erase screen */
+                void INTDC_CL10h_AH0Ah(uint16_t pattern);
+                INTDC_CL10h_AH0Ah(reg_dx);
+                goto done;
+            }
+            else if (reg_ah == 0x0b) { /* CL=0x10 AH=0x0B DL=pattern Erase lines */
+                void INTDC_CL10h_AH0Bh(uint16_t pattern);
+                INTDC_CL10h_AH0Bh(reg_dx);
+                goto done;
+            }
+            else if (reg_ah == 0x0c) { /* CL=0x10 AH=0x0C DL=count Insert lines */
+                void INTDC_CL10h_AH0Ch(uint16_t count);
+                INTDC_CL10h_AH0Ch(reg_dx);
+                goto done;
+            }
+            else if (reg_ah == 0x0d) { /* CL=0x10 AH=0x0D DL=count Erase lines */
+                void INTDC_CL10h_AH0Dh(uint16_t count);
+                INTDC_CL10h_AH0Dh(reg_dx);
+                goto done;
+            }
+            else if (reg_ah == 0x0E) { /* CL=0x10 AH=0x0E DL=mode Change character mode */
+                void pc98_set_char_mode(bool mode);
+                pc98_set_char_mode(reg_dl == 0);
+                goto done;
+            }
             goto unknown;
         default: /* some compilers don't like not having a default case */
             goto unknown;
@@ -5687,7 +5727,7 @@ uint32_t BIOS_HostTimeSync(uint32_t ticks) {
 
 #ifdef JSDOS
     dos.date.day=25;
-    dos.date.month=6; 
+    dos.date.month=6;
     dos.date.year=1998;
 #else
     dos.date.day=(uint8_t)loctime->tm_mday;
@@ -5782,7 +5822,7 @@ static Bitu INT8_Handler(void) {
        value change, then it sends it to the keyboard. This is why on
        older DOS machines you could change LEDs by writing to 40:17.
        We have to emulate this also because Windows 3.1/9x seems to rely on
-       it when handling the keyboard from it's own driver. Their driver does
+       it when handling the keyboard from its own driver. Their driver does
        hook the keyboard and handles keyboard I/O by itself, but it still
        allows the BIOS to do the keyboard magic from IRQ 0 (INT 8h). Yech. */
     if (enable_bios_timer_synchronize_keyboard_leds) {
@@ -7917,6 +7957,7 @@ extern uint32_t tandy_128kbase;
 
 static int bios_post_counter = 0;
 
+extern void BIOSKEY_PC98_Write_Tables(void);
 extern Bitu PC98_AVSDRV_PCM_Handler(void);
 
 class BIOS:public Module_base{
@@ -8028,6 +8069,17 @@ private:
              * bit[1:1] = ?
              * bit[0:0] = 480-line mode    1=640x480     0=640x400 or 640x200 */
             mem_writeb(0x459,0x08/*non-interlaced*/);
+
+            /* Time stamper */
+            /* bit[7:7] = 1=Port 5Fh exists  0=No such port    Write to port 0x5F to wait 0.6us
+             * bit[6:6] = ?
+             * bit[5:5] = "Power" ?
+             * bit[4:4] = 1=PCMCIA BIOS running 0=not running
+             * bit[3:3] = ?
+             * bit[2:2] = 1=Time stamper (I/O ports 0x5C and 0x5E) available
+             * bit[1:1] = 1=Card I/O slot function 0=No card slot function
+             * bit[0:0] = 1=386SL(98)  0=Other */
+            mem_writeb(0x45B,(pc98_timestamp5c?0x4:0x0)|0x80/*port 5Fh*/);
 
             /* CPU/Display */
             /* bit[7:7] = 486SX equivalent (?)                                                                      1=yes
@@ -8174,6 +8226,11 @@ private:
              *
              *       NOTED: Neko Project II determines INT 18h AH=30h availability by whether or not it was compiled
              *              with 31khz hsync support (SUPPORT_CRT31KHZ) */
+
+            /* Set up the translation table pointer, which is relative to segment 0xFD80 */
+            mem_writew(0x522,(unsigned int)(Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION) - 0xFD800));
+            mem_writew(0x5C6,(unsigned int)(Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION) - 0xFD800));
+            mem_writew(0x5C8,0xFD80);
         }
 
         if (bios_user_reset_vector_blob != 0 && !bios_user_reset_vector_blob_run) {
@@ -8221,7 +8278,7 @@ private:
         {
             Bitu sz = MEM_TotalPages();
 
-            /* The standard BIOS is said to put it's stack (at least at OS boot time) 512 bytes past the end of the boot sector
+            /* The standard BIOS is said to put its stack (at least at OS boot time) 512 bytes past the end of the boot sector
              * meaning that the boot sector loads to 0000:7C00 and the stack is set grow downward from 0000:8000 */
 
             if (sz > 8) sz = 8; /* 4KB * 8 = 32KB = 0x8000 */
@@ -8800,11 +8857,9 @@ private:
             else size_extended = 0;
         }
 
-        if (!IS_PC98_ARCH) {
-            /* PS/2 mouse */
-            void BIOS_PS2Mouse_Startup(Section *sec);
-            BIOS_PS2Mouse_Startup(NULL);
-        }
+        /* PS/2 mouse */
+        void BIOS_PS2Mouse_Startup(Section *sec);
+        BIOS_PS2Mouse_Startup(NULL);
 
         if (!IS_PC98_ARCH) {
             /* this belongs HERE not on-demand from INT 15h! */
@@ -8883,7 +8938,7 @@ private:
         }
 
         // ISA Plug & Play BIOS entrypoint
-        // NTS: Apparently, Windows 95, 98, and ME will re-enumerate and re-install PnP devices if our entry point changes it's address.
+        // NTS: Apparently, Windows 95, 98, and ME will re-enumerate and re-install PnP devices if our entry point changes its address.
         if (!IS_PC98_ARCH && ISAPNPBIOS) {
             Bitu base;
             unsigned int i;
@@ -9233,12 +9288,7 @@ private:
         strcpy(logostr[3], "|  D O S B o x - X !  |");
         strcpy(logostr[4], "|                     |");
         sprintf(logostr[5],"|     %d-bit %s     |",
-#if defined(_M_X64) || defined (_M_AMD64) || defined (_M_ARM64) || defined (_M_IA64) || defined(__ia64__) || defined(__LP64__) || defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__) || defined(__powerpc64__)^M
-        64
-#else
-        32
-#endif
-        , SDL_STRING);
+        OS_BIT_INT, SDL_STRING);
         sprintf(logostr[6], "| Version %10s  |", VERSION);
         strcpy(logostr[7], "+---------------------+");
 startfunction:
@@ -9922,6 +9972,8 @@ public:
             Section_prop * section=static_cast<Section_prop *>(control->GetSection("dosbox"));
 			Section_prop * pc98_section=static_cast<Section_prop *>(control->GetSection("pc98"));
 
+            pc98_timestamp5c = pc98_section->Get_bool("pc-98 time stamp");
+
             enable_pc98_copyright_string = pc98_section->Get_bool("pc-98 BIOS copyright string");
 
             // NTS: This setting is also valid in PC-98 mode. According to Undocumented PC-98 by Webtech,
@@ -9945,13 +9997,20 @@ public:
             {
                 std::string s = section->Get_string("isa memory hole at 15mb");
 
-                if (s == "true" || s == "1")
+                // Do NOT emulate the memory hole if emulating 24 or less address bits! BIOS crashes will result at startup!
+                // The whole point of the 15MB memory hole is to emulate a hole into hardware as if a 24-bit 386SX. A memalias
+                // setting of 24 makes it redundant. Furthermore memalias=24 and 15MB memory hole prevents the BIOS from
+                // mapping correctly and crashes immediately at startup. This is especially necessary for PC-98 mode where
+		// memalias==24 and memory hole enabled for the PEGC linear framebuffer prevents booting.
+
+                if (MEM_get_address_bits() <= 24)
+                    isa_memory_hole_15mb = false;
+                else if (s == "true" || s == "1")
                     isa_memory_hole_15mb = true;
                 else if (s == "false" || s == "0")
                     isa_memory_hole_15mb = false;
                 else if (IS_PC98_ARCH)
-                    isa_memory_hole_15mb = true;
- // For the sake of some DOS games, enable by default
+                    isa_memory_hole_15mb = true; // For the sake of some PC-98 DOS games, enable by default
                 else
                     isa_memory_hole_15mb = false;
             }
@@ -9979,6 +10038,13 @@ public:
             }
         }
 
+	if (IS_PC98_ARCH) {
+		/* Keyboard translation tables, must exist at segment 0xFD80:0x0E00 because PC-98 MS-DOS assumes it (it writes 0x522 itself on boot) */
+		/* The table must be placed back far enough so that (0x60 * 10) bytes do not overlap the lookup table at 0xE28 */
+		BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION = PhysToReal416(ROMBIOS_GetMemory(0x60 * 10,"Keyboard translation tables",/*align*/1,0xFD800+0xA13));
+		if (ROMBIOS_GetMemory(0x2 * 10,"Keyboard translation shift tables",/*align*/1,0xFD800+0xE28) == (~0u)) E_Exit("Failed to allocate shift tables");//reserve it
+		BIOSKEY_PC98_Write_Tables();
+	}
 
         /* pick locations */
 	/* IBM PC mode: See [https://github.com/skiselev/8088_bios/blob/master/bios.asm]. Some values also provided by Allofich.
@@ -10144,7 +10210,7 @@ public:
             LOG(LOG_MISC,LOG_DEBUG)("BIOS: setting tandy 128KB base region to %lxh",(unsigned long)tandy_128kbase);
         }
         else if (machine == MCH_PCJR) {
-            /* PCjr reserves the top of it's internal 128KB of RAM for video RAM.
+            /* PCjr reserves the top of its internal 128KB of RAM for video RAM.
              * Sidecars can extend it past 128KB but it requires DOS drivers or TSRs
              * to modify the MCB chain so that it a) marks the video memory as reserved
              * and b) creates a new free region above the video RAM region.
@@ -10336,6 +10402,33 @@ public:
                 bo = 0xE8000;
                 phys_writeb(bo+0x00,(uint8_t)0xEB);                       // JMP $+2 (to next instruction)
                 phys_writeb(bo+0x01,(uint8_t)0x00);
+
+                /* "Nut Berry" expects a 8-byte lookup table for [AL&7] -> 1 << (AL&7) at 0xFD80:0x0E3C so it's
+                 * custom keyboard interrupt handler can update the keyboard status bitmap in the BIOS data area.
+                 * I don't know if the game even uses it. On a BIOS.ROM image I have, and on real hardware, there
+                 * is clearly that table but at slightly different addresses (One PC-9821 laptop has it at
+                 * 0xFD80:0x0E45) which means whether the game uses it or not the bitmap may have random bits set
+                 * when you exit to DOS.
+                 *
+                 * Assuming no other game does this, this fixed address should be fine.
+                 *
+                 * NOTE: After disassembling the IRQ1 handler on a real PC-9821 laptop, I noticed this game's
+                 *       custom ISR bears a strong resemblance to it. In fact, you might say it's an exact instruction
+                 *       for instruction copy of the ISR, except that the table addresses in ROM are slightly different.
+                 *       Ha. Theoretically then, that means we could also get this game to work fully properly by patching
+                 *       it not to hook the keyboard interrupt at all! */
+                for (unsigned int i=0;i < 8;i++) phys_writeb(0xFD800+0xE3C+i,1u << i);
+
+                /* "Nut Berry" also assumes shift state table offsets (for all 16 possible combinations) exist
+                 * at 0xFD80:0x0E28. Once again, this means it will not work properly on anything other than the dev's
+                 * machine because on a real PC-9821 laptop used for testing, the table offset is slightly different
+                 * (0xE31 instead of 0xE28). The table mentioned here is used to update the 0x522 offset WORD in the
+                 * BIOS data area to reflect the translation table in effect based on the shift key status, so if you
+                 * misread the table you end up pointing it at junk and then keyboard input doesn't work anymore. */
+                // NTS: On a real PC-9821 laptop, the table is apparently 10 entries long. If BDA byte 0x53A is less than
+                //      8 then it's just a simple lookup. If BDA byte 0x53A has bit 4 set, then use the 8th entry, and
+                //      if bit 4 and 3 are set, use the 9th entry.
+                for (unsigned int i=0;i < 10;i++) phys_writew(0xFD800+0xE28+(i*2),(unsigned int)(Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION) - 0xFD800) + (i * 0x60));
             }
 	    else {
 		    if (ibm_rom_basic_size == 0) {
@@ -10385,7 +10478,7 @@ public:
     }
     ~BIOS(){
         /* snap the CPU back to real mode. this code thinks in terms of 16-bit real mode
-         * and if allowed to do it's thing in a 32-bit guest OS like WinNT, will trigger
+         * and if allowed to do its thing in a 32-bit guest OS like WinNT, will trigger
          * a page fault. */
         CPU_Snap_Back_To_Real_Mode();
 
@@ -10511,7 +10604,7 @@ void BIOS_PnP_ComPortRegister(Bitu port,Bitu irq) {
         const unsigned char h1[9] = {
             ISAPNP_SYSDEV_HEADER(
                 ISAPNP_ID('P','N','P',0x0,0x5,0x0,0x1), /* PNP0501 16550A-compatible COM port */
-                ISAPNP_TYPE(0x07,0x00,0x02),        /* type: RS-232 communcations device, 16550-compatible */
+                ISAPNP_TYPE(0x07,0x00,0x02),        /* type: RS-232 communications device, 16550-compatible */
                 0x0001 | 0x0002)
         };
 

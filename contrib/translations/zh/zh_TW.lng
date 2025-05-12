@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Traditional Chinese
 :DOSBOX-X:CODEPAGE:950
-:DOSBOX-X:VERSION:2023.10.06
+:DOSBOX-X:VERSION:2024.03.01
 :DOSBOX-X:REMARK:建議將國家和字碼頁設為 886,950 並搭配中文字型; 或使用 cht 或 tw 中文 DOS/V 模式以直接支援中文顯示和列印
 :AUTOEXEC_CONFIGFILE_HELP
 區段中的指令行會在啟動時執行.
@@ -808,7 +808,6 @@ dosbox-x [名稱] [-exit] [-version] [-fastlaunch] [-fullscreen]
 
 關於基本掛載的資訊, 請輸入 [34;1mintro mount[0m
 關於光碟機支援的資訊, 請輸入 [34;1mintro cdrom[0m
-關於特殊按鍵的資訊, 請輸入 [34;1mintro special[0m
 關於使用的資訊, 請輸入 [34;1mintro usage[0m
 
 關於最新版本的 DOSBox-X, 請造訪其首頁:[34;1m

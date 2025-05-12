@@ -37,13 +37,15 @@
 #endif
 
 /* SDL by default treats numlock and scrolllock different from all other keys.
- * In recent versions this can disabled by a environment variable which we set in sdlmain.cpp
+ * In recent versions this can disabled by an environment variable which we set in sdlmain.cpp
  * Define the following if this is the case */
 #if SDL_VERSION_ATLEAST(1, 2, 14)
 #define CAN_USE_LOCK 1
 /* For lower versions of SDL we also use a slight hack to get the startup states of numclock and capslock right.
  * The proper way is in the mapper, but the repeating key is an unwanted side effect for lower versions of SDL */
 #endif
+
+extern Bitu BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION;
 
 static Bitu call_int16 = 0,call_irq1 = 0,irq1_ret_ctrlbreak_callback = 0,call_irq6 = 0,call_irq_pcjr_nmi = 0;
 static uint8_t fep_line = 0x01;
@@ -295,6 +297,66 @@ static scancode_tbl scan_to_scanascii_pc98[0x80] = {
     {   none,   none,   none,   none,   none,   none }, /* 7e      */
     {   none,   none,   none,   none,   none,   none }  /* 7f      */
 };
+
+void BIOSKEY_PC98_Write_Tables(void) {
+	unsigned int i;
+	Bitu o = Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION);
+
+	/* Assume this function will not be called unless BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION points to ROM BIOS.
+	 * It's actually not exactly a 1:1 mapping, the empty range between 0x56-0x61 is skipped according to the
+	 * tables on real hardware. On real hardware the tables are noticeably 0x60 (not 0x80) bytes apart from each other.
+	 * Special processing is done for the shift state keys that do not involve the table. */
+
+	/* [0] Normal */
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [1] Shift */
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [2] Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [3] Shift+Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [4] Kana */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [5] Kana+Shift */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [6] Kana+Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [7] Kana+Shift+Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [8] Graph (Alt) */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [9] Control */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+}
 
 std::queue <uint16_t>over_key_buffer;
 
@@ -566,7 +628,7 @@ static Bitu IRQ1_Handler(void) {
         break;
     case 0x1d:                      /* Ctrl Pressed */
         if (INT16_AX_GetKBDBIOSMode() == 0x51 && (flags3 & 0x02))
-            trimKana();//英数カナ keycode not assignged in AX
+            trimKana();//英数カナ keycode not assigned in AX
         else if (!(flags3 &0x01)) {
             flags1 |=0x04;
             if (flags3 &0x02) flags3 |=0x04;
@@ -843,6 +905,7 @@ bool CPU_PUSHF(Bitu use32);
 void CPU_Push16(uint16_t value);
 unsigned char AT_read_60(void);
 extern bool pc98_force_ibm_layout;
+extern bool pc98_force_jis_layout;
 
 /* BIOS INT 18h output vs keys:
  *
@@ -1017,10 +1080,18 @@ static Bitu IRQ1_Handler_PC98(void) {
             else {
                 if (!pc98_force_ibm_layout){
                     if (shift){
-                        if (scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
+                        if (!pc98_force_jis_layout) {
+                            if(scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
+                        }
+                        else {
+                            if(sc_8251 == 0x1a) add_key(scan_add + '`');
+                            else if(sc_8251 == 0x0c) add_key(scan_add + '~');
+                            else if(scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
+                        }
                     }
                     else{
-                        if (scan_to_scanascii_pc98[sc_8251].normal){
+                        if(pc98_force_jis_layout && sc_8251 == 0x33) add_key(scan_add + '\\');
+                        else if (scan_to_scanascii_pc98[sc_8251].normal){
                             add_key(scan_to_scanascii_pc98[sc_8251].normal);
                         }
                     }

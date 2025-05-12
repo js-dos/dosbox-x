@@ -391,7 +391,7 @@ public:
     }
 
     template <class T>
-    void registerPOD(T& pod) //register POD for serializatioin
+    void registerPOD(T& pod) //register POD for serialization
     {
         podRef.push_back(POD(pod));
     }

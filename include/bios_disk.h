@@ -51,7 +51,8 @@ class imageDisk {
 			ID_MEMORY,
 			ID_VHD,
 			ID_D88,
-			ID_NFD
+			ID_NFD,
+			ID_EMPTY_DRIVE
 		};
 
 		virtual uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0);
@@ -59,6 +60,7 @@ class imageDisk {
 		virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
 		virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
 
+		virtual void UpdateFloppyType(void);
 		virtual void Set_Reserved_Cylinders(Bitu resCyl);
 		virtual uint32_t Get_Reserved_Cylinders();
 		virtual void Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize);
@@ -128,6 +130,17 @@ class imageDisk {
 
 			return false;
 		}
+};
+
+class imageDiskEmptyDrive : public imageDisk {
+public:
+	virtual uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0);
+	virtual uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0);
+	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
+	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
+
+	imageDiskEmptyDrive();
+	virtual ~imageDiskEmptyDrive();
 };
 
 class imageDiskD88 : public imageDisk {
@@ -240,7 +253,7 @@ public:
 	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
 	virtual uint8_t GetBiosType(void);
 	virtual void Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize);
-	// Parition and format the ramdrive
+	// Partition and format the ramdrive
 	virtual uint8_t Format();
 
 	// Create a hard drive image of a specified size; automatically select c/h/s
@@ -485,8 +498,8 @@ public:
  * Maximum 16 entries. */
 #pragma pack(push,1)
 struct _PC98RawPartition {
-	uint8_t		mid;		/* 0x80 - boot */
-	uint8_t		sid;		/* 0x80 - active */
+	uint8_t		mid;		/* 0x00: unused, 0x20: MS-DOS(not bootable), 0xa1-0xaf: MS-DOS(bootable) */
+	uint8_t		sid;		/* 0x00: unused, 0x81,0x91,0xa1,0xe1: MS-DOS(active), 0x01,0x11,0x21,0x61: MS-DOS(sleep) */
 	uint8_t		dum1;		/* dummy for padding */
 	uint8_t		dum2;		/* dummy for padding */
 	uint8_t		ipl_sect;	/* IPL sector */

@@ -1374,6 +1374,7 @@ bool INT10_SetVideoMode(uint16_t mode) {
 			misc_output|=0x20;
 	}
 	IO_Write(0x3c2,misc_output);		//Setup for 3b4 or 3d4
+	real_writew(BIOSMEM_SEG,BIOSMEM_CRTC_ADDRESS,((CurMode->mode==7 )|| (CurMode->mode==0x0f)) ? 0x3b4 : 0x3d4); // update immediately
 
 	if (IS_VGA_ARCH && (svgaCard == SVGA_S3Trio)) {
 		// unlock the S3 registers
@@ -1406,7 +1407,7 @@ bool INT10_SetVideoMode(uint16_t mode) {
 		case M_TEXT:
 			if (CurMode->cwidth==9) seq_data[1] &= ~1;
 			seq_data[2]|=0x3;				//Enable plane 0 and 1
-			seq_data[4]|=0x01;				//Alpanumeric
+			seq_data[4]|=0x01;				//Alphanumeric
 			seq_data[4]&=~0x04;				//odd/even enable
 			break;
 		case M_DCGA:
@@ -1813,12 +1814,12 @@ bool INT10_SetVideoMode(uint16_t mode) {
 		break;
 	case M_CGA4:
 		gfx_data[0x5]|=0x20;		//CGA mode
-		gfx_data[0x6]|=0x0f;		//graphics mode at at 0xb800=0xbfff
+		gfx_data[0x6]|=0x0f;		//graphics mode at 0xb800=0xbfff
 		if (IS_EGAVGA_ARCH) gfx_data[0x5]|=0x10;
 		break;
 	case M_DCGA:
 	case M_CGA2:
-		gfx_data[0x6]|=0x0d;		//graphics mode at at 0xb800=0xbfff, chain odd/even disabled
+		gfx_data[0x6]|=0x0d;		//graphics mode at 0xb800=0xbfff, chain odd/even disabled
 		break;
 	default:
 		break;
@@ -2129,7 +2130,7 @@ dac_text16:
 		IO_Write(crtc_base,0x45);
 		IO_Write(crtc_base+1u,0x00);
 
-		// Accellerator setup 
+		// Accelerator setup 
 		Bitu reg_50=S3_XGA_8BPP;
 		switch (CurMode->type) {
 			case M_LIN15:
@@ -2171,7 +2172,7 @@ dac_text16:
 		unsigned char s3_mode = 0x00;
 
 		switch (CurMode->type) {
-			case M_LIN4: // <- There's a discrepance with real hardware on this
+			case M_LIN4: // <- There's a discrepancy with real hardware on this
 			case M_LIN8:
 			case M_LIN15:
 			case M_LIN16:
@@ -2219,7 +2220,7 @@ dac_text16:
 		J3_SetBiosArea(mode);
 	}
 
-	INT10_ToggleBlinkingBit(blinking?1:0);
+	INT10_ToggleBlinkingBit(blinking?1:0); // WARNING: The CRTC I/O port in the BDA must have been written by this point or the Attribute Controller will be mis-programmed
 	FinishSetMode(clearmem);
 
 	/* Set vga attrib register into defined state */

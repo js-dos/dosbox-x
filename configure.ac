@@ -1,5 +1,5 @@
 dnl Init.
-AC_INIT(dosbox-x,2023.10.06,[https://github.com/joncampbell123/dosbox-x/issues],[],[https://dosbox-x.com])
+AC_INIT(dosbox-x,2024.03.01,[https://github.com/joncampbell123/dosbox-x/issues],[],[https://dosbox-x.com])
 AC_PREREQ(2.60)
 AC_CONFIG_SRCDIR(README.md)
 
@@ -365,8 +365,8 @@ else
     esac
 fi
 
-dnl Some needed libaries for OS2
-dnl perharps join this with the other target depended checks. move them upwards
+dnl Some needed libraries for OS2
+dnl perhaps join this with the other target depended checks. move them upwards
 if test x$host = xi386-pc-os2-emx ; then
     CXXFLAGS="$CXXFLAGS -Zmt"
     LDFLAGS="$LDFLAGS -Zomf -Zmt"
@@ -660,7 +660,7 @@ case "$host_cpu" in
     ;;
 esac
 
-dnl TODO: Need GCC to know this code is using C++ lamda functions
+dnl TODO: Need GCC to know this code is using C++ lambda functions
 
 dnl LIBRARY TEST: ALSA
 AM_PATH_ALSA(0.9.0, AC_DEFINE(HAVE_ALSA,1,[Define to 1 to use ALSA for MIDI]) , : )

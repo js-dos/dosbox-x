@@ -51,6 +51,7 @@
 #include "sdlmain.h"
 #include "menudef.h"
 #include "build_timestamp.h"
+#include "version_string.h"
 
 #include <output/output_ttf.h>
 
@@ -235,7 +236,7 @@ bool DOS_Shell::CheckConfig(char* cmd_in,char*line) {
 bool enable_config_as_shell_commands = false;
 
 bool DOS_Shell::execute_shell_cmd(char *name, char *arguments) {
-	SHELL_Cmd shell_cmd = {};
+	// SHELL_Cmd shell_cmd = {}; /* unused */
 	uint32_t cmd_index=0;
 	while (cmd_list[cmd_index].name) {
 		if (strcasecmp(cmd_list[cmd_index].name,name)==0) {
@@ -1418,7 +1419,7 @@ void DOS_Shell::CMD_CHDIR(char * args) {
 		if(drive == 'Z')
 			WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT"),toupper(targetdisplay));
 	} else if (!DOS_ChangeDir(sargs)) {
-		/* Changedir failed. Check if the filename is longer then 8 and/or contains spaces */
+		/* Changedir failed. Check if the filename is longer than 8 and/or contains spaces */
 	   
 		std::string temps(args),slashpart;
 		std::string::size_type separator = temps.find_first_of("\\/");
@@ -2322,7 +2323,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 		dos.dta(save_dta);
 		return;
 	}
-	// Gather all sources (extension to copy more then 1 file specified at command line)
+	// Gather all sources (extension to copy more than 1 file specified at command line)
 	// Concatenating files go as follows: All parts except for the last bear the concat flag.
 	// This construction allows them to be counted (only the non concat set)
 	char q[]="\"";
@@ -2392,7 +2393,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 	}
 
 	copysource target;
-	// If more then one object exists and last target is not part of a 
+	// If more than one object exists and last target is not part of a 
 	// concat sequence then make it the target.
 	if(sources.size()>1 && !sources[sources.size()-2].concat){
 		target = sources.back();
@@ -2596,13 +2597,22 @@ void DOS_Shell::CMD_COPY(char * args) {
 						}
 						if (!exist&&size) {
 							int drive=strlen(nameTarget)>1&&(nameTarget[1]==':'||nameTarget[2]==':')?(toupper(nameTarget[nameTarget[0]=='"'?1:0])-'A'):-1;
-							if (drive>=0&&Drives[drive]) {
-								uint16_t bytes_sector;uint8_t sectors_cluster;uint16_t total_clusters;uint16_t free_clusters;
-								rsize=true;
-								freec=0;
-								Drives[drive]->AllocationInfo(&bytes_sector,&sectors_cluster,&total_clusters,&free_clusters);
-								rsize=false;
-								if ((Bitu)bytes_sector * (Bitu)sectors_cluster * (Bitu)(freec?freec:free_clusters)<size) {
+                            if(drive >= 0 && Drives[drive]) {
+                                uint16_t bytes_sector; uint8_t sectors_cluster; uint16_t total_clusters; uint16_t free_clusters;
+                                uint32_t bytes32, sectors32, clusters32, free32;
+                                bool no_free_space = false;
+                                rsize = true;
+                                freec = 0;
+                                if(dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10)) {
+                                    Drives[drive]->AllocationInfo32(&bytes32, &sectors32, &clusters32, &free32);
+                                    no_free_space = (uint64_t)bytes32 * (uint64_t)sectors32 * (uint64_t)free32 < size ? true : false;
+                                }
+                                else {
+                                    Drives[drive]->AllocationInfo(&bytes_sector, &sectors_cluster, &total_clusters, &free_clusters);
+                                    no_free_space = (Bitu)bytes_sector* (Bitu)sectors_cluster* (Bitu)(freec ? freec : free_clusters) < size ? true : false;
+                                }
+                                rsize = false;
+								if (no_free_space) {
 									WriteOut(MSG_Get("SHELL_CMD_COPY_NOSPACE"), uselfn?lname:name);
 									DOS_CloseFile(sourceHandle);
 									ret = DOS_FindNext();
@@ -3401,9 +3411,10 @@ bool get_param(char *&args, char *&rem, char *&temp, char &wait_char, int &wait_
 void DOS_Shell::CMD_CHOICE(char * args){
 	HELP("CHOICE");
 	static char defchoice[3] = {MSG_Get("INT21_6523_YESNO_CHARS")[0],MSG_Get("INT21_6523_YESNO_CHARS")[1],0};
-	char *rem1 = NULL, *rem2 = NULL, *rem = NULL, *temp = NULL, waitchar = 0, *ptr;
+	//char *rem1 = NULL, *rem2 = NULL; /* unused */
+	char *rem = NULL, *temp = NULL, waitchar = 0, *ptr;
 	int waitsec = 0;
-	bool optC = false, optT = false;
+	//bool optC = false, optT = false; /* unused */
 	bool optN = ScanCMDBool(args,"N");
 	bool optS = ScanCMDBool(args,"S"); //Case-sensitive matching
 	// ignore /b and /m switches for compatibility
@@ -3705,7 +3716,7 @@ void DOS_Shell::CMD_VER(char *args) {
 		dos_ver_menu(false);
 	} else {
 		WriteOut(MSG_Get("SHELL_CMD_VER_VER"),VERSION,SDL_STRING,dos.version.major,dos.version.minor);
-		if (optR) WriteOut("DOSBox-X Git commit %s, built on %s\n", GIT_COMMIT_HASH, UPDATED_STR);
+		if (optR) WriteOut("DOSBox-X Git commit %s, built on %s\nPlatform: %s %d-bit", GIT_COMMIT_HASH, UPDATED_STR, OS_PLATFORM_LONG, OS_BIT_INT);
 	}
 }
 

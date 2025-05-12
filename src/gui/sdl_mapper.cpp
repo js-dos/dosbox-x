@@ -1321,9 +1321,9 @@ Bitu GetKeyCode(SDL_keysym keysym) {
                 break;
             default:
 #elif defined (__linux__)
-            switch(keysym.scancode) { // Workaround for some of the keys return incorrect virtual keycodes
-            //case 0x56:
-            //    return SDLK_LESS;
+            switch(keysym.scancode) { // Workaround for some of the keys return incorrect virtual keycodes 
+            case 0x5E:
+                return SDLK_LESS;    //DE Keyboard on Debian GNU/Linux 12 (bookworm) Debian 1:6.1.63-1+rpt1 (2023-11-24) aarch64 Linux 6.1.0-rpi7-rpi-v8
             case 0x60:
                 return SDLK_F12;
             case 0x61:

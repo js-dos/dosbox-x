@@ -101,7 +101,7 @@ enum {DSP_S_RESET,DSP_S_RESET_WAIT,DSP_S_NORMAL,DSP_S_HIGHSPEED};
 enum SB_TYPES {SBT_NONE=0,SBT_1=1,SBT_PRO1=2,SBT_2=3,SBT_PRO2=4,SBT_16=6,SBT_GB=7}; /* TODO: Need SB 2.0 vs SB 2.01 */
 enum REVEAL_SC_TYPES {RSC_NONE=0,RSC_SC400=1};
 enum SB_IRQS {SB_IRQ_8,SB_IRQ_16,SB_IRQ_MPU};
-enum ESS_TYPES {ESS_NONE=0,ESS_688=1};
+enum ESS_TYPES {ESS_NONE=0,ESS_688=1,ESS_1688=2};
 
 enum DSP_MODES {
     MODE_NONE,
@@ -231,6 +231,8 @@ struct SB_INFO {
         bool filtered;
         bool sbpro_stereo; /* Game or OS is attempting SB Pro type stereo */
         uint8_t unhandled[0x48];
+        uint8_t ess_id_str[4];
+        uint8_t ess_id_str_pos;
     } mixer;
     struct {
         uint8_t reference;
@@ -1168,7 +1170,7 @@ static void DSP_DoDMATransfer(DMA_MODES mode,Bitu freq,bool stereo,bool dontInit
      * program, before it is divided by two for stereo.
      *
      * Of course, some demos like Crystal Dream take the approach of just setting the
-     * sample rate to the max supported by the card and then letting it's timer interrupt
+     * sample rate to the max supported by the card and then letting its timer interrupt
      * define the sample rate. So of course anything below 44.1KHz sounds awful. */
     if (sb.dma_dac_mode && sb.goldplay_stereo && (stereo || sb.mixer.sbpro_stereo) && sb.single_sample_dma)
         sb.dma_dac_srcrate = sb.freq;
@@ -1921,7 +1923,7 @@ static void DSP_DoCommand(void) {
             // so there's no point below that rate in additional rendering.
             if (rt < 1000) rt = 1000;
 
-            // FIXME: What does the ESS AudioDrive do to it's filter/sample rate divider registers when emulating this Sound Blaster command?
+            // FIXME: What does the ESS AudioDrive do to its filter/sample rate divider registers when emulating this Sound Blaster command?
             ESSreg(0xA1) = 128 - (397700 / 22050);
             ESSreg(0xA2) = 256 - (7160000 / (82 * ((4 * 22050) / 10)));
 
@@ -1929,7 +1931,7 @@ static void DSP_DoCommand(void) {
             // The sound card isn't given any hint what the actual sample rate is, only that it's given
             // instruction when to change the 8-bit value being output to the DAC which is why older DOS
             // games using this method tend to sound "grungy" compared to DMA playback. We recreate the
-            // effect here by asking the mixer to do it's linear interpolation as if at 23KHz while
+            // effect here by asking the mixer to do its linear interpolation as if at 23KHz while
             // rendering the audio at whatever rate the DOS game is giving it to us.
             sb.chan->SetFreq((Bitu)(rt * 0x100),0x100);
             updateSoundBlasterFilter(sb.freq);
@@ -2288,8 +2290,19 @@ static void DSP_DoCommand(void) {
     case 0xe7:  /* ESS detect/read config */
         if (sb.ess_type != ESS_NONE) {
             DSP_FlushData();
-            DSP_AddData(0x68);
-            DSP_AddData(0x80 | 0x04/*ESS 688 version*/);
+            switch (sb.ess_type) {
+            case ESS_NONE:
+                break;
+            case ESS_688:
+                DSP_AddData(0x68);
+                DSP_AddData(0x80 | 0x04);
+                break;
+            case ESS_1688:
+                // Determined via Windows driver debugging.
+                DSP_AddData(0x68);
+                DSP_AddData(0x80 | 0x09);
+                break;
+            }
         }
         break;
     case 0xe8:  /* Read Test Register */
@@ -2330,7 +2343,7 @@ static void DSP_DoCommand(void) {
         break;
     case 0x37: /* MIDI Read Timestamp Interrupt & Write Poll */
         DSP_SB2_ABOVE;
-        LOG(LOG_SB,LOG_DEBUG)("DSP:Entering MIDI Read Timstamp Interrupt/Write Poll mode");
+        LOG(LOG_SB,LOG_DEBUG)("DSP:Entering MIDI Read Timestamp Interrupt/Write Poll mode");
         sb.dsp.midi_rwpoll_mode = true;
         sb.dsp.midi_read_interrupt = true;
         sb.dsp.midi_read_with_timestamps = true;
@@ -3060,6 +3073,32 @@ static uint8_t CTMIXER_Read(void) {
     case 0x3e:      /* Line Volume (ESS 688) */
         if (sb.ess_type != ESS_NONE) return ((sb.mixer.lin[0] << 3) & 0xF0) + (sb.mixer.lin[1] >> 1);
         break;
+    case 0x40:      /* ESS identification value (ES1488 and later) */
+        if (sb.ess_type != ESS_NONE) {
+            switch (sb.ess_type) {
+            case ESS_688:
+                ret=0xa;
+                break;
+            case ESS_1688:
+                ret=sb.mixer.ess_id_str[sb.mixer.ess_id_str_pos];
+                sb.mixer.ess_id_str_pos++;
+                if (sb.mixer.ess_id_str_pos >= 4) {
+                    sb.mixer.ess_id_str_pos = 0;
+                }
+                break;
+            default:
+                ret=0xa;
+                LOG(LOG_SB,LOG_WARN)("MIXER:FIXME:ESS identification function (0x%X) for selected card is not implemented",sb.mixer.index);
+            }
+        } else {
+            if (sb.type == SBT_16) {
+                ret=sb.mixer.unhandled[sb.mixer.index];
+            } else {
+                ret=0xa;
+            }
+            LOG(LOG_SB,LOG_WARN)("MIXER:Read from unhandled index %X",sb.mixer.index);
+        }
+        break;
     case 0x80:      /* IRQ Select */
         ret=0;
         if (IS_PC98_ARCH) {
@@ -3180,7 +3219,7 @@ static Bitu read_sb(Bitu port,Bitu /*iolen*/) {
             /* NTS: DSP "busy cycle" is independent of whether the DSP is actually
              *      busy (executing a command) or highspeed mode. On SB16 hardware,
              *      writing a DSP command during the busy cycle means that the command
-             *      is remembered, but not acted on until the DSP leaves it's busy
+             *      is remembered, but not acted on until the DSP leaves its busy
              *      cycle. */
             sb.busy_cycle_io_hack++; /* NTS: busy cycle I/O timing hack! */
             if (DSP_busy_cycle())
@@ -3234,6 +3273,9 @@ static void write_sb(Bitu port,Bitu val,Bitu /*iolen*/) {
         break;
     case MIXER_INDEX:
         sb.mixer.index=val8;
+        if (sb.mixer.index == 0x40 && sb.ess_type != ESS_NONE) {
+            sb.mixer.ess_id_str_pos = 0;
+        }
         break;
     case MIXER_DATA:
         CTMIXER_Write(val8);
@@ -3642,6 +3684,14 @@ private:
             LOG(LOG_SB,LOG_WARN)("Reveal SC400 emulation is EXPERIMENTAL at this time and should not yet be used for normal gaming.");
             LOG(LOG_SB,LOG_WARN)("Additional WARNING: This code only emulates the Sound Blaster portion of the card. Attempting to use the Windows Sound System part of the card (i.e. the Voyetra/SC400 Windows drivers) will not work!");
         }
+        else if (!strcasecmp(sbtype,"ess1688")) {
+            type=SBT_PRO2;
+            sb.ess_type=ESS_1688;
+            sb.mixer.ess_id_str[0] = 0x16;
+            sb.mixer.ess_id_str[1] = 0x88;
+            LOG(LOG_SB,LOG_DEBUG)("ESS ES1688 emulation enabled.");
+            LOG(LOG_SB,LOG_WARN)("ESS ES1688 emulation is EXPERIMENTAL at this time and should not yet be used for normal gaming.");
+        }
         else type=SBT_16;
 
         if (type == SBT_16) {
@@ -3673,6 +3723,7 @@ private:
         else if (!strcasecmp(omode,"opl3gold")) opl_mode=OPL_opl3gold;
         else if (!strcasecmp(omode,"hardware")) opl_mode=OPL_hardware;
         else if (!strcasecmp(omode,"hardwaregb")) opl_mode=OPL_hardwareCMS;
+        else if (!strcasecmp(omode,"esfm")) opl_mode=OPL_esfm;
         /* Else assume auto */
         else {
             switch (type) {
@@ -3691,7 +3742,11 @@ private:
                 break;
             case SBT_PRO2: // NTS: ESS 688 cards also had an OPL3 (http://www.dosdays.co.uk/topics/Manufacturers/ess.php)
             case SBT_16:
-                opl_mode=OPL_opl3;
+                if (sb.ess_type != ESS_NONE && sb.ess_type != ESS_688) {
+                    opl_mode=OPL_esfm;
+                } else {
+                    opl_mode=OPL_opl3;
+                }
                 break;
             }
         }
@@ -3722,6 +3777,11 @@ public:
         Section_prop * section=static_cast<Section_prop *>(configuration);
 
         sb.hw.base=(unsigned int)section->Get_hex("sbbase");
+
+        if (sb.ess_type != ESS_NONE && sb.ess_type != ESS_688) {
+            sb.mixer.ess_id_str[2] = (sb.hw.base >> 8) & 0xff;
+            sb.mixer.ess_id_str[3] = sb.hw.base & 0xff;
+        }
 
         if (IS_PC98_ARCH) {
             if (sb.hw.base >= 0x220 && sb.hw.base <= 0x2E0) /* translate IBM PC to PC-98 (220h -> D2h) */
@@ -3766,7 +3826,7 @@ public:
          *                   trick of reading port 22Ch to wait for bit 7 to clear (which is normal), then
          *                   using the value it read (left over from AL) as the byte to sum it's audio output
          *                   to before sending out to the DAC. This is why, if the write status port returns
-         *                   a different value like 0x2A, the audio crackes with saturation errors.
+         *                   a different value like 0x2A, the audio crackles with saturation errors.
          *
          *                   Overload's Sound Blaster output code:
          *
@@ -3881,6 +3941,7 @@ public:
             // fall-through
         case OPL_opl3:
         case OPL_opl3gold:
+        case OPL_esfm:
             OPL_Init(section,oplmode);
             break;
         case OPL_hardwareCMS:
@@ -3914,6 +3975,8 @@ public:
             ReadHandler[i].Install(sb.hw.base+(IS_PC98_ARCH ? ((i+0x20u) << 8u) : i),read_sb,IO_MB);
             WriteHandler[i].Install(sb.hw.base+(IS_PC98_ARCH ? ((i+0x20u) << 8u) : i),write_sb,IO_MB);
         }
+
+        // TODO: read/write handler for ESS AudioDrive ES1688 (and later) MPU-401 ports (3x0h/3x1h; prevents Windows drivers from working with default settings if missing)
 
         // NTS: Unknown/undefined registers appear to return the register index you requested rather than the actual contents,
         //      according to real SB16 CSP/ASP hardware (chip version id 0x10).
@@ -4070,7 +4133,7 @@ public:
         if (sb.hw.irq != 0 && sb.hw.irq != 0xFF) {
             s = section->Get_string("irq hack");
             if (!s.empty() && s != "none") {
-                LOG(LOG_SB,LOG_NORMAL)("Sound Blaster emulation: Assigning IRQ hack '%s' as instruced",s.c_str());
+                LOG(LOG_SB,LOG_NORMAL)("Sound Blaster emulation: Assigning IRQ hack '%s' as instructed",s.c_str());
                 PIC_Set_IRQ_hack((int)sb.hw.irq,PIC_parse_IRQ_hack_string(s.c_str()));
             }
         }
@@ -4171,6 +4234,7 @@ ASP>
         case OPL_dualopl2:
         case OPL_opl3:
         case OPL_opl3gold:
+        case OPL_esfm:
             OPL_ShutDown(m_configuration);
             break;
         default:
@@ -4193,7 +4257,7 @@ void SBLASTER_ShutDown(Section* /*sec*/) {
         test = NULL;
     }
 #if HAS_HARDOPL
-    HWOPL_Cleanup();
+    HARDOPL_Cleanup();
 #endif
 }
 
@@ -4206,7 +4270,7 @@ void SBLASTER_OnReset(Section *sec) {
         test = NULL;
     }
 #if HAS_HARDOPL
-    HWOPL_Cleanup();
+    HARDOPL_Cleanup();
 #endif
 
     if (test == NULL) {

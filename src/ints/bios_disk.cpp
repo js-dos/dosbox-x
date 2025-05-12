@@ -1116,6 +1116,8 @@ diskGeo DiskGeometryList[] = {
     {2880, 36, 2, 80, 6, 512, 240, 2, 0xF0},      // IBM PC high density 3.5" double-sided 2.88MB
 
     {1232,  8, 2, 77, 7, 1024,192, 1, 0xFE},      // NEC PC-98 high density 3.5" double-sided 1.2MB "3-mode"
+    {1520, 19, 2, 80, 2, 512, 224, 1, 0xF9},      // IBM PC high density 5.25" double-sided 1.52MB (XDF)
+    {1840, 23, 2, 80, 4, 512, 224, 1, 0xF0},      // IBM PC high density 3.5" double-sided 1.84MB (XDF)
 
     {   0,  0, 0,  0, 0,    0,  0, 0,    0}
 };
@@ -1434,6 +1436,20 @@ imageDisk::imageDisk(FILE* diskimg, const char* diskName, uint32_t cylinders, ui
     floppytype = 0;
 }
 
+
+void imageDisk::UpdateFloppyType(void) {
+	uint8_t i=0;
+
+	while (DiskGeometryList[i].ksize!=0x0) {
+		if ((DiskGeometryList[i].ksize==diskSizeK) || (DiskGeometryList[i].ksize+1==diskSizeK)) {
+			floppytype = i;
+			LOG_MSG("Updating floppy type to %u BIOS type 0x%02x",floppytype,GetBiosType());
+			break;
+		}
+		i++;
+	}
+}
+
 imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint32_t imgSizeK, bool isHardDisk) : diskSizeK(imgSizeK), diskimg(imgFile), image_length((uint64_t)imgSizeK * 1024) {
     if (imgName != NULL)
         diskname = imgName;
@@ -1697,7 +1713,7 @@ void imageDisk::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSec
     Bitu bigdisk_shift = 0;
 
     if (IS_PC98_ARCH) {
-        /* TODO: PC-98 has it's own 4096 cylinder limit */
+        /* TODO: PC-98 has its own 4096 cylinder limit */
     }
     else {
         if(setCyl > 16384) LOG_MSG("Warning: This disk image is too big.");
@@ -1899,7 +1915,7 @@ static Bitu INT13_DiskHandler(void) {
 
         /* INT 13h is limited to 512 bytes/sector (as far as I know).
          * The sector buffer in this function is limited to 512 bytes/sector,
-         * so this is also a protection against overruning the stack if you
+         * so this is also a protection against overrunning the stack if you
          * mount a PC-98 disk image (1024 bytes/sector) and try to read it with INT 13h. */
         if (imageDiskList[drivenum]->sector_size > sizeof(sectbuf)) {
             LOG(LOG_MISC,LOG_DEBUG)("INT 13h: Read failed because disk bytes/sector on drive %c is too large",(char)drivenum+'A');
@@ -1960,7 +1976,7 @@ static Bitu INT13_DiskHandler(void) {
 
         /* INT 13h is limited to 512 bytes/sector (as far as I know).
          * The sector buffer in this function is limited to 512 bytes/sector,
-         * so this is also a protection against overruning the stack if you
+         * so this is also a protection against overrunning the stack if you
          * mount a PC-98 disk image (1024 bytes/sector) and try to read it with INT 13h. */
         if (imageDiskList[drivenum]->sector_size > sizeof(sectbuf)) {
             LOG(LOG_MISC,LOG_DEBUG)("INT 13h: Write failed because disk bytes/sector on drive %c is too large",(char)drivenum+'A');
@@ -3597,7 +3613,7 @@ void LogPrintPartitionTable(const std::vector<_PC98RawPartition> &parts) {
 		const _PC98RawPartition &part = parts[i];
 
 		LOG(LOG_DOSMISC,LOG_DEBUG)("IPL #%u: boot=%u active=%u startchs=%u/%u/%u endchs=%u/%u/%u '%s'",
-			(unsigned int)i,(part.mid&0x80)?1:0,(part.sid&0x80)?1:0,
+        (unsigned int)i,(part.mid&0x80)?1:0,(part.sid&0x80)?1:0,
 			part.cyl,part.head,part.sector,part.end_cyl,part.end_head,part.end_sector,
 			std::string((char*)part.name,sizeof(part.name)).c_str());
 	}
@@ -3614,5 +3630,34 @@ void LogPrintPartitionTable(const std::vector<partTable::partentry_t> &parts) {
 			(unsigned long long)part.absSectStart,
 			(unsigned long long)part.partSize);
 	}
+}
+
+
+uint8_t imageDiskEmptyDrive::Read_Sector(uint32_t /*head*/,uint32_t /*cylinder*/,uint32_t /*sector*/,void * /*data*/,unsigned int /*req_sector_size*/) {
+	return 0x05;
+}
+
+uint8_t imageDiskEmptyDrive::Write_Sector(uint32_t /*head*/,uint32_t /*cylinder*/,uint32_t /*sector*/,const void * /*data*/,unsigned int /*req_sector_size*/) {
+	return 0x05;
+}
+
+uint8_t imageDiskEmptyDrive::Read_AbsoluteSector(uint32_t /*sectnum*/, void * /*data*/) {
+	return 0x05;
+}
+
+uint8_t imageDiskEmptyDrive::Write_AbsoluteSector(uint32_t /*sectnum*/, const void * /*data*/) {
+	return 0x05;
+}
+
+imageDiskEmptyDrive::imageDiskEmptyDrive() : imageDisk(ID_EMPTY_DRIVE) {
+	active = true;
+	sector_size = 512;
+	heads = 2;
+	cylinders = 80;
+	sectors = 18;
+	diskSizeK = 1440;
+}
+
+imageDiskEmptyDrive::~imageDiskEmptyDrive() {
 }
 
