@@ -53,14 +53,14 @@ public:
 
 	DECLARE_WRITE8_MEMBER( write );
 
-	uint32_t sample_rate = clock() / 256;
+	uint32_t sample_rate;
 
 //protected:
 	// device-level overrides
-	virtual void device_start();
+	void device_start() override;
 
 	// sound stream update overrides
-	virtual void sound_stream_update(sound_stream &stream, stream_sample_t **inputs, stream_sample_t **outputs, int samples);
+	void sound_stream_update(sound_stream &stream, stream_sample_t **inputs, stream_sample_t **outputs, int samples) override;
 
 	void SaveState( std::ostream& stream );
 	void LoadState( std::istream& stream );

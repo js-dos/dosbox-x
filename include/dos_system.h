@@ -33,6 +33,7 @@
 #define DOS_PATHLENGTH 255u
 #define DOS_TEMPSIZE 1024u
 #define DOSERR_FUNCTION_NUMBER_INVALID 1
+
 void DOS_SetError(uint16_t code);
 
 enum {
@@ -120,11 +121,11 @@ public:
 	}
 	DOS_Device():DOS_File() {};
 	virtual ~DOS_Device() {};
-	virtual bool	Read(uint8_t * data,uint16_t * size);
-	virtual bool	Write(const uint8_t * data,uint16_t * size);
-	virtual bool	Seek(uint32_t * pos,uint32_t type);
-	virtual bool	Close();
-	virtual uint16_t	GetInformation(void);
+	bool	Read(uint8_t * data,uint16_t * size) override;
+	bool	Write(const uint8_t * data,uint16_t * size) override;
+	bool	Seek(uint32_t * pos,uint32_t type) override;
+	bool	Close() override;
+	uint16_t	GetInformation(void) override;
 	virtual void	SetInformation(uint16_t info);
 	virtual bool	ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode);
 	virtual bool	WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode);
@@ -158,14 +159,14 @@ public:
         return *this;
     }
 
-    virtual bool	Read(uint8_t* data, uint16_t* size);
-    virtual bool	Write(const uint8_t* data, uint16_t* size);
-    virtual bool	Seek(uint32_t* pos, uint32_t type);
-    virtual bool	Close();
-    virtual uint16_t	GetInformation(void);
-    virtual bool	ReadFromControlChannel(PhysPt bufptr, uint16_t size, uint16_t* retcode);
-    virtual bool	WriteToControlChannel(PhysPt bufptr, uint16_t size, uint16_t* retcode);
-    virtual uint8_t	GetStatus(bool input_flag);
+    bool	Read(uint8_t* data, uint16_t* size) override;
+    bool	Write(const uint8_t* data, uint16_t* size) override;
+    bool	Seek(uint32_t* pos, uint32_t type) override;
+    bool	Close() override;
+    uint16_t	GetInformation(void) override;
+    bool	ReadFromControlChannel(PhysPt bufptr, uint16_t size, uint16_t* retcode) override;
+    bool	WriteToControlChannel(PhysPt bufptr, uint16_t size, uint16_t* retcode) override;
+    uint8_t	GetStatus(bool input_flag) override;
     bool CheckSameDevice(uint16_t seg, uint16_t s_off, uint16_t i_off);
     uint16_t CallDeviceFunction(uint8_t command, uint8_t length, uint16_t seg, uint16_t offset, uint16_t size);
 private:
@@ -173,21 +174,21 @@ private:
 
 };
 
-class localFile : public DOS_File {
+class LocalFile : public DOS_File {
 public:
-	localFile();
-	localFile(const char* _name, FILE * handle);
-	bool Read(uint8_t * data,uint16_t * size);
-	bool Write(const uint8_t * data,uint16_t * size);
-	bool Seek(uint32_t * pos,uint32_t type);
-	bool Close();
-	bool LockFile(uint8_t mode, uint32_t pos, uint16_t size);
-	uint16_t GetInformation(void);
-	bool UpdateDateTimeFromHost(void);
+	LocalFile();
+	LocalFile(const char* _name, FILE * handle);
+	bool Read(uint8_t * data,uint16_t * size) override;
+	bool Write(const uint8_t * data,uint16_t * size) override;
+	bool Seek(uint32_t * pos,uint32_t type) override;
+	bool Close() override;
+	bool LockFile(uint8_t mode, uint32_t pos, uint16_t size) override;
+	uint16_t GetInformation(void) override;
+	bool UpdateDateTimeFromHost(void) override;
 	bool UpdateLocalDateTime(void);
 	void FlagReadOnlyMedium(void);
-	void Flush(void);
-	uint32_t GetSeekPos(void);
+	void Flush(void) override;
+	uint32_t GetSeekPos(void) override;
 	FILE * fhandle;
 private:
 	bool read_only_medium = false;
@@ -269,7 +270,7 @@ private:
 	CFileInfo*	FindDirInfo		(const char* path, char* expandedPath);
 	bool		RemoveSpaces		(char* str);
 	bool		OpenDir			(CFileInfo* dir, const char* expand, uint16_t& id);
-    char*       CreateEntry     (CFileInfo* dir, const char* name, const char* sname, bool is_directory);
+    char*       CreateEntry     (CFileInfo* dir, const char* name, const char* sname, bool is_directory, bool skipSort=false);
 	void		CopyEntry		(CFileInfo* dir, CFileInfo* from);
 	uint16_t		GetFreeID		(CFileInfo* dir);
 	void		Clear			(void);
@@ -314,8 +315,9 @@ public:
 	virtual HANDLE CreateOpenFile(char const* const name)=0;
 #endif
 	virtual bool Rename(const char * oldname,const char * newname)=0;
-	virtual bool AllocationInfo(uint16_t * _bytes_sector,uint8_t * _sectors_cluster,uint16_t * _total_clusters,uint16_t * _free_clusters)=0;
-	virtual bool AllocationInfo32(uint32_t * _bytes_sector,uint32_t * _sectors_cluster,uint32_t * _total_clusters,uint32_t * _free_clusters) { (void)_bytes_sector; (void)_sectors_cluster; (void)_total_clusters; (void)_free_clusters; return false; }
+    virtual bool AllocationInfo(uint16_t* _bytes_sector, uint8_t* _sectors_cluster, uint16_t* _total_clusters, uint16_t* _free_clusters) = 0;
+    virtual bool AllocationInfo32(uint32_t * _bytes_sector,uint32_t * _sectors_cluster,uint32_t * _total_clusters,uint32_t * _free_clusters) { (void)_bytes_sector; (void)_sectors_cluster; (void)_total_clusters; (void)_free_clusters; return false; }
+    virtual bool AllocationInfo64(uint32_t* _bytes_sector, uint32_t* _sectors_cluster, uint64_t* _total_clusters, uint64_t* _free_clusters) { (void)_bytes_sector; (void)_sectors_cluster; (void)_total_clusters; (void)_free_clusters; return false; }
 	virtual bool FileExists(const char* name)=0;
 	virtual bool FileStat(const char* name, FileStat_Block * const stat_block)=0;
 	virtual uint8_t GetMediaByte(void)=0;

@@ -27,8 +27,15 @@
 // C++ SDLnet wrapper
 
 #if !defined(__MINGW32__) || defined(__MINGW64_VERSION_MAJOR)
-#define ENET_IMPLEMENTATION
-#include "enet.h"
+#define WITH_ENET_IMPLEMENTATION
+#endif
+#if defined(OS2)
+#undef WITH_ENET_IMPLEMENTATION
+#endif
+
+#if defined(WITH_ENET_IMPLEMENTATION)
+ #define ENET_IMPLEMENTATION
+ #include "enet.h"
 #endif
 #include "ipx.h"
 #include "logging.h"
@@ -86,7 +93,7 @@ NETClientSocket *NETClientSocket::NETClientFactory(SocketTypesE socketType,
 	switch (socketType) {
 	case SOCKET_TYPE_TCP: return new TCPClientSocket(destination, port);
 
-#if !defined(__MINGW32__) || defined(__MINGW64_VERSION_MAJOR)
+#if defined(WITH_ENET_IMPLEMENTATION)
 	case SOCKET_TYPE_ENET: return new ENETClientSocket(destination, port);
 #endif
 
@@ -145,7 +152,7 @@ NETServerSocket *NETServerSocket::NETServerFactory(SocketTypesE socketType,
 	switch (socketType) {
 	case SOCKET_TYPE_TCP: return new TCPServerSocket(port);
 
-#if !defined(__MINGW32__) || defined(__MINGW64_VERSION_MAJOR)
+#if defined(WITH_ENET_IMPLEMENTATION)
 	case SOCKET_TYPE_ENET: return new ENETServerSocket(port);
 #endif
 
@@ -156,7 +163,7 @@ NETServerSocket *NETServerSocket::NETServerFactory(SocketTypesE socketType,
 
 // --- ENet UDP NET INTERFACE ------------------------------------------------
 
-#if !defined(__MINGW32__) || defined(__MINGW64_VERSION_MAJOR)
+#if defined(WITH_ENET_IMPLEMENTATION)
 class enet_manager_t {
 public:
 	enet_manager_t()
@@ -629,7 +636,7 @@ TCPClientSocket::TCPClientSocket(TCPsocket source)
 	if (!NetWrapper_InitializeSDLNet())
 		return;
 
-	if(source!=0) {
+	if (source) {
 		mysock = source;
 		listensocketset = SDLNet_AllocSocketSet(1);
 		if(!listensocketset) return;
@@ -771,7 +778,7 @@ NETClientSocket *TCPServerSocket::Accept()
 	new_tcpsock=SDLNet_TCP_Accept(mysock);
 	if(!new_tcpsock) {
 		//printf("SDLNet_TCP_Accept: %s\n", SDLNet_GetError());
-		return 0;
+		return nullptr;
 	}
 	
 	return new TCPClientSocket(new_tcpsock);

@@ -190,7 +190,7 @@ static int create_mutex( const char* p_name )
 #else // MACOSX
 		LOG_MSG( "GAMELINK: Might need to manually tidy up in /dev/shm (or reboot system)." );
 #endif // MACOSX
-		g_mutex_handle = 0;
+		g_mutex_handle = nullptr;
 	}
     else
     {
@@ -294,7 +294,7 @@ static int create_shared_memory()
 
 		// map to a pointer.
 		g_p_shared_memory = reinterpret_cast< GameLink::sSharedMemoryMap_R4* >(
-			mmap( 0, memory_map_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_mmap_handle, 0 )
+			mmap(nullptr, memory_map_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_mmap_handle, 0)
 		);
 
 		if ( g_p_shared_memory == MAP_FAILED )
@@ -415,7 +415,7 @@ uint8_t* GameLink::AllocRAM( const uint32_t size )
 	{
 		destroy_mutex( GAMELINK_MUTEX_NAME );
 		// failed.
-		return 0;
+		return nullptr;
 	}
 
 	// Initialise
@@ -681,13 +681,14 @@ void GameLink::Out( const uint16_t frame_width,
 			LOG_MSG("Load Address = %06x", RunningProgramLoadAddress);
 			int matches = 0;
 #endif
-			for (int addr = 0; addr < g_membase_size-1024; addr++) {
+			for (decltype(g_membase_size) addr = 0; addr < g_membase_size-1024; addr++) {
 				bool match = true;
-				int base = g_p_shared_memory->peek.addr[ 0 ];
-				for (int i = 0; i < g_p_shared_memory->peek.addr_count; i++) {
+				auto const base = g_p_shared_memory->peek.addr[ 0 ];
+				using addr_count_t = decltype(g_p_shared_memory->peek.addr_count);
+				for (addr_count_t i = 0; i < g_p_shared_memory->peek.addr_count; i++) {
 					uint8_t seek = g_p_shared_memory->peek.data[ i ];
                     if (g_p_shared_memory->peek.addr[ i ] > 0x10000000) continue;
-					int oaddr = g_p_shared_memory->peek.addr[ i ] - base + addr;
+					auto const oaddr = g_p_shared_memory->peek.addr[ i ] - base + addr;
 					if (oaddr >= g_membase_size || p_sysmem[ oaddr ] != seek) {
 						match = false;
 						break;

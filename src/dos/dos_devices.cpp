@@ -233,28 +233,28 @@ static void DOS_CheckOpenExtDevice(const char *name) {
 class device_NUL : public DOS_Device {
 public:
 	device_NUL() { SetName("NUL"); };
-	virtual bool Read(uint8_t * data,uint16_t * size) {
+	bool Read(uint8_t * data,uint16_t * size) override {
         (void)data; // UNUSED
 		*size = 0; //Return success and no data read.
 //		LOG(LOG_IOCTL,LOG_NORMAL)("%s:READ",GetName());
 		return true;
 	}
-	virtual bool Write(const uint8_t * data,uint16_t * size) {
+	bool Write(const uint8_t * data,uint16_t * size) override {
         (void)data; // UNUSED
         (void)size; // UNUSED
 //		LOG(LOG_IOCTL,LOG_NORMAL)("%s:WRITE",GetName());
 		return true;
 	}
-	virtual bool Seek(uint32_t * pos,uint32_t type) {
+	bool Seek(uint32_t * pos,uint32_t type) override {
         (void)type;
         (void)pos;
 //		LOG(LOG_IOCTL,LOG_NORMAL)("%s:SEEK",GetName());
 		return true;
 	}
-	virtual bool Close() { return true; }
-	virtual uint16_t GetInformation(void) { return DeviceInfoFlags::Device | DeviceInfoFlags::Nul; }
-	virtual bool ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) { (void)bufptr; (void)size; (void)retcode; return false; }
-	virtual bool WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) { (void)bufptr; (void)size; (void)retcode; return false; }
+	bool Close() override { return true; }
+	uint16_t GetInformation(void) override { return DeviceInfoFlags::Device | DeviceInfoFlags::Nul; }
+	bool ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) override { (void)bufptr; (void)size; (void)retcode; return false; }
+	bool WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) override { (void)bufptr; (void)size; (void)retcode; return false; }
 };
 
 class device_PRN : public DOS_Device {
@@ -262,13 +262,13 @@ public:
 	device_PRN() {
 		SetName("PRN");
 	}
-	bool Read(uint8_t * data,uint16_t * size) {
+	bool Read(uint8_t * data,uint16_t * size) override {
         (void)data; // UNUSED
         (void)size; // UNUSED
 		DOS_SetError(DOSERR_ACCESS_DENIED);
 		return false;
 	}
-	bool Write(const uint8_t * data,uint16_t * size) {
+	bool Write(const uint8_t * data,uint16_t * size) override {
 		for(int i = 0; i < 9; i++) {
 			// look up a parallel port
 			if(parallelPortObjects[i] != NULL) {
@@ -281,15 +281,15 @@ public:
 		}
 		return false;
 	}
-	bool Seek(uint32_t * pos,uint32_t type) {
+	bool Seek(uint32_t * pos,uint32_t type) override {
         (void)type; // UNUSED
 		*pos = 0;
 		return true;
 	}
-	uint16_t GetInformation(void) {
+	uint16_t GetInformation(void) override {
 		return DeviceInfoFlags::Device | DeviceInfoFlags::Binary;
 	}
-	bool Close() {
+	bool Close() override {
 		return false;
 	}
 };
@@ -509,7 +509,7 @@ public:
 		strcpy(tmpAscii, "#clip$.asc");
 		strcpy(tmpUnicode, "#clip$.txt");
 	}
-	virtual bool Read(uint8_t * data,uint16_t * size) {
+	bool Read(uint8_t * data,uint16_t * size) override {
 		if(control->SecureMode()||!(dos_clipboard_device_access==2||dos_clipboard_device_access==4)) {
 			*size = 0;
 			return true;
@@ -530,7 +530,7 @@ public:
 		}
 		return true;
 	}
-	virtual bool Write(const uint8_t * data,uint16_t * size) {
+	bool Write(const uint8_t * data,uint16_t * size) override {
 		if(control->SecureMode()||!(dos_clipboard_device_access==3||dos_clipboard_device_access==4)) {
 			DOS_SetError(DOSERR_ACCESS_DENIED);
 			return false;
@@ -564,7 +564,7 @@ public:
 			}
 		return true;
 	}
-	virtual bool Seek(uint32_t * pos,uint32_t type) {
+	bool Seek(uint32_t * pos,uint32_t type) override {
 		if(control->SecureMode()||!(dos_clipboard_device_access==2||dos_clipboard_device_access==4)) {
 			*pos = 0;
 			return true;
@@ -602,7 +602,7 @@ public:
 		fPointer = newPos;
 		return true;
 	}
-	virtual bool Close() {
+	bool Close() override {
 		if(control->SecureMode()||dos_clipboard_device_access<2)
 			return false;
 		clipSize = 0;																	// Reset clipboard read
@@ -616,7 +616,7 @@ public:
 		CommitData();
 		return true;
 	}
-	uint16_t GetInformation(void) {
+	uint16_t GetInformation(void) override {
 		return DeviceInfoFlags::Device | DeviceInfoFlags::EofOnInput | DeviceInfoFlags::Binary;
 	}
 };
@@ -626,6 +626,16 @@ bool DOS_Device::Read(uint8_t * data,uint16_t * size) {
 }
 
 bool DOS_Device::Write(const uint8_t * data,uint16_t * size) {
+	// Enables console capture with VZ editor resident and xscript
+	if(IS_PC98_ARCH && Devices[devnum]->IsName("CON")) {
+		uint16_t keep_ax = reg_ax;
+		for(uint16_t n = 0 ; n < *size ; n++) {
+			reg_al = *data++;
+			CALLBACK_RunRealInt(0x29);
+		}
+		reg_ax = keep_ax;
+		return true;
+	}
 	return Devices[devnum]->Write(data,size);
 }
 
@@ -682,7 +692,7 @@ DOS_File& DOS_File::operator= (const DOS_File& orig) {
         drive = orig.drive;
         newtime = orig.newtime;
         if (name) {
-            delete[] name; name = 0;
+            delete[] name; name = nullptr;
         }
         if (orig.name) {
             name = new char[strlen(orig.name) + 1]; strcpy(name, orig.name);
@@ -743,7 +753,7 @@ uint8_t DOS_FindDevice(char const * name) {
 						return index;
 					} else {
 						delete Devices[index];
-						Devices[index] = 0;
+						Devices[index] = nullptr;
 						break;
 					}
 				}
@@ -759,7 +769,7 @@ uint8_t DOS_FindDevice(char const * name) {
 	static char com[5] = { 'C','O','M','1',0 };
 	static char lpt[5] = { 'L','P','T','1',0 };
 	// AUX is alias for COM1 and PRN for LPT1
-	// A bit of a hack. (but less then before).
+	// A bit of a hack. (but less than before).
 	// no need for casecmp as makename returns uppercase
 	if (strcmp(name_part, "AUX") == 0) name_part = com;
 	if (strcmp(name_part, "PRN") == 0) name_part = lpt;
@@ -821,7 +831,7 @@ void DOS_DelDevice(DOS_Device * dev) {
 			if (!strcmp(Devices[i]->name, dev->name)) {
 //				LOG_MSG("DOS_DelDevice() %s (%p)",dev->name,(void*)dev);
 				delete Devices[i];
-				Devices[i] = 0;
+				Devices[i] = nullptr;
 				return;
 			}
 		}
@@ -953,6 +963,26 @@ void INTDC_CL10h_AH08h(uint16_t count) {
 void INTDC_CL10h_AH09h(uint16_t count) {
     if (DOS_CON != NULL)
         DOS_CON->INTDC_CL10h_AH09h(count);
+}
+
+void INTDC_CL10h_AH0Ah(uint16_t pattern) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Ah(pattern);
+}
+
+void INTDC_CL10h_AH0Bh(uint16_t pattern) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Bh(pattern);
+}
+
+void INTDC_CL10h_AH0Ch(uint16_t count) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Ch(count);
+}
+
+void INTDC_CL10h_AH0Dh(uint16_t count) {
+    if (DOS_CON != NULL)
+        DOS_CON->INTDC_CL10h_AH0Dh(count);
 }
 
 /* The CB_INT28 handler calls this callback then executes STI+HLT.

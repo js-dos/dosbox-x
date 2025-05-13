@@ -39,7 +39,11 @@ static uint16_t sdid[256];
 extern int lfn_filefind_handle;
 extern bool gbk, isDBCSCP(), isKanji1_gbk(uint8_t chr), shiftjis_lead_byte(int c);
 extern bool filename_not_8x3(const char *n), filename_not_strict_8x3(const char *n);
-extern bool CodePageHostToGuestUTF16(char *d/*CROSS_LEN*/,const uint16_t *s/*CROSS_LEN*/);
+bool CodePageHostToGuestUTF16(char *d/*CROSS_LEN*/,const uint16_t *s/*CROSS_LEN*/);
+inline bool CodePageHostToGuestUTF16(uint8_t *d/*CROSS_LEN*/,const uint8_t *s/*CROSS_LEN*/) {
+    std::u16string u16s(reinterpret_cast<const char16_t *>(s));
+    return CodePageHostToGuestUTF16(reinterpret_cast<char *>(d), reinterpret_cast<const uint16_t *>(u16s.c_str()));
+}
 
 using namespace std;
 
@@ -844,12 +848,12 @@ unsigned int isoDrive::UDFextent_read(struct UDFextents &ex,unsigned char *buf,s
 class isoFile : public DOS_File {
 public:
     isoFile(isoDrive* drive, const char* name, const FileStat_Block* stat, uint32_t offset);
-	bool Read(uint8_t *data, uint16_t *size);
-	bool Write(const uint8_t *data, uint16_t *size);
-	bool Seek(uint32_t *pos, uint32_t type);
-	bool Close();
-	uint16_t GetInformation(void);
-	uint32_t GetSeekPos(void);
+	bool Read(uint8_t *data, uint16_t *size) override;
+	bool Write(const uint8_t *data, uint16_t *size) override;
+	bool Seek(uint32_t *pos, uint32_t type) override;
+	bool Close() override;
+	uint16_t GetInformation(void) override;
+	uint32_t GetSeekPos(void) override;
 public:
 	UDFextents udffext;
 	bool udf = false;
@@ -1001,6 +1005,9 @@ isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int&
 	}
     }
 
+    if (!strcmp(fileName,"empty"))
+        empty_drive = true;
+
     if (!CDROM_Interface_Image::images_init) {
         CDROM_Interface_Image::images_init = true;
         for (size_t i=0;i < 26;i++)
@@ -1018,7 +1025,15 @@ isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int&
 	error = UpdateMscdex(driveLetter, fileName, subUnit);
 
 	if (!error) {
-		if (loadImage()) {
+		if (empty_drive) {
+			LOG_MSG("Empty ISO");
+			strcpy(info, "isoDrive ");
+			strcat(info, "empty");
+			this->driveLetter = driveLetter;
+			this->mediaid = mediaid;
+			char buffer[32] = { 0 };
+			Set_Label(buffer,discLabel,true);
+		} else if (loadImage()) {
 			strcpy(info, "isoDrive ");
 			strcat(info, fileName);
 			this->driveLetter = driveLetter;
@@ -1026,7 +1041,6 @@ isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int&
 			char buffer[32] = { 0 };
 			if (!MSCDEX_GetVolumeName(subUnit, buffer)) strcpy(buffer, "");
 			Set_Label(buffer,discLabel,true);
-
 		} else if (CDROM_Interface_Image::images[subUnit]->HasDataTrack() == false && CDROM_Interface_Image::images[subUnit]->HasAudioTrack() == true) { //Audio only cdrom
 			strcpy(info, "isoDrive ");
 			strcat(info, fileName);
@@ -1050,16 +1064,30 @@ void isoDrive::setFileName(const char* fileName) {
 int isoDrive::UpdateMscdex(char driveLetter, const char* path, uint8_t& subUnit) {
 	if (MSCDEX_HasDrive(driveLetter)) {
 		subUnit = MSCDEX_GetSubUnit(driveLetter);
-		CDROM_Interface_Image* oldCdrom = CDROM_Interface_Image::images[subUnit];
-		CDROM_Interface* cdrom = new CDROM_Interface_Image(subUnit);
-		char pathCopy[CROSS_LEN];
-		safe_strncpy(pathCopy, path, CROSS_LEN);
-		if (!cdrom->SetDevice(pathCopy, 0)) {
-			CDROM_Interface_Image::images[subUnit] = oldCdrom;
-			delete cdrom;
-			return 3;
+		if (empty_drive) {
+			CDROM_Interface_Image* oldCdrom = CDROM_Interface_Image::images[subUnit];
+			CDROM_Interface* cdrom = new CDROM_Interface_Fake();
+			char pathCopy[CROSS_LEN];
+			safe_strncpy(pathCopy, path, CROSS_LEN);
+			if (!cdrom->SetDevice(pathCopy, 0)) {
+				CDROM_Interface_Image::images[subUnit] = oldCdrom;
+				delete cdrom;
+				return 3;
+			}
+			MSCDEX_ReplaceDrive(cdrom, subUnit);
 		}
-		MSCDEX_ReplaceDrive(cdrom, subUnit);
+		else {
+			CDROM_Interface_Image* oldCdrom = CDROM_Interface_Image::images[subUnit];
+			CDROM_Interface* cdrom = new CDROM_Interface_Image(subUnit);
+			char pathCopy[CROSS_LEN];
+			safe_strncpy(pathCopy, path, CROSS_LEN);
+			if (!cdrom->SetDevice(pathCopy, 0)) {
+				CDROM_Interface_Image::images[subUnit] = oldCdrom;
+				delete cdrom;
+				return 3;
+			}
+			MSCDEX_ReplaceDrive(cdrom, subUnit);
+		}
 		return 0;
 	} else {
 		return MSCDEX_AddDrive(driveLetter, path, subUnit);
@@ -1472,7 +1500,6 @@ bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, UDFFileIdentifierDes
 	if (!is_udf) return 0;
 
 	UDFTagId ctag;
-	uint8_t* buffer = NULL;
 	unsigned char dirent[4096];
 	DirIterator& dirIterator = dirIterators[dirIteratorHandle];
 
@@ -1710,7 +1737,8 @@ bool isoDrive::ReadCachedSector(uint8_t** buffer, const uint32_t sector) {
 }
 
 inline bool isoDrive :: readSector(uint8_t *buffer, uint32_t sector) const {
-	return CDROM_Interface_Image::images[subUnit]->ReadSector(buffer, false, sector);
+    if(CDROM_Interface_Image::images[subUnit] == nullptr) return false;
+    return CDROM_Interface_Image::images[subUnit]->ReadSector(buffer, false, sector);
 }
 
 int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dirIteratorIndex) const {
@@ -1719,7 +1747,7 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 
 	// copy data into isoDirEntry struct, data[0] = length of DirEntry
 //	if (data[0] > sizeof(isoDirEntry)) return -1;//check disabled as isoDirentry is currently 258 bytes large. So it always fits
-	memcpy(de, data, data[0]);//Perharps care about a zero at the end.
+	memcpy(de, data, data[0]);//Perhaps care about a zero at the end.
 	
 	// xa not supported
 	if (de->extAttrLength != 0) return -1;
@@ -1739,7 +1767,7 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 				// The string is big Endian UCS-16, convert to host Endian UCS-16
 				for (size_t i=0;((const uint16_t*)de->ident)[i] != 0;i++) ((uint16_t*)de->ident)[i] = be16toh(((uint16_t*)de->ident)[i]);
 				// finally, convert from UCS-16 to local code page, using C++ string construction to make a copy first
-				CodePageHostToGuestUTF16((char*)de->ident,(const uint16_t*)std::u16string((const char16_t*)de->ident).c_str());
+				CodePageHostToGuestUTF16(de->ident,de->ident);
 			}
 		}
 	} else {
@@ -1761,7 +1789,7 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 			// The string is big Endian UCS-16, convert to host Endian UCS-16
 			for (size_t i=0;((const uint16_t*)de->ident)[i] != 0;i++) ((uint16_t*)de->ident)[i] = be16toh(((uint16_t*)de->ident)[i]);
 			// finally, convert from UCS-16 to local code page, using C++ string construction to make a copy first
-			CodePageHostToGuestUTF16((char*)de->ident,(const uint16_t*)std::u16string((const char16_t*)de->ident).c_str());
+			CodePageHostToGuestUTF16(de->ident,de->ident);
 		}
 		else {
 			// remove any file version identifiers as there are some cdroms that don't have them
@@ -2331,6 +2359,7 @@ void isoDrive :: EmptyCache(void) {
 			return;
 		}
 	}
+	if (dos_kernel_disabled) return;
 	enable_udf = (dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10));//default
 	enable_rock_ridge = dos.version.major >= 7 || uselfn;
 	enable_joliet = dos.version.major >= 7 || uselfn;
@@ -2338,10 +2367,10 @@ void isoDrive :: EmptyCache(void) {
 	//this->fileName[0]  = '\0'; /* deleted to fix issue #3848. Revert this if there are any flaws */
 	//this->discLabel[0] = '\0'; /* deleted to fix issue #3848. Revert this if there are any flaws */
 	nextFreeDirIterator = 0;
-    size_t numberOfDirIterators = sizeof(dirIterators) / sizeof(dirIterators[0]);
-    for(std::size_t i = 0; i < numberOfDirIterators; ++i) {
-        dirIterators[i] = isoDrive::DirIterator{};
-    }
+	size_t numberOfDirIterators = sizeof(dirIterators) / sizeof(dirIterators[0]);
+	for(std::size_t i = 0; i < numberOfDirIterators; ++i) {
+		dirIterators[i] = isoDrive::DirIterator{};
+	}
 	memset(sectorHashEntries, 0, sizeof(sectorHashEntries));
 	memset(&rootEntry, 0, sizeof(isoDirEntry));
 	//safe_strncpy(this->fileName, fileName, CROSS_LEN); /* deleted to fix issue #3848. Revert this if there are any flaws */

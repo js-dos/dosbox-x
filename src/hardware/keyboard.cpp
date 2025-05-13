@@ -43,7 +43,7 @@
 
 #define KEYBUFSIZE 32*3
 #define RESETDELAY 400
-#define KEYDELAY 0.300f         //Considering 20-30 khz serial clock and 11 bits/char
+static pic_tickindex_t KEYDELAY=0.300f;         //Considering 20-30 khz serial clock and 11 bits/char
 
 #define AUX 0x100
 
@@ -296,6 +296,11 @@ static void KEYBOARD_TransferBuffer(Bitu val) {
     KEYBOARD_SetPort60(keyb.buffer[keyb.pos]);
     if (++keyb.pos>=KEYBUFSIZE) keyb.pos-=KEYBUFSIZE;
     keyb.used--;
+
+    if (machine == MCH_PCJR && keyb.used > 0) {
+        keyb.scheduled=true;
+        PIC_AddEvent(KEYBOARD_TransferBuffer,KEYDELAY);
+    }
 }
 
 void KEYBOARD_ClrBuffer(void) {
@@ -337,9 +342,17 @@ void KEYBOARD_AddBuffer(uint16_t data) {
     keyb.buffer[start]=data;
     keyb.used++;
     /* Start up an event to start the first IRQ */
-    if (!keyb.scheduled && !keyb.p60changed) {
-        keyb.scheduled=true;
-        PIC_AddEvent(KEYBOARD_TransferBuffer,KEYDELAY);
+    if (!keyb.scheduled) {
+        if (machine == MCH_PCJR) {
+            keyb.scheduled=true;
+            PIC_AddEvent(KEYBOARD_TransferBuffer,KEYDELAY);
+        }
+        else {
+            if (!keyb.p60changed) {
+                keyb.scheduled=true;
+                PIC_AddEvent(KEYBOARD_TransferBuffer,KEYDELAY);
+	    }
+        }
     }
 }
 
@@ -363,9 +376,22 @@ void KEYBOARD_SetLEDs(uint8_t bits) {
 static Bitu read_p60(Bitu port,Bitu iolen) {
     (void)port;//UNUSED
     (void)iolen;//UNUSED
+
+    /* Reading port 60h should clear the IRQ signal. */
+    /* NOTES: "Cronologia" by Cascada (1991) polls the keyboard I/O ports directory for part 1 and 2,
+     *        but part 3 installs a keyboard ISR. That ISR assumes that if IRQ 1 happens, there is valid
+     *        data in port 60h, it does not poll port 61h to determine if data is available. If the last
+     *        scan code was a key-up scancode event for the Escape key, then when part 3 enables the IRQ,
+     *        if this code had not cleared the signal, the ISR will be immediately called and the demo
+     *        will immediately act as if you hit the escape key and exit right away. */
+    if (machine != MCH_PCJR) {
+        PIC_DeActivateIRQ(12);
+        PIC_DeActivateIRQ(1);
+    }
+
     keyb.p60changed=false;
     keyb.auxchanged=false;
-    if (!keyb.scheduled && keyb.used) {
+    if (!keyb.scheduled && keyb.used && !(machine == MCH_PCJR)) {
         keyb.scheduled=true;
         PIC_AddEvent(KEYBOARD_TransferBuffer,KEYDELAY);
     }
@@ -538,6 +564,12 @@ void On_Software_CPU_Reset();
 static void write_p60(Bitu port,Bitu val,Bitu iolen) {
     (void)port;//UNUSED
     (void)iolen;//UNUSED
+
+    if (machine == MCH_PCJR) {
+        keyb.p60data=(uint8_t)val;
+        return;
+    }
+
     switch (keyb.command) {
     case CMD_NONE:  /* None */
         if (keyb.reset)
@@ -1240,6 +1272,7 @@ void pc98_kana_toggle(void);
 void pc98_numlock_toggle(void);
 void pc98_keyboard_send(const unsigned char b);
 bool pc98_force_ibm_layout = false;
+bool pc98_force_jis_layout = false;
 
 /* this version sends to the PC-98 8251 emulation NOT the AT 8042 emulation */
 void KEYBOARD_PC98_AddKey(KBD_KEYS keytype,bool pressed) {
@@ -1415,6 +1448,150 @@ void KEYBOARD_PC98_AddKey(KBD_KEYS keytype,bool pressed) {
     if (!pressed) ret |= 0x80;
 
     pc98_keyboard_send(ret | (!pressed ? 0x80 : 0x00));
+}
+
+/* PCjr scan codes reflect the fact that some "keys" are only
+ * available by holding Fn and pressing a key. For example,
+ * F1 is Fn+1. The scan code for the Fn key is 0x54/0xD4 */
+void KEYBOARD_AddKeyPCjr(KBD_KEYS keytype,bool pressed) {
+    uint8_t ret=0;bool fn=false;
+
+    if (keyb.reset)
+        return;
+
+    switch (keytype) {
+    case KBD_esc:ret=1;break;
+    case KBD_1:ret=2;break;
+    case KBD_f1:ret=2;fn=true;break;/*Fn+1*/
+    case KBD_2:ret=3;break;
+    case KBD_f2:ret=3;fn=true;break;/*Fn+2*/
+    case KBD_3:ret=4;break;
+    case KBD_f3:ret=4;fn=true;break;/*Fn+3*/
+    case KBD_4:ret=5;break;
+    case KBD_f4:ret=5;fn=true;break;/*Fn+4*/
+    case KBD_5:ret=6;break;
+    case KBD_f5:ret=6;fn=true;break;/*Fn+5*/
+    case KBD_6:ret=7;break;
+    case KBD_f6:ret=7;fn=true;break;/*Fn+6*/
+    case KBD_7:ret=8;break;
+    case KBD_f7:ret=8;fn=true;break;/*Fn+7*/
+    case KBD_8:ret=9;break;
+    case KBD_f8:ret=9;fn=true;break;/*Fn+8*/
+    case KBD_9:ret=10;break;
+    case KBD_f9:ret=10;fn=true;break;/*Fn+9*/
+    case KBD_0:ret=11;break;
+    case KBD_f10:ret=11;fn=true;break;/*Fn+10*/
+    case KBD_minus:ret=12;break;
+    case KBD_equals:ret=13;break;
+    case KBD_backspace:ret=14;break;
+    case KBD_tab:ret=15;break;
+    case KBD_q:ret=16;break;
+    case KBD_pause:ret=16;fn=true;break;/*Fn+Q*/
+    case KBD_w:ret=17;break;
+    case KBD_e:ret=18;break;
+    case KBD_r:ret=19;break;
+    case KBD_t:ret=20;break;
+    case KBD_y:ret=21;break;
+    case KBD_u:ret=22;break;
+    case KBD_i:ret=23;break;
+    case KBD_o:ret=24;break;
+    case KBD_p:ret=25;break;
+    case KBD_printscreen:ret=25;fn=true;break;/*Fn+P*/
+    case KBD_leftbracket:ret=26;break;
+    case KBD_rightbracket:ret=27;break;
+    case KBD_enter:ret=28;break;
+    case KBD_leftctrl:
+        ret=29;
+        keyb.leftctrl_pressed=pressed;
+        break;
+    case KBD_rightctrl:
+        ret=29;
+        keyb.rightctrl_pressed=pressed;
+        break;
+    case KBD_a:ret=30;break;
+    case KBD_s:ret=31;break;
+    case KBD_scrolllock:ret=31;fn=true;break;/*Fn+S*/
+    case KBD_d:ret=32;break;
+    case KBD_f:ret=33;break;
+    case KBD_g:ret=34;break;
+    case KBD_h:ret=35;break;
+    case KBD_j:ret=36;break;
+    case KBD_k:ret=37;break;
+    case KBD_l:ret=38;break;
+    case KBD_semicolon:ret=39;break;
+    case KBD_quote:ret=40;break;
+    case KBD_grave:ret=(keyb.leftshift_pressed||keyb.rightshift_pressed)?27/*rightbracket*/:40/*quote*/;fn=true;break;/*Fn+'*/
+
+    case KBD_leftshift:
+        ret=42;
+        keyb.leftshift_pressed=pressed;
+        break;
+
+    case KBD_z:ret=44;break;
+    case KBD_x:ret=45;break;
+    case KBD_c:ret=46;break;
+    case KBD_v:ret=47;break;
+    case KBD_b:ret=48;break;
+    case KBD_n:ret=49;break;
+    case KBD_m:ret=50;break;
+    case KBD_comma:ret=51;break;
+    case KBD_period:ret=52;break;
+    case KBD_slash:ret=53;break;
+    case KBD_backslash:ret=(keyb.leftshift_pressed||keyb.rightshift_pressed)?26/*leftbracket*/:53/*fwd slash*/;fn=true;break;/*Fn+foward slash*/
+    case KBD_rightshift:
+        ret=54;
+        keyb.rightshift_pressed=pressed;
+        break;
+
+    case KBD_leftalt:
+        ret=56;
+        keyb.leftalt_pressed=pressed;
+        break;
+    case KBD_rightalt:
+        ret=56;
+        keyb.rightalt_pressed=pressed;
+        break;
+
+    case KBD_space:ret=57;break;
+    case KBD_capslock:ret=58;break;
+
+    case KBD_up:ret=72;break;
+    case KBD_home:ret=72;fn=true;break;/*Fn+Up*/
+
+    case KBD_left:ret=75;break;
+    case KBD_pageup:ret=75;fn=true;break;/*Fn+Left*/
+
+    case KBD_right:ret=77;break;
+    case KBD_pagedown:ret=77;fn=true;break;/*Fn+Right*/
+
+    case KBD_down:ret=80;break;
+    case KBD_end:ret=80;fn=true;break;/*Fn+Down*/
+
+    case KBD_insert:ret=82;break;
+    case KBD_delete:ret=83;break;
+
+	default:
+        LOG(LOG_MISC, LOG_WARN)("Unsupported key press %lu", (unsigned long)keytype);
+        return;
+    }
+
+    /* Add the actual key in the keyboard queue */
+    if (pressed) {
+        if (keyb.repeat.key == keytype) keyb.repeat.wait = keyb.repeat.rate;
+        else keyb.repeat.wait = keyb.repeat.pause;
+        keyb.repeat.key = keytype;
+	if (fn) KEYBOARD_AddBuffer(0x54);/*Fn*/
+        KEYBOARD_AddBuffer(ret);
+    } else {
+        if (keyb.repeat.key == keytype) {
+            /* repeated key being released */
+            keyb.repeat.key  = KBD_NONE;
+            keyb.repeat.wait = 0;
+        }
+
+        KEYBOARD_AddBuffer(ret+0x80);
+	if (fn) KEYBOARD_AddBuffer(0x54+0x80);/*Fn*/
+    }
 }
 
 void KEYBOARD_AddKey1(KBD_KEYS keytype,bool pressed) {
@@ -1728,6 +1905,9 @@ void KEYBOARD_AddKey(KBD_KEYS keytype,bool pressed) {
     if (IS_PC98_ARCH) {
         KEYBOARD_PC98_AddKey(keytype,pressed);
     }
+    else if (machine == MCH_PCJR) {
+        KEYBOARD_AddKeyPCjr(keytype,pressed);
+    }
     else if (keyb.cb_xlat) {
         /* emulate typical setup where keyboard generates scan set 2 and controller translates to scan set 1 */
         /* yeah I know... yuck */
@@ -1822,7 +2002,7 @@ public:
     /* TODO: Writes to Port A should go to printer emulation */
     /* TODO: Writes to bit 7, Port C should go to printer emulation (strobe pin) */
     /* port B is input */
-    virtual uint8_t inPortB(void) const {
+    uint8_t inPortB(void) const override {
         return      0x80 +                                                          /* bits [7:6]   10 = other model */
                     ((PIT_TICK_RATE == PIT_TICK_RATE_PC98_8MHZ) ? 0x20 : 0x00) +    /* bit  [5:5]   1 = 8MHz  0 = 5/10MHz */
                     0x10 +                                                          /* bit  [4:4]   1 = LCD plasma display usage cond. not used */
@@ -1912,7 +2092,7 @@ public:
     }
 public:
     /* port A is input */
-    virtual uint8_t inPortA(void) const {
+    uint8_t inPortA(void) const override {
         /* TODO: Improve this! What do the various 2-1 to 2-8 switches do?
          *       It might help to look at the BIOS setup menus of 1990s PC-98 systems
          *       that offer toggling virtual versions of these DIP switches to see
@@ -1923,12 +2103,12 @@ public:
         return 0x63 | (gdc_5mhz_mode_initial ? 0x00 : 0x80); // taken from a PC-9821 Lt2
     }
     /* port B is input */
-    virtual uint8_t inPortB(void) const {
+    uint8_t inPortB(void) const override {
         /* TODO: Improve this! */
         return 0xF9; // taken from a PC-9821 Lt2
     }
     /* port C is output (both halves) */
-    virtual void outPortC(const uint8_t mask) {
+    void outPortC(const uint8_t mask) override {
         if (mask & 0x80) /* Shutdown flag 0 */
             PC98_SHUT0 = !!(latchOutPortC & 0x80);
 
@@ -2252,14 +2432,15 @@ uint8_t p7fd9_8255_mouse_latch = 0;
 uint8_t p7fd8_8255_mouse_int_enable = 0;
 
 void pc98_mouse_movement_apply(int x,int y) {
-    x += p7fd9_8255_mouse_x;
-    if (x < -128) x = -128;
-    if (x > 127) x = 127;
-    y += p7fd9_8255_mouse_y;
-    if (y < -128) y = -128;
-    if (y > 127) y = 127;
-    p7fd9_8255_mouse_x = (int8_t)x;
-    p7fd9_8255_mouse_y = (int8_t)y;
+    /* NTS: Contrary to initial impressions, bus mice do not clip
+     *      the counter values to stay within signed integer range,
+     *      they just count.
+     *
+     *      According to Nanshiki: [https://github.com/joncampbell123/dosbox-x/pull/4697]
+     *
+     *      -- 2023/12/21 J.C. */
+    p7fd9_8255_mouse_x += x;
+    p7fd9_8255_mouse_y += y;
 }
 
 unsigned int pc98_mouse_rate_hz = 120;
@@ -2371,7 +2552,7 @@ public:
     }
 public:
     /* port A is input */
-    virtual uint8_t inPortA(void) const {
+    uint8_t inPortA(void) const override {
         uint8_t bs;
         Bitu r;
 
@@ -2406,17 +2587,17 @@ public:
         return r;
     }
     /* port B is input */
-    virtual uint8_t inPortB(void) const {
+    uint8_t inPortB(void) const override {
         /* TODO */
         return 0x00;
     }
     /* port C is input[3:0] and output[7:4] */
-    virtual uint8_t inPortC(void) const {
+    uint8_t inPortC(void) const override {
         /* TODO */
         return 0x00;
     }
     /* port C is input[3:0] and output[7:4] */
-    virtual void outPortC(const uint8_t mask) {
+    void outPortC(const uint8_t mask) override {
         if (!enable_pc98_bus_mouse)
             return;
 
@@ -2525,6 +2706,9 @@ void KEYBOARD_OnEnterPC98(Section *sec) {
             KeyboardLayoutDetect();
         if (pc98_force_ibm_layout)
             LOG_MSG("Forcing PC-98 keyboard to use IBM US-English like default layout");
+        pc98_force_jis_layout = pc98_section->Get_bool("pc-98 force JIS keyboard layout") & !pc98_force_ibm_layout;
+        if (pc98_force_jis_layout)
+            LOG_MSG("Forcing PC-98 keyboard to use JIS (JP106) layout");
     }
 
     if (!IS_PC98_ARCH) {
@@ -2640,6 +2824,11 @@ void KEYBOARD_OnReset(Section *sec) {
             LOG(LOG_KEYBOARD,LOG_NORMAL)("Keyboard AUX emulation enabled");
         }
     }
+
+    if (machine == MCH_PCJR) // IBM Personal Computer PCjr Hardware Ref Tech Ref 2-104 Cordless Keyboard
+        KEYDELAY=0.440 * 21; // 440us bit cell times 21 bits (START + DATA(8) + PARITY + 11 STOP)
+    else
+        KEYDELAY=0.300f; //Considering 20-30 khz serial clock and 11 bits/char
 
     TIMER_DelTickHandler(&KEYBOARD_TickHandler);
 

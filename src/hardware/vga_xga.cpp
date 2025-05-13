@@ -83,7 +83,7 @@ struct XGAStatus {
 		bool newline;
 		bool wait;
 		uint16_t cmd;
-		uint16_t curx, cury;
+		uint16_t curx, cury, curdx, curdy;
 		uint16_t x1, y1, x2, y2, sizex, sizey;
 		uint32_t data; /* transient data passed by multiple calls */
 		Bitu datasize;
@@ -355,6 +355,13 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 	   one is actually 24-bit. Without this step there may be some graphics corruption (mainly,
 	   during windows dragging. */
 	switch(XGA_COLOR_MODE) {
+		case M_LIN4:
+			{
+				uint8_t shf = ((memaddr^1u)&1u)*4u;
+				if (GCC_UNLIKELY((memaddr/2) >= vga.mem.memsize)) break;
+				vga.mem.linear[memaddr/2] = (vga.mem.linear[memaddr/2] & (0xF0 >> shf)) + ((c&0xF) << shf);
+			}
+			break;
 		case M_LIN8:
 			if (GCC_UNLIKELY(memaddr >= vga.mem.memsize)) break;
 			vga.mem.linear[memaddr] = (uint8_t)c;
@@ -374,11 +381,12 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 		default:
 			break;
 	}
-
 }
 
 Bitu XGA_PointMask() {
 	switch(XGA_COLOR_MODE) {
+		case M_LIN4:
+			return 0xFul;
 		case M_LIN8:
 			return 0xFFul;
 		case M_LIN15:
@@ -396,19 +404,23 @@ Bitu XGA_GetPoint(Bitu x, Bitu y) {
 	uint32_t memaddr = (uint32_t)((y * XGA_SCREEN_WIDTH) + x);
 
 	switch(XGA_COLOR_MODE) {
-	case M_LIN8:
-		if (GCC_UNLIKELY(memaddr >= vga.mem.memsize)) break;
-		return vga.mem.linear[memaddr];
-	case M_LIN15:
-	case M_LIN16:
-		if (GCC_UNLIKELY(memaddr*2 >= vga.mem.memsize)) break;
-		return ((uint16_t*)(vga.mem.linear))[memaddr];
-	case M_LIN32:
-		if (GCC_UNLIKELY(memaddr*4 >= vga.mem.memsize)) break;
-		return ((uint32_t*)(vga.mem.linear))[memaddr];
-	default:
-		break;
+		case M_LIN4:
+			if (GCC_UNLIKELY((memaddr/2) >= vga.mem.memsize)) break;
+			return (vga.mem.linear[memaddr/2] >> (((memaddr&1)^1)*4)) & 0xF;
+		case M_LIN8:
+			if (GCC_UNLIKELY(memaddr >= vga.mem.memsize)) break;
+			return vga.mem.linear[memaddr];
+		case M_LIN15:
+		case M_LIN16:
+			if (GCC_UNLIKELY(memaddr*2 >= vga.mem.memsize)) break;
+			return ((uint16_t*)(vga.mem.linear))[memaddr];
+		case M_LIN32:
+			if (GCC_UNLIKELY(memaddr*4 >= vga.mem.memsize)) break;
+			return ((uint32_t*)(vga.mem.linear))[memaddr];
+		default:
+			break;
 	}
+
 	return 0;
 }
 
@@ -802,7 +814,7 @@ bool XGA_CheckX(void) {
 	
 	if((xga.waitcmd.curx<2048) && xga.waitcmd.curx > (xga.waitcmd.x2)) {
 		xga.waitcmd.curx = xga.waitcmd.x1;
-		xga.waitcmd.cury++;
+		xga.waitcmd.cury += xga.waitcmd.curdy;
 		xga.waitcmd.cury&=0x0fff;
 		newline = true;
 		xga.waitcmd.newline = true;
@@ -814,7 +826,7 @@ bool XGA_CheckX(void) {
 			uint16_t realxend=4096-xga.waitcmd.x2;
 			if(realx==realxend) {
 				xga.waitcmd.curx = xga.waitcmd.x1;
-				xga.waitcmd.cury++;
+				xga.waitcmd.cury += xga.waitcmd.curdy;
 				xga.waitcmd.cury&=0x0fff;
 				newline = true;
 				xga.waitcmd.newline = true;
@@ -824,7 +836,7 @@ bool XGA_CheckX(void) {
 		} else { // else overlapping
 			if(realx==xga.waitcmd.x2) {
 				xga.waitcmd.curx = xga.waitcmd.x1;
-				xga.waitcmd.cury++;
+				xga.waitcmd.cury += xga.waitcmd.curdy;
 				xga.waitcmd.cury&=0x0fff;
 				newline = true;
 				xga.waitcmd.newline = true;
@@ -834,7 +846,7 @@ bool XGA_CheckX(void) {
 			}
 		}
 	} else {
-        xga.waitcmd.newline = false;
+		xga.waitcmd.newline = false;
 	}
 	return newline;
 }
@@ -847,7 +859,7 @@ void XGA_DrawWaitSub(Bitu mixmode, Bitu srcval) {
 	//LOG_MSG("XGA: DrawPattern: Mixmode: %x srcval: %x", mixmode, srcval);
 
 	XGA_DrawPoint(xga.waitcmd.curx, xga.waitcmd.cury, destval);
-	xga.waitcmd.curx++;
+	xga.waitcmd.curx += xga.waitcmd.curdx;
 	xga.waitcmd.curx&=0x0fff;
 	XGA_CheckX();
 }
@@ -1236,7 +1248,7 @@ void XGA_DrawCmd(Bitu val, Bitu len) {
 #if XGA_SHOW_COMMAND_TRACE == 1
 					LOG_MSG("XGA: Drawing Bresenham line");
 #endif
-                    XGA_DrawLineBresenham(val);
+					XGA_DrawLineBresenham(val);
 				} else {
 #if XGA_SHOW_COMMAND_TRACE == 1
 					LOG_MSG("XGA: Drawing vector line");
@@ -1262,6 +1274,13 @@ void XGA_DrawCmd(Bitu val, Bitu len) {
 				xga.waitcmd.wait = true;
 				xga.waitcmd.curx = xga.curx;
 				xga.waitcmd.cury = xga.cury;
+
+				/* Windows will always use 101b (+X +Y) to draw left to right, top to bottom.
+				 * Apparently there is an MS-DOS CAD program out there that wants to draw
+				 * (+X -Y) left to right, bottom to top. */
+				xga.waitcmd.curdx = ((val>>5)&1) ? 1 : uint16_t(~0u)/*equiv -1*/;
+				xga.waitcmd.curdy = ((val>>7)&1) ? 1 : uint16_t(~0u)/*equiv -1*/;
+
 				xga.waitcmd.x1 = xga.curx;
 				xga.waitcmd.y1 = xga.cury;
 				xga.waitcmd.x2 = (uint16_t)((xga.curx + xga.MAPcount)&0x0fff);
@@ -1413,6 +1432,8 @@ void XGA_DrawCmd(Bitu val, Bitu len) {
 
 void XGA_SetDualReg(uint32_t& reg, Bitu val) {
 	switch(XGA_COLOR_MODE) {
+	case M_LIN4:
+		reg = (uint8_t)(val&0xf); break;
 	case M_LIN8:
 		reg = (uint8_t)(val&0xff); break;
 	case M_LIN15:
@@ -1434,6 +1455,8 @@ void XGA_SetDualReg(uint32_t& reg, Bitu val) {
 
 Bitu XGA_GetDualReg(uint32_t reg) {
 	switch(XGA_COLOR_MODE) {
+	case M_LIN4:
+		return (uint8_t)(reg&0xf);
 	case M_LIN8:
 		return (uint8_t)(reg&0xff);
 	case M_LIN15: case M_LIN16:

@@ -337,7 +337,7 @@ bool RENDER_StartUpdate(void) {
     render.scale.inLine = 0;
     render.scale.outLine = 0;
     render.scale.cacheRead = (uint8_t*)&scalerSourceCache;
-    render.scale.outWrite = 0;
+    render.scale.outWrite = nullptr;
     render.scale.outPitch = 0;
     Scaler_ChangedLines[0] = 0;
     Scaler_ChangedLineIndex = 0;
@@ -369,7 +369,7 @@ bool RENDER_StartUpdate(void) {
 
 static void RENDER_Halt( void ) {
     RENDER_DrawLine = RENDER_EmptyLineHandler;
-    GFX_EndUpdate( 0 );
+    GFX_EndUpdate(nullptr);
     render.updating=false;
     render.active=false;
 }
@@ -432,7 +432,7 @@ void RENDER_EndUpdate( bool abort ) {
 #endif
         // Force output to update the screen even if nothing changed...
         // works only with Direct3D output (GFX_StartUpdate() was probably not even called)
-        if (RENDER_GetForceUpdate()) GFX_EndUpdate( 0 );
+        if (RENDER_GetForceUpdate()) GFX_EndUpdate(nullptr);
     }
     render.frameskip.index = (render.frameskip.index + 1) & (RENDER_SKIP_CACHE - 1);
     render.updating=false;
@@ -474,386 +474,427 @@ std::string RENDER_GetScaler(void) {
 #ifdef JSDOS
 extern void RENDER_Reset( void );
 #else
+static int aspect_x=0, aspect_y=0;
+
 void RENDER_Reset( void ) {
-    Bitu width=render.src.width;
-    Bitu height=render.src.height;
-    bool dblw=render.src.dblw;
-    bool dblh=render.src.dblh;
+	Bitu width=render.src.width;
+	Bitu height=render.src.height;
+	bool dblw=render.src.dblw;
+	bool dblh=render.src.dblh;
 
-    double gfx_scalew;
-    double gfx_scaleh;
-    const std::string scaler = RENDER_GetScaler();
+	double gfx_scalew;
+	double gfx_scaleh;
+	const std::string scaler = RENDER_GetScaler();
 
-    if (width == 0 || height == 0)
-        return;
-    
-    Bitu gfx_flags, xscale, yscale;
-    ScalerSimpleBlock_t     *simpleBlock = &ScaleNormal1x;
-    ScalerComplexBlock_t    *complexBlock = 0;
-    gfx_scalew = 1;
-    gfx_scaleh = 1;
+	if (width == 0 || height == 0)
+		return;
+
+	Bitu gfx_flags, xscale, yscale;
+	ScalerSimpleBlock_t     *simpleBlock = &ScaleNormal1x;
+	ScalerComplexBlock_t    *complexBlock = nullptr;
+	gfx_scalew = 1;
+	gfx_scaleh = 1;
 
 #if !C_XBRZ
-    if (render.aspect == ASPECT_TRUE && !render.aspectOffload)
+	if (render.aspect == ASPECT_TRUE && !render.aspectOffload)
 #else
-    if (render.aspect == ASPECT_TRUE && !render.aspectOffload && !(sdl_xbrz.enable && sdl_xbrz.scale_on))
+	if (render.aspect == ASPECT_TRUE && !render.aspectOffload && !(sdl_xbrz.enable && sdl_xbrz.scale_on))
 #endif
-    {
-        if (render.src.ratio>1.0) {
-            gfx_scalew = 1;
-            gfx_scaleh = render.src.ratio;
-        } else {
-            gfx_scalew = (1.0/render.src.ratio);
-            gfx_scaleh = 1;
-        }
-    }
+	{
+		if (render.src.ratio>1.0) {
+			gfx_scalew = 1;
+			gfx_scaleh = render.src.ratio;
+		} else {
+			gfx_scalew = (1.0/render.src.ratio);
+			gfx_scaleh = 1;
+		}
+	}
 
-    if( sdl.desktop.isperfect ) /* Handle scaling if no pixel-perfect mode */
-        goto forcenormal;
+	if( sdl.desktop.isperfect ) /* Handle scaling if no pixel-perfect mode */
+		goto forcenormal;
 
-    if(render.scale.prompt && (!dblh || !dblw) && !((dblh || dblw) && !render.scale.hardware) && scalerOpTV != render.scale.op && scaler != "none" && strncasecmp(scaler.c_str(), "normal", 6) && !render.scale.forced && sdl.desktop.want_type != SCREEN_TTF) {
-        std::string message = "This scaler may not work properly or have undesired effect:\n\n"+scaler+"\n\nDo you want to force load the scaler?";
-        render.scale.forced = systemmessagebox("Loading scaler", message.c_str(), "yesno","question", 1);
-        render.scale.prompt = false;
-    }
-    if ((dblh && dblw) || (render.scale.forced && dblh == dblw/*this branch works best with equal scaling in both directions*/)) {
-        /* Initialize always working defaults */
-        if (render.scale.size == 2)
-            simpleBlock = &ScaleNormal2x;
-        else if (render.scale.size == 3)
-            simpleBlock = &ScaleNormal3x;
-        else if (render.scale.size == 1 && !(dblh || dblw) && render.scale.hardware)
-            simpleBlock = &ScaleNormal1x;
-        else if (render.scale.size == 4 && !(dblh || dblw) && render.scale.hardware)
-            simpleBlock = &ScaleNormal2x;
-        else if (render.scale.size == 6 && !(dblh || dblw) && render.scale.hardware)
-            simpleBlock = &ScaleNormal3x;
-        else if (render.scale.size == 4 && !render.scale.hardware)
-            simpleBlock = &ScaleNormal4x;
-        else if (render.scale.size == 5 && !render.scale.hardware)
-            simpleBlock = &ScaleNormal5x;
-        else if (render.scale.size == 8 && !(dblh || dblw) && render.scale.hardware)
-            simpleBlock = &ScaleNormal4x;
-        else if (render.scale.size == 10 && !(dblh || dblw) && render.scale.hardware)
-            simpleBlock = &ScaleNormal5x;
-        /* Maybe override them */
+	if(render.scale.prompt && (!dblh || !dblw) && !((dblh || dblw) && !render.scale.hardware) && scalerOpTV != render.scale.op && scaler != "none" && strncasecmp(scaler.c_str(), "normal", 6) && !render.scale.forced && sdl.desktop.want_type != SCREEN_TTF) {
+		std::string message = formatString(MSG_Get("SCALER_LOAD_WARN"), scaler.c_str());
+		render.scale.forced = systemmessagebox("Loading scaler", message.c_str(), "yesno","question", 1);
+		render.scale.prompt = false;
+	}
+	if ((dblh && dblw) || (render.scale.forced && dblh == dblw/*this branch works best with equal scaling in both directions*/)) {
+		/* Initialize always working defaults */
+		if (render.scale.size == 2)
+			simpleBlock = &ScaleNormal2x;
+		else if (render.scale.size == 3)
+			simpleBlock = &ScaleNormal3x;
+		else if (render.scale.size == 1 && !(dblh || dblw) && render.scale.hardware)
+			simpleBlock = &ScaleNormal1x;
+		else if (render.scale.size == 4 && !(dblh || dblw) && render.scale.hardware)
+			simpleBlock = &ScaleNormal2x;
+		else if (render.scale.size == 6 && !(dblh || dblw) && render.scale.hardware)
+			simpleBlock = &ScaleNormal3x;
+		else if (render.scale.size == 4 && !render.scale.hardware)
+			simpleBlock = &ScaleNormal4x;
+		else if (render.scale.size == 5 && !render.scale.hardware)
+			simpleBlock = &ScaleNormal5x;
+		else if (render.scale.size == 8 && !(dblh || dblw) && render.scale.hardware)
+			simpleBlock = &ScaleNormal4x;
+		else if (render.scale.size == 10 && !(dblh || dblw) && render.scale.hardware)
+			simpleBlock = &ScaleNormal5x;
+		/* Maybe override them */
 #if RENDER_USE_ADVANCED_SCALERS>0
-        switch (render.scale.op) {
+		switch (render.scale.op) {
 #if RENDER_USE_ADVANCED_SCALERS>2
-        case scalerOpAdvInterp:
-            if (render.scale.size == 2)
-                complexBlock = &ScaleAdvInterp2x;
-            else if (render.scale.size == 3)
-                complexBlock = &ScaleAdvInterp3x;
-            break;
-        case scalerOpAdvMame:
-            if (render.scale.size == 2)
-                complexBlock = &ScaleAdvMame2x;
-            else if (render.scale.size == 3)
-                complexBlock = &ScaleAdvMame3x;
-            break;
-        case scalerOpHQ:
-            if (render.scale.size == 2)
-                complexBlock = &ScaleHQ2x;
-            else if (render.scale.size == 3)
-                complexBlock = &ScaleHQ3x;
-            break;
-        case scalerOpSuperSaI:
-            if (render.scale.size == 2)
-                complexBlock = &ScaleSuper2xSaI;
-            break;
-        case scalerOpSuperEagle:
-            if (render.scale.size == 2)
-                complexBlock = &ScaleSuperEagle;
-            break;
-        case scalerOpSaI:
-            if (render.scale.size == 2)
-                complexBlock = &Scale2xSaI;
-            break;
+			case scalerOpAdvInterp:
+				if (render.scale.size == 2)
+					complexBlock = &ScaleAdvInterp2x;
+				else if (render.scale.size == 3)
+					complexBlock = &ScaleAdvInterp3x;
+				break;
+			case scalerOpAdvMame:
+				if (render.scale.size == 2)
+					complexBlock = &ScaleAdvMame2x;
+				else if (render.scale.size == 3)
+					complexBlock = &ScaleAdvMame3x;
+				break;
+			case scalerOpHQ:
+				if (render.scale.size == 2)
+					complexBlock = &ScaleHQ2x;
+				else if (render.scale.size == 3)
+					complexBlock = &ScaleHQ3x;
+				break;
+			case scalerOpSuperSaI:
+				if (render.scale.size == 2)
+					complexBlock = &ScaleSuper2xSaI;
+				break;
+			case scalerOpSuperEagle:
+				if (render.scale.size == 2)
+					complexBlock = &ScaleSuperEagle;
+				break;
+			case scalerOpSaI:
+				if (render.scale.size == 2)
+					complexBlock = &Scale2xSaI;
+				break;
 #endif
-        case scalerOpTV:
-            if (render.scale.size == 2)
-                simpleBlock = &ScaleTV2x;
-            else if (render.scale.size == 3)
-                simpleBlock = &ScaleTV3x;
-            break;
-        case scalerOpRGB:
-            if (render.scale.size == 2)
-                simpleBlock = &ScaleRGB2x;
-            else if (render.scale.size == 3)
-                simpleBlock = &ScaleRGB3x;
-            break;
-        case scalerOpScan:
-            if (render.scale.size == 2)
-                simpleBlock = &ScaleScan2x;
-            else if (render.scale.size == 3)
-                simpleBlock = &ScaleScan3x;
-            break;
-        case scalerOpGray:
-            if (render.scale.size == 1){
-			        simpleBlock = &ScaleGrayNormal;
-            }else if (render.scale.size == 2){
-			        simpleBlock = &ScaleGray2x;
-            }
-        break;
-        default:
-            break;
-        }
+			case scalerOpTV:
+				if (render.scale.size == 2)
+					simpleBlock = &ScaleTV2x;
+				else if (render.scale.size == 3)
+					simpleBlock = &ScaleTV3x;
+				break;
+			case scalerOpRGB:
+				if (render.scale.size == 2)
+					simpleBlock = &ScaleRGB2x;
+				else if (render.scale.size == 3)
+					simpleBlock = &ScaleRGB3x;
+				break;
+			case scalerOpScan:
+				if (render.scale.size == 2)
+					simpleBlock = &ScaleScan2x;
+				else if (render.scale.size == 3)
+					simpleBlock = &ScaleScan3x;
+				break;
+			case scalerOpGray:
+				if (render.scale.size == 1){
+					simpleBlock = &ScaleGrayNormal;
+				}else if (render.scale.size == 2){
+					simpleBlock = &ScaleGray2x;
+				}
+				break;
+			default:
+				break;
+		}
 #endif
-    } else if (dblw && !render.scale.hardware) {
-      if(scalerOpGray == render.scale.op){
-        simpleBlock = &ScaleGrayDw;
-      }else{
-          if (render.scale.forced && render.scale.size >= 2)
-              simpleBlock = &ScaleNormal2xDw;
-          else
-              simpleBlock = &ScaleNormalDw;
-      }
-    } else if (dblh && !render.scale.hardware) {
+	} else if (dblw && !render.scale.hardware) {
+		if(scalerOpGray == render.scale.op){
+			simpleBlock = &ScaleGrayDw;
+		}else{
+			if (render.scale.forced && render.scale.size >= 2)
+				simpleBlock = &ScaleNormal2xDw;
+			else
+				simpleBlock = &ScaleNormalDw;
+		}
+	} else if (dblh && !render.scale.hardware) {
 		//Check whether tv2x and scan2x is selected
 		if(scalerOpGray == render.scale.op){
 			simpleBlock = &ScaleGrayDh;
-    }else if(scalerOpTV == render.scale.op){
+		}else if(scalerOpTV == render.scale.op){
 			simpleBlock = &ScaleTVDh;
-        }else if(scalerOpScan == render.scale.op){
+		}else if(scalerOpScan == render.scale.op){
 			simpleBlock = &ScaleScanDh;
-        }else{
-            if (render.scale.forced && render.scale.size >= 2)
-                simpleBlock = &ScaleNormal2xDh;
-            else
-                simpleBlock = &ScaleNormalDh;
-        }
-    }
-    if( simpleBlock == NULL && complexBlock == NULL ) {
+		}else{
+			if (render.scale.forced && render.scale.size >= 2)
+				simpleBlock = &ScaleNormal2xDh;
+			else
+				simpleBlock = &ScaleNormalDh;
+		}
+	}
+	if( simpleBlock == NULL && complexBlock == NULL ) {
 forcenormal:
-        complexBlock = 0;
-        if(scalerOpGray==render.scale.op){
-          simpleBlock = &ScaleGrayNormal;
-        }else{
-          simpleBlock = &ScaleNormal1x;
-        }
-    }
-    if (complexBlock) {
+		complexBlock = nullptr;
+		if(scalerOpGray==render.scale.op){
+			simpleBlock = &ScaleGrayNormal;
+		}else{
+			simpleBlock = &ScaleNormal1x;
+		}
+	}
+	if (complexBlock) {
 #if RENDER_USE_ADVANCED_SCALERS>1
-        if ((width >= SCALER_COMPLEXWIDTH - 16) || height >= SCALER_COMPLEXHEIGHT - 16) {
-            LOG_MSG("Scaler can't handle this resolution, going back to normal");
-            goto forcenormal;
-        }
+		if ((width >= SCALER_COMPLEXWIDTH - 16) || height >= SCALER_COMPLEXHEIGHT - 16) {
+			LOG_MSG("Scaler can't handle this resolution, going back to normal");
+			goto forcenormal;
+		}
 #else
-        goto forcenormal;
+		goto forcenormal;
 #endif
-        gfx_flags = complexBlock->gfxFlags;
-        xscale = complexBlock->xscale;  
-        yscale = complexBlock->yscale;
-//      LOG_MSG("Scaler:%s",complexBlock->name);
-    } else {
-        gfx_flags = simpleBlock->gfxFlags;
-        xscale = simpleBlock->xscale;   
-        yscale = simpleBlock->yscale;
-//      LOG_MSG("Scaler:%s",simpleBlock->name);
-    }
-    switch (render.src.bpp) {
-    case 8:
-        render.src.start = ( render.src.width * 1) / sizeof(Bitu);
-        if (gfx_flags & GFX_CAN_8)
-            gfx_flags |= GFX_LOVE_8;
-        else
-            gfx_flags |= GFX_LOVE_32;
-        break;
-    case 15:
-        render.src.start = ( render.src.width * 2) / sizeof(Bitu);
-        gfx_flags |= GFX_LOVE_15;
-        gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-        break;
-    case 16:
-        render.src.start = ( render.src.width * 2) / sizeof(Bitu);
-        gfx_flags |= GFX_LOVE_16;
-        gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-        break;
-    case 32:
-        render.src.start = ( render.src.width * 4) / sizeof(Bitu);
-        gfx_flags |= GFX_LOVE_32;
-        gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-        break;
-    default:
-        render.src.start = ( render.src.width * 1) / sizeof(Bitu);
-        if (gfx_flags & GFX_CAN_8)
-            gfx_flags |= GFX_LOVE_8;
-        else
-            gfx_flags |= GFX_LOVE_32;
-        break;
-    }
+		gfx_flags = complexBlock->gfxFlags & ~(GFX_NORMALSCALE);
+		xscale = complexBlock->xscale;
+		yscale = complexBlock->yscale;
+		//      LOG_MSG("Scaler:%s",complexBlock->name);
+	} else {
+		gfx_flags = simpleBlock->gfxFlags & ~(GFX_NORMALSCALE);
+		xscale = simpleBlock->xscale;
+		yscale = simpleBlock->yscale;
+		if ((simpleBlock->gfxFlags & GFX_NORMALSCALE) && render.scale.hardware) {
+			/* Normal (pixel duplication) scalers should not be used for hardware scaling,
+			 * because the hardware scaling will do all the scaling, AND so that users who
+			 * use CRT scanline emulation shaders can work with the raw pixels and scanlines
+			 * of the source video memory.
+			 *
+			 * This is not related to the "doublescan" option (on by default) that VGA emulation
+			 * uses to emulate the hardware scan line duplication used to ensure that the raster
+			 * to the monitor is 400-line or 480-line nor is it related to the double scan used
+			 * in PC-98 200-line 8/16-color graphics modes to render as a 400-line raster.
+			 *
+			 * A side effect is that all your low res modes will look blurry when scaled up
+			 * by your GPU. If you want a crisper look from the pixel duplication you're used
+			 * to, use the none, normal2x, etc. scalers that are default anyway, OR use a
+			 * shader that processes the video the way you prefer to see it.
+			 *
+			 * For this reason, the only difference in hardware_none, hardware2x, etc. is
+			 * how much to multiply the GFX window scale without duplicating the pixels
+			 * in software using any of the normal scalers INCLUDING the normal scalers
+			 * used to double pixels horizontally and/or vertically for 200-line modes
+			 * or 320-pixel wide modes.
+			 *
+			 * Because of integer scaling, the scale factor is restricted to a multiple of 2
+			 * if the video mode would normally double pixels in one direction only but not
+			 * both, such as CGA 80x25 text or CGA/EGA 640x200 graphics where normal scaler would
+			 * normally only double pixels in the Y direction (height). */
+			simpleBlock = &ScaleNormal1x;
+			xscale = 1;
+			yscale = 1;
+		}
+		//      LOG_MSG("Scaler:%s",simpleBlock->name);
+	}
+	switch (render.src.bpp) {
+		case 8:
+			render.src.start = ( render.src.width * 1) / sizeof(Bitu);
+			if (gfx_flags & GFX_CAN_8)
+				gfx_flags |= GFX_LOVE_8;
+			else
+				gfx_flags |= GFX_LOVE_32;
+			break;
+		case 15:
+			render.src.start = ( render.src.width * 2) / sizeof(Bitu);
+			gfx_flags |= GFX_LOVE_15;
+			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
+			break;
+		case 16:
+			render.src.start = ( render.src.width * 2) / sizeof(Bitu);
+			gfx_flags |= GFX_LOVE_16;
+			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
+			break;
+		case 32:
+			render.src.start = ( render.src.width * 4) / sizeof(Bitu);
+			gfx_flags |= GFX_LOVE_32;
+			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
+			break;
+		default:
+			render.src.start = ( render.src.width * 1) / sizeof(Bitu);
+			if (gfx_flags & GFX_CAN_8)
+				gfx_flags |= GFX_LOVE_8;
+			else
+				gfx_flags |= GFX_LOVE_32;
+			break;
+	}
 #if !defined(C_SDL2)
-    gfx_flags=GFX_GetBestMode(gfx_flags);
+	gfx_flags=GFX_GetBestMode(gfx_flags);
 #else
-    if (sdl.desktop.want_type == SCREEN_TTF)
-        gfx_flags = GFX_CAN_32 | GFX_SCALING;
-    else {
-        gfx_flags &= ~GFX_SCALING;
-        gfx_flags |= GFX_RGBONLY | GFX_CAN_RANDOM;
-    }
+	if (sdl.desktop.want_type == SCREEN_TTF)
+		gfx_flags = GFX_CAN_32 | GFX_SCALING;
+	else
+		gfx_flags |= GFX_RGBONLY | GFX_CAN_RANDOM;
 #endif
-    if (!gfx_flags) {
-        if (!complexBlock && simpleBlock == &ScaleNormal1x) 
-            E_Exit("Failed to create a rendering output");
-        else 
-            goto forcenormal;
-    }
-    width *= xscale;
-    Bitu skip = complexBlock ? 1 : 0;
-    if (gfx_flags & GFX_SCALING) {
-        if(render.scale.size == 1 && render.scale.hardware) { //hardware_none
-            if(dblh)
-            gfx_scaleh *= 1;
-            if(dblw)
-            gfx_scalew *= 1;
-        } else if(render.scale.size == 4 && render.scale.hardware) {
-            if(dblh)
-            gfx_scaleh *= 2;
-            if(dblw)
-            gfx_scalew *= 2;
-        } else if(render.scale.size == 6 && render.scale.hardware) {
-            if(dblh && dblw) {
-            gfx_scaleh *= 3; gfx_scalew *= 3;
-            } else if(dblh) {
-            gfx_scaleh *= 2;
-            } else if(dblw)
-            gfx_scalew *= 2;
-        } else if(render.scale.size == 8 && render.scale.hardware) { //hardware4x
-            if(dblh)
-            gfx_scaleh *= 4;
-            if(dblw)
-            gfx_scalew *= 4;
-        } else if(render.scale.size == 10 && render.scale.hardware) { //hardware5x
-            if(dblh && dblw) {
-            gfx_scaleh *= 5; gfx_scalew *= 5;
-            } else if(dblh) {
-            gfx_scaleh *= 4;
-            } else if(dblw)
-            gfx_scalew *= 4;
-        }
-        height = MakeAspectTable(skip, render.src.height, (double)yscale, yscale );
-    } else {
-        // Print a warning when hardware scalers are selected, hopefully the first
-        // video mode will not have dblh or dblw or AR will be wrong
-        if (render.scale.hardware) {
-            LOG_MSG("Output does not support hardware scaling, switching to normal scalers");
-            render.scale.hardware=false;
-        }
-        if ((gfx_flags & GFX_CAN_RANDOM) && gfx_scaleh > 1) {
-            gfx_scaleh *= yscale;
-            height = MakeAspectTable( skip, render.src.height, gfx_scaleh, yscale );
-        } else {
-            gfx_flags &= ~GFX_CAN_RANDOM;       //Hardware surface when possible
-            height = MakeAspectTable( skip, render.src.height, (double)yscale, yscale);
-        }
-    }
-/* update the aspect ratio */
-    sdl.srcAspect.x = aspect_ratio_x>0?aspect_ratio_x:(int)(render.src.width * (render.src.dblw ? 2 : 1));
-    sdl.srcAspect.y = aspect_ratio_y>0?aspect_ratio_y:(int)floor((render.src.height * (render.src.dblh ? 2 : 1) * render.src.ratio) + 0.5);
-    sdl.srcAspect.xToY = (double)sdl.srcAspect.x / sdl.srcAspect.y;
-    sdl.srcAspect.yToX = (double)sdl.srcAspect.y / sdl.srcAspect.x;
-    LOG_MSG("Aspect ratio: %u x %u  xToY=%.3f yToX=%.3f",sdl.srcAspect.x,sdl.srcAspect.y,sdl.srcAspect.xToY,sdl.srcAspect.yToX);
-/* Setup the scaler variables */
+	if (!gfx_flags) {
+		if (!complexBlock && simpleBlock == &ScaleNormal1x)
+			E_Exit("Failed to create a rendering output");
+		else
+			goto forcenormal;
+	}
+	width *= xscale;
+	Bitu skip = complexBlock ? 1 : 0;
+	if (gfx_flags & GFX_SCALING) {
+		if(render.scale.size == 1 && render.scale.hardware) { //hardware_none
+			/* don't scale */
+		} else if(render.scale.size == 2 && render.scale.hardware) {
+			if(dblh)
+				gfx_scaleh *= 2;
+			if(dblw)
+				gfx_scalew *= 2;
+		} else if(render.scale.size == 3 && render.scale.hardware) {
+			if(dblh && dblw) {
+				gfx_scaleh *= 3; gfx_scalew *= 3;
+			}
+			else {
+				if(dblh)
+					gfx_scaleh *= 2;
+				if(dblw)
+					gfx_scalew *= 2;
+			}
+		} else if(render.scale.size == 4 && render.scale.hardware) { //hardware4x
+			gfx_scaleh *= 2;
+			gfx_scalew *= 2;
+			if(dblh)
+				gfx_scaleh *= 2;
+			if(dblw)
+				gfx_scalew *= 2;
+		} else if(render.scale.size == 5 && render.scale.hardware) { //hardware5x
+			if(dblh && dblw) {
+				gfx_scaleh *= 5; gfx_scalew *= 5;
+			}
+			else{
+				gfx_scaleh *= 2;
+				gfx_scalew *= 2;
+				if(dblh)
+					gfx_scaleh *= 2;
+				if(dblw)
+					gfx_scalew *= 2;
+			}
+		}
+		height = MakeAspectTable(skip, render.src.height, (double)yscale, yscale );
+	} else {
+		// Print a warning when hardware scalers are selected, hopefully the first
+		// video mode will not have dblh or dblw or AR will be wrong
+		if (render.scale.hardware) {
+			LOG_MSG("Output does not support hardware scaling, switching to normal scalers");
+			render.scale.hardware=false;
+		}
+		if ((gfx_flags & GFX_CAN_RANDOM) && gfx_scaleh > 1) {
+			gfx_scaleh *= yscale;
+			height = MakeAspectTable( skip, render.src.height, gfx_scaleh, yscale );
+		} else {
+			gfx_flags &= ~GFX_CAN_RANDOM;       //Hardware surface when possible
+			height = MakeAspectTable( skip, render.src.height, (double)yscale, yscale);
+		}
+	}
+	/* update the aspect ratio */
+	sdl.srcAspect.x = aspect_ratio_x>0?aspect_ratio_x:(int)(render.src.width * (render.src.dblw ? 2 : 1));
+	sdl.srcAspect.y = aspect_ratio_y>0?aspect_ratio_y:(int)floor((render.src.height * (render.src.dblh ? 2 : 1) * render.src.ratio) + 0.5);
+	sdl.srcAspect.xToY = (double)sdl.srcAspect.x / sdl.srcAspect.y;
+	sdl.srcAspect.yToX = (double)sdl.srcAspect.y / sdl.srcAspect.x;
+	if(aspect_x != sdl.srcAspect.x || aspect_y != sdl.srcAspect.y) {
+		LOG_MSG("Aspect ratio: %u x %u  xToY=%.3f yToX=%.3f", sdl.srcAspect.x, sdl.srcAspect.y, sdl.srcAspect.xToY, sdl.srcAspect.yToX);
+		aspect_x = sdl.srcAspect.x;
+		aspect_y = sdl.srcAspect.y;
+	}
+	/* Setup the scaler variables */
 #if C_OPENGL
-    GFX_SetShader(render.shader_src);
+	GFX_SetShader(render.shader_src);
 #endif
-    gfx_flags=GFX_SetSize(width,height,gfx_flags,gfx_scalew,gfx_scaleh,&RENDER_CallBack);
-    if (gfx_flags & GFX_CAN_8)
-        render.scale.outMode = scalerMode8;
-    else if (gfx_flags & GFX_CAN_15)
-        render.scale.outMode = scalerMode15;
-    else if (gfx_flags & GFX_CAN_16)
-        render.scale.outMode = scalerMode16;
-    else if (gfx_flags & GFX_CAN_32)
-        render.scale.outMode = scalerMode32;
-    else 
-        E_Exit("Failed to create a rendering output");
-    ScalerLineBlock_t *lineBlock;
-    if (gfx_flags & GFX_HARDWARE) {
+	gfx_flags=GFX_SetSize(width,height,gfx_flags,gfx_scalew,gfx_scaleh,&RENDER_CallBack);
+	if (gfx_flags & GFX_CAN_8)
+		render.scale.outMode = scalerMode8;
+	else if (gfx_flags & GFX_CAN_15)
+		render.scale.outMode = scalerMode15;
+	else if (gfx_flags & GFX_CAN_16)
+		render.scale.outMode = scalerMode16;
+	else if (gfx_flags & GFX_CAN_32)
+		render.scale.outMode = scalerMode32;
+	else
+		E_Exit("Failed to create a rendering output");
+	ScalerLineBlock_t *lineBlock;
+	if (gfx_flags & GFX_HARDWARE) {
 #if RENDER_USE_ADVANCED_SCALERS>1
-        if (complexBlock) {
-            lineBlock = &ScalerCache;
-            render.scale.complexHandler = complexBlock->Linear[ render.scale.outMode ];
-        } else
+		if (complexBlock) {
+			lineBlock = &ScalerCache;
+			render.scale.complexHandler = complexBlock->Linear[ render.scale.outMode ];
+		} else
 #endif
-        {
-            render.scale.complexHandler = 0;
-            lineBlock = &simpleBlock->Linear;
-        }
-    } else {
+		{
+			render.scale.complexHandler = nullptr;
+			lineBlock = &simpleBlock->Linear;
+		}
+	} else {
 #if RENDER_USE_ADVANCED_SCALERS>1
-        if (complexBlock) {
-            lineBlock = &ScalerCache;
-            render.scale.complexHandler = complexBlock->Random[ render.scale.outMode ];
-        } else
+		if (complexBlock) {
+			lineBlock = &ScalerCache;
+			render.scale.complexHandler = complexBlock->Random[ render.scale.outMode ];
+		} else
 #endif
-        {
-            render.scale.complexHandler = 0;
-            lineBlock = &simpleBlock->Random;
-        }
-    }
-    switch (render.src.bpp) {
-    case 8:
-        render.scale.lineHandler = (*lineBlock)[0][render.scale.outMode];
-        render.scale.linePalHandler = (*lineBlock)[4][render.scale.outMode];
-        render.scale.inMode = scalerMode8;
-        render.scale.cachePitch = render.src.width * 1;
-        break;
-    case 15:
-        render.scale.lineHandler = (*lineBlock)[1][render.scale.outMode];
-        render.scale.linePalHandler = 0;
-        render.scale.inMode = scalerMode15;
-        render.scale.cachePitch = render.src.width * 2;
-        break;
-    case 16:
-        render.scale.lineHandler = (*lineBlock)[2][render.scale.outMode];
-        render.scale.linePalHandler = 0;
-        render.scale.inMode = scalerMode16;
-        render.scale.cachePitch = render.src.width * 2;
-        break;
-    case 32:
-        render.scale.lineHandler = (*lineBlock)[3][render.scale.outMode];
-        render.scale.linePalHandler = 0;
-        render.scale.inMode = scalerMode32;
-        render.scale.cachePitch = render.src.width * 4;
-        break;
-    default:
-        //render.src.bpp=8;
-        render.scale.lineHandler = (*lineBlock)[0][render.scale.outMode];
-        render.scale.linePalHandler = (*lineBlock)[4][render.scale.outMode];
-        render.scale.inMode = scalerMode8;
-        render.scale.cachePitch = render.src.width * 1;
-        break;
-        //E_Exit("RENDER:Wrong source bpp %d", render.src.bpp );
-    }
-    render.scale.blocks = render.src.width / SCALER_BLOCKSIZE;
-    render.scale.lastBlock = render.src.width % SCALER_BLOCKSIZE;
-    render.scale.inHeight = render.src.height;
-    /* Reset the palette change detection to it's initial value */
-    render.pal.first= 0;
-    render.pal.last = 255;
-    render.pal.changed = false;
-    memset(render.pal.modified, 0, sizeof(render.pal.modified));
-    //Finish this frame using a copy only handler
-    RENDER_DrawLine = RENDER_FinishLineHandler;
-    render.scale.outWrite = 0;
-    /* Signal the next frame to first reinit the cache */
-    render.scale.clearCache = true;
+		{
+			render.scale.complexHandler = nullptr;
+			lineBlock = &simpleBlock->Random;
+		}
+	}
+	switch (render.src.bpp) {
+		case 8:
+			render.scale.lineHandler = (*lineBlock)[0][render.scale.outMode];
+			render.scale.linePalHandler = (*lineBlock)[4][render.scale.outMode];
+			render.scale.inMode = scalerMode8;
+			render.scale.cachePitch = render.src.width * 1;
+			break;
+		case 15:
+			render.scale.lineHandler = (*lineBlock)[1][render.scale.outMode];
+			render.scale.linePalHandler = nullptr;
+			render.scale.inMode = scalerMode15;
+			render.scale.cachePitch = render.src.width * 2;
+			break;
+		case 16:
+			render.scale.lineHandler = (*lineBlock)[2][render.scale.outMode];
+			render.scale.linePalHandler = nullptr;
+			render.scale.inMode = scalerMode16;
+			render.scale.cachePitch = render.src.width * 2;
+			break;
+		case 32:
+			render.scale.lineHandler = (*lineBlock)[3][render.scale.outMode];
+			render.scale.linePalHandler = nullptr;
+			render.scale.inMode = scalerMode32;
+			render.scale.cachePitch = render.src.width * 4;
+			break;
+		default:
+			//render.src.bpp=8;
+			render.scale.lineHandler = (*lineBlock)[0][render.scale.outMode];
+			render.scale.linePalHandler = (*lineBlock)[4][render.scale.outMode];
+			render.scale.inMode = scalerMode8;
+			render.scale.cachePitch = render.src.width * 1;
+			break;
+			//E_Exit("RENDER:Wrong source bpp %d", render.src.bpp );
+	}
+	render.scale.blocks = render.src.width / SCALER_BLOCKSIZE;
+	render.scale.lastBlock = render.src.width % SCALER_BLOCKSIZE;
+	render.scale.inHeight = render.src.height;
+	/* Reset the palette change detection to its initial value */
+	render.pal.first= 0;
+	render.pal.last = 255;
+	render.pal.changed = false;
+	memset(render.pal.modified, 0, sizeof(render.pal.modified));
+	//Finish this frame using a copy only handler
+	RENDER_DrawLine = RENDER_FinishLineHandler;
+	render.scale.outWrite = nullptr;
+	/* Signal the next frame to first reinit the cache */
+	render.scale.clearCache = true;
 
-    if (!sdl.window_too_small)
-        render.active=true;
+	if (!sdl.window_too_small)
+		render.active=true;
 
-    last_gfx_flags = gfx_flags;
+	last_gfx_flags = gfx_flags;
 #if defined(USE_TTF)
-    if (sdl.desktop.want_type == SCREEN_TTF) {
-        if (resetreq) resetFontSize();
+	if (sdl.desktop.want_type == SCREEN_TTF) {
+		if (resetreq) resetFontSize();
 #if defined(HX_DOS)
-        else PIC_AddEvent(drawmenu, 200);
+		else PIC_AddEvent(drawmenu, 200);
 #endif
-    }
+	}
 #endif
-    // Ensure VMware mouse support knows the current parameters
+	// Ensure VMware mouse support knows the current parameters
 	VMWARE_ScreenParams(sdl.clip.x, sdl.clip.y, sdl.clip.w, sdl.clip.h, sdl.desktop.fullscreen);
 #if defined(MACOSX) && !defined(C_SDL2)
 	SetWindowTransparency(-1);
@@ -869,7 +910,7 @@ void RENDER_CallBack( GFX_CallBackFunctions_t function ) {
         render.scale.clearCache = true;
         return;
     } else if ( function == GFX_CallBackReset) {
-        GFX_EndUpdate( 0 ); 
+        GFX_EndUpdate(nullptr);
         RENDER_Reset();
     } else {
         E_Exit("Unhandled GFX_CallBackReset %d", function );
@@ -1124,6 +1165,7 @@ void RENDER_OnSectionPropChange(Section *x) {
 
     bool p_doublescan = vga.draw.doublescan_set;
     bool p_char9 = vga.draw.char9_set;
+    bool p_modeswitch = vga.draw.modeswitch_set;
     int p_aspect = render.aspect;
 
     std::string s_aspect = section->Get_string("aspect");
@@ -1139,14 +1181,24 @@ void RENDER_OnSectionPropChange(Section *x) {
     vga.draw.doublescan_set=section->Get_bool("doublescan");
     vga.draw.char9_set=section->Get_bool("char9");
 
-    if (render.aspect != p_aspect || vga.draw.doublescan_set != p_doublescan || vga.draw.char9_set != p_char9)
+#if C_SDL2
+	vga.draw.modeswitch_set=section->Get_bool("modeswitch");
+#endif
+
+    if (render.aspect != p_aspect || vga.draw.doublescan_set != p_doublescan || \
+		vga.draw.char9_set != p_char9 || vga.draw.modeswitch_set != p_modeswitch)
         RENDER_CallBack(GFX_CallBackReset);
-    if (vga.draw.doublescan_set != p_doublescan || vga.draw.char9_set != p_char9)
+    if (vga.draw.doublescan_set != p_doublescan || vga.draw.char9_set != p_char9 || \
+		vga.draw.modeswitch_set != p_modeswitch)
         VGA_StartResize();
 
     mainMenu.get_item("vga_9widetext").check(vga.draw.char9_set).refresh_item(mainMenu);
     mainMenu.get_item("doublescan").check(vga.draw.doublescan_set).refresh_item(mainMenu);
     mainMenu.get_item("mapper_aspratio").check(render.aspect).refresh_item(mainMenu);
+
+#if C_SDL2
+    mainMenu.get_item("modeswitch").check(vga.draw.modeswitch_set).refresh_item(mainMenu);
+#endif
 
 #if C_XBRZ
     xBRZ_Change_Options(section);
@@ -1217,10 +1269,10 @@ void RENDER_UpdateFromScalerSetting(void) {
     else if (scaler == "gray2x"){ render.scale.op = scalerOpGray; render.scale.size = 2; render.scale.hardware=false; }
 #endif
     else if (scaler == "hardware_none") { render.scale.op = scalerOpNormal; render.scale.size = 1; render.scale.hardware=true; }
-    else if (scaler == "hardware2x") { render.scale.op = scalerOpNormal; render.scale.size = 4; render.scale.hardware=true; }
-    else if (scaler == "hardware3x") { render.scale.op = scalerOpNormal; render.scale.size = 6; render.scale.hardware=true; }
-    else if (scaler == "hardware4x") { render.scale.op = scalerOpNormal; render.scale.size = 8; render.scale.hardware=true; }
-    else if (scaler == "hardware5x") { render.scale.op = scalerOpNormal; render.scale.size = 10; render.scale.hardware=true; }
+    else if (scaler == "hardware2x") { render.scale.op = scalerOpNormal; render.scale.size = 2; render.scale.hardware=true; }
+    else if (scaler == "hardware3x") { render.scale.op = scalerOpNormal; render.scale.size = 3; render.scale.hardware=true; }
+    else if (scaler == "hardware4x") { render.scale.op = scalerOpNormal; render.scale.size = 4; render.scale.hardware=true; }
+    else if (scaler == "hardware5x") { render.scale.op = scalerOpNormal; render.scale.size = 5; render.scale.hardware=true; }
 #if C_XBRZ
     else if (scaler == "xbrz" || scaler == "xbrz_bilinear") { 
         render.scale.op = scalerOpNormal; 
@@ -1322,6 +1374,11 @@ void RENDER_Init() {
 
     vga.draw.doublescan_set=section->Get_bool("doublescan");
     vga.draw.char9_set=section->Get_bool("char9");
+
+#if C_SDL2
+	vga.draw.modeswitch_set=section->Get_bool("modeswitch");
+#endif
+
 	eurAscii = section->Get_int("euro");
 	if (eurAscii != -1 && (eurAscii < 33 || eurAscii > 255)) {
 		LOG_MSG("Euro ASCII value has to be between 33 and 255\n");
@@ -1407,6 +1464,10 @@ void RENDER_Init() {
     mainMenu.get_item("doublescan").check(vga.draw.doublescan_set).refresh_item(mainMenu);
     mainMenu.get_item("mapper_aspratio").check(render.aspect).refresh_item(mainMenu);
 
+#if C_SDL2
+    mainMenu.get_item("modeswitch").check(vga.draw.modeswitch_set).refresh_item(mainMenu);
+#endif
+
     RENDER_UpdateFrameskipMenu();
 
     /* BUG FIX: Some people's dosbox-x.conf files have frameskip=-1 WTF?? */
@@ -1459,11 +1520,11 @@ public:
 	SerializeRender() : SerializeGlobalPOD("Render") {}
 
 private:
-	virtual void getBytes(std::ostream& stream)
+	void getBytes(std::ostream& stream) override
 	{
 		// - pure data
-        SerializeGlobalPOD::getBytes(stream);
-        WRITE_POD( &render.src, render.src );
+		SerializeGlobalPOD::getBytes(stream);
+		WRITE_POD( &render.src, render.src );
 		WRITE_POD( &render.pal, render.pal );
 		WRITE_POD( &render.updating, render.updating );
 		WRITE_POD( &render.active, render.active );
@@ -1473,10 +1534,10 @@ private:
 		WRITE_POD( &render.scale, render.scale );
 	}
 
-	virtual void setBytes(std::istream& stream)
+	void setBytes(std::istream& stream) override
 	{
 		// - pure data
-        SerializeGlobalPOD::setBytes(stream);
+		SerializeGlobalPOD::setBytes(stream);
 		READ_POD( &render.src, render.src );
 		READ_POD( &render.pal, render.pal );
 		READ_POD( &render.updating, render.updating );
@@ -1484,22 +1545,22 @@ private:
 		READ_POD( &render.fullFrame, render.fullFrame );
 		READ_POD( &render.frameskip, render.frameskip );
 		READ_POD( &render.aspect, render.aspect );
-        scalerOperation_t op = render.scale.op;
+		scalerOperation_t op = render.scale.op;
 		Bitu size = render.scale.size;
 		bool hardware = render.scale.hardware;
-        uint8_t* cacheRead = render.scale.cacheRead;
-        uint8_t* outWrite = render.scale.outWrite;
-        Bitu cachePitch = render.scale.cachePitch;
-        Bitu outPitch = render.scale.outPitch;
-        READ_POD( &render.scale, render.scale );
-        render.scale.cacheRead = cacheRead;
-        render.scale.cachePitch = cachePitch;
-        render.scale.outWrite = outWrite;
-        render.scale.outPitch = outPitch;
-        render.scale.op = op;
+		uint8_t* cacheRead = render.scale.cacheRead;
+		uint8_t* outWrite = render.scale.outWrite;
+		Bitu cachePitch = render.scale.cachePitch;
+		Bitu outPitch = render.scale.outPitch;
+		READ_POD( &render.scale, render.scale );
+		render.scale.cacheRead = cacheRead;
+		render.scale.cachePitch = cachePitch;
+		render.scale.outWrite = outWrite;
+		render.scale.outPitch = outPitch;
+		render.scale.op = op;
 		render.scale.size = size;
 		render.scale.hardware = hardware;
- 
+
 		// reset screen
 		if (render.aspect==ASPECT_FALSE) {
 			render.scale.clearCache = true;

@@ -27,6 +27,48 @@
 #include <list>
 #include <stddef.h> //for offsetof
 
+ /* Macros SSET_* and SGET_* are used to safely access fields in memory-mapped
+  * DOS structures represented via classes inheriting from MemStruct class.
+  *
+  * All of these macros depend on 'pt' base pointer from MemStruct base class;
+  * all DOS-specific fields are accessed by reading memory relative to that
+  * pointer.
+  *
+  * Example usage:
+  *
+  *   SSET_WORD(dos-structure-name, field-name, value);
+  *   uint16_t x = SGET_WORD(dos-structure-name, field-name);
+  */
+template <size_t N, typename S, typename T1, typename T2 = T1>
+constexpr PhysPt assert_macro_args_ok()
+{
+    static_assert(sizeof(T1) == N, "Requested struct field has unexpected size");
+    static_assert(sizeof(T2) == N, "Type used to save value has unexpected size");
+    static_assert(std::is_standard_layout<S>::value,
+        "Struct needs to have standard layout for offsetof calculation");
+    // returning 0, so compiler can optimize-out no-op "0 +" expression
+    return 0;
+}
+
+#define VERIFY_SSET_ARGS(n, s, f, v)                                           \
+	assert_macro_args_ok<n, s, decltype(s::f), decltype(v)>()
+#define VERIFY_SGET_ARGS(n, s, f)                                              \
+	assert_macro_args_ok<n, s, decltype(s::f)>()
+
+#define SSET_BYTE(s, f, v)                                                     \
+	mem_writeb(VERIFY_SSET_ARGS(1, s, f, v) + pt + offsetof(s, f), v)
+#define SSET_WORD(s, f, v)                                                     \
+	mem_writew(VERIFY_SSET_ARGS(2, s, f, v) + pt + offsetof(s, f), v)
+#define SSET_DWORD(s, f, v)                                                    \
+	mem_writed(VERIFY_SSET_ARGS(4, s, f, v) + pt + offsetof(s, f), v)
+
+#define SGET_BYTE(s, f)                                                        \
+	mem_readb(VERIFY_SGET_ARGS(1, s, f) + pt + offsetof(s, f))
+#define SGET_WORD(s, f)                                                        \
+	mem_readw(VERIFY_SGET_ARGS(2, s, f) + pt + offsetof(s, f))
+#define SGET_DWORD(s, f)                                                       \
+	mem_readd(VERIFY_SGET_ARGS(4, s, f) + pt + offsetof(s, f))
+
 #ifdef _MSC_VER
 #pragma pack (1)
 #endif
@@ -56,6 +98,7 @@ extern uint16_t first_umb_size;
 
 bool MEM_unmap_physmem(Bitu start,Bitu end);
 bool MEM_map_RAM_physmem(Bitu start,Bitu end);
+bool MEM_map_ROM_physmem(Bitu start,Bitu end);
 
 struct BuiltinFileBlob {
 	const char		*recommended_file_name;
@@ -153,6 +196,10 @@ extern uint16_t DOS_MEM_START;// 0x158	 // regression to r3437 fixes nascar 2 co
 
 extern uint16_t DOS_PRIVATE_SEGMENT;// 0xc800
 extern uint16_t DOS_PRIVATE_SEGMENT_END;// 0xd000
+
+constexpr int SftHeaderSize = 6;
+constexpr int SftEntrySize = 59;
+constexpr int SftNumEntries = 16;
 
 /* internal Dos Tables */
 
@@ -277,6 +324,8 @@ bool DOS_ResizeMemory(uint16_t segment,uint16_t * blocks);
 bool DOS_FreeMemory(uint16_t segment);
 void DOS_FreeProcessMemory(uint16_t pspseg);
 uint16_t DOS_GetMemory(uint16_t pages,const char *who=NULL);
+void DOS_Private_UMB_Lock(const bool lock);
+void DOS_FreeTableMemory();
 bool DOS_SetMemAllocStrategy(uint16_t strat);
 uint16_t DOS_GetMemAllocStrategy(void);
 void DOS_BuildUMBChain(bool umb_active,bool ems_active);
@@ -457,7 +506,7 @@ private:
 	#pragma pack(1)
 	#endif
 	struct sPSP {
-		uint8_t	exit[2];			/* CP/M-like exit poimt */
+		uint8_t	exit[2];			/* CP/M-like exit point */
 		uint16_t	next_seg;			/* Segment of first byte beyond memory allocated or program */
 		uint8_t	fill_1;				/* single char fill */
 		uint8_t	far_call;			/* far call opcode */
@@ -467,7 +516,7 @@ private:
 		RealPt	int_24;				/* Critical Error Address */
 		uint16_t	psp_parent;			/* Parent PSP Segment */
 		uint8_t	files[20];			/* File Table - 0xff is unused */
-		uint16_t	environment;		/* Segment of evironment table */
+		uint16_t	environment;		/* Segment of environment table */
 		RealPt	stack;				/* SS:SP Save point for int 0x21 calls */
 		uint16_t	max_files;			/* Maximum open files */
 		RealPt	file_table;			/* Pointer to File Table PSP:0x18 */
@@ -476,7 +525,7 @@ private:
 		uint8_t truename_flag;
 		uint16_t nn_flags;
 		uint16_t dos_version;
-		uint8_t	fill_2[14];			/* Lot's of unused stuff i can't care aboue */
+		uint8_t	fill_2[14];			/* Lot's of unused stuff i can't care about */
 		uint8_t	service[3];			/* INT 0x21 Service call int 0x21;retf; */
 		uint8_t	fill_3[9];			/* This has some blocks with FCB info */
 		uint8_t	fcb1[16];			/* first FCB */
@@ -1013,7 +1062,7 @@ const std::map<std::string, int> country_code_map {
 	{"tt443",  COUNTRYNO::Russia         }, // Tatarstan Typewriter
 	{"ua",     COUNTRYNO::Ukraine        }, // 101-key
 	{"uk",     COUNTRYNO::United_Kingdom }, // Standard
-	{"uk168",  COUNTRYNO::United_Kingdom }, // Allternate
+	{"uk168",  COUNTRYNO::United_Kingdom }, // Alternate
 	{"ur",     COUNTRYNO::Ukraine        }, // 101-key
 	{"ur465",  COUNTRYNO::Ukraine        }, // 101-key
 	{"ur1996", COUNTRYNO::Ukraine        }, // 101-key

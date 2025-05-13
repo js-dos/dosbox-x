@@ -47,6 +47,30 @@ void sdl1_hax_set_topmost(unsigned char topmost) {
 }
 #endif
 
+#if defined(MACOSX)
+void MacOSEnableWindowCapture(unsigned int enable) {
+    NSWindow *wnd = nil;
+
+# if defined(C_SDL2)
+    SDL_Window* GFX_GetSDLWindow(void);
+    SDL_SysWMinfo wminfo;
+    memset(&wminfo,0,sizeof(wminfo));
+    SDL_VERSION(&wminfo.version);
+    if (SDL_GetWindowWMInfo(GFX_GetSDLWindow(),&wminfo) >= 0) {
+        if (wminfo.subsystem == SDL_SYSWM_COCOA && wminfo.info.cocoa.window != NULL) {
+            wnd = wminfo.info.cocoa.window;
+        }
+    }
+# else
+    wnd = sdl1_hax_get_window();
+# endif
+
+    if (wnd) {
+        [wnd setSharingType:(enable?NSWindowSharingReadOnly:NSWindowSharingNone)];
+    }
+}
+#endif
+
 #if defined(MACOSX) && defined(C_SDL2)
 bool IME_GetEnable() {
     TISInputSourceRef is = TISCopyCurrentKeyboardInputSource();

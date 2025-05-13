@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <cstdint>
 
 #include "callback.h"
 #include "logging.h"
@@ -90,7 +91,7 @@ uint8_t CALLBACK_Allocate(void) {
 	for (uint8_t i=1;(i<CB_MAX);i++) {
 		if (CallBack_Handlers[i]==&illegal_handler) {
 			if (CallBack_Description[i] != NULL) LOG_MSG("CALLBACK_Allocate() warning: empty slot still has description string!\n");
-			CallBack_Handlers[i]=0;
+			CallBack_Handlers[i]=nullptr;
 			return i;
 		}
 	}
@@ -228,7 +229,10 @@ void CALLBACK_RunRealInt(uint8_t intnum) {
 	SegSet16(cs,oldcs);
 }
 
-void CALLBACK_SZF(bool val) {
+namespace {
+
+template <std::uint32_t FLAG>
+inline void CALLBACK_SET_FLAG(bool const val) {
 	uint32_t tempf;
 
 	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
@@ -244,8 +248,8 @@ void CALLBACK_SZF(bool val) {
 			tempf = real_readw(SegValue(ss),reg_sp+4); // first word past FAR 16:16
 	}
 
-	if (val) tempf |= FLAG_ZF;
-	else tempf &= ~FLAG_ZF;
+	if (val) tempf |= FLAG;
+	else tempf &= ~FLAG;
 
 	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
 		if (cpu.stack.big)
@@ -261,75 +265,15 @@ void CALLBACK_SZF(bool val) {
 	}
 }
 
-void CALLBACK_SCF(bool val) {
-	uint32_t tempf;
+} // anonymous namespace
 
-	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
-		if (cpu.stack.big)
-			tempf = mem_readd(SegPhys(ss)+reg_esp+8); // first word past FAR 32:32
-		else
-			tempf = mem_readw(SegPhys(ss)+reg_sp+4); // first word past FAR 16:16
-	}
-	else {
-		if (cpu.stack.big)
-			tempf = real_readd(SegValue(ss),reg_esp+8); // first word past FAR 32:32
-		else
-			tempf = real_readw(SegValue(ss),reg_sp+4); // first word past FAR 16:16
-	}
-
-	if (val) tempf |= FLAG_CF;
-	else tempf &= ~FLAG_CF;
-
-	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
-		if (cpu.stack.big)
-			mem_writed(SegPhys(ss)+reg_esp+8,tempf);
-		else
-			mem_writew(SegPhys(ss)+reg_sp+4,(uint16_t)tempf);
-	}
-	else {
-		if (cpu.stack.big)
-			real_writed(SegValue(ss),reg_esp+8,tempf);
-		else
-			real_writew(SegValue(ss),reg_sp+4,(uint16_t)tempf);
-	}
-}
-
-void CALLBACK_SIF(bool val) {
-	uint32_t tempf;
-
-	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
-		if (cpu.stack.big)
-			tempf = mem_readd(SegPhys(ss)+reg_esp+8); // first word past FAR 32:32
-		else
-			tempf = mem_readw(SegPhys(ss)+reg_sp+4); // first word past FAR 16:16
-	}
-	else {
-		if (cpu.stack.big)
-			tempf = real_readd(SegValue(ss),reg_esp+8); // first word past FAR 32:32
-		else
-			tempf = real_readw(SegValue(ss),reg_sp+4); // first word past FAR 16:16
-	}
-
-	if (val) tempf |= FLAG_IF;
-	else tempf &= ~FLAG_IF;
-
-	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
-		if (cpu.stack.big)
-			mem_writed(SegPhys(ss)+reg_esp+8,tempf);
-		else
-			mem_writew(SegPhys(ss)+reg_sp+4,(uint16_t)tempf);
-	}
-	else {
-		if (cpu.stack.big)
-			real_writed(SegValue(ss),reg_esp+8,tempf);
-		else
-			real_writew(SegValue(ss),reg_sp+4,(uint16_t)tempf);
-	}
-}
+void CALLBACK_SZF(bool const val) { CALLBACK_SET_FLAG<FLAG_ZF>(val); }
+void CALLBACK_SCF(bool const val) { CALLBACK_SET_FLAG<FLAG_CF>(val); }
+void CALLBACK_SIF(bool const val) { CALLBACK_SET_FLAG<FLAG_IF>(val); }
 
 void CALLBACK_SetDescription(Bitu nr, const char* descr) {
 	if (CallBack_Description[nr]) delete[] CallBack_Description[nr];
-	CallBack_Description[nr] = 0;
+	CallBack_Description[nr] = nullptr;
 
 	if (descr != NULL) {
 		CallBack_Description[nr] = new char[strlen(descr)+1];
@@ -338,7 +282,7 @@ void CALLBACK_SetDescription(Bitu nr, const char* descr) {
 }
 
 const char* CALLBACK_GetDescription(Bitu nr) {
-	if (nr>=CB_MAX) return 0;
+	if (nr>=CB_MAX) return nullptr;
 	return CallBack_Description[nr];
 }
 
@@ -459,56 +403,69 @@ Bitu CALLBACK_SetupExtra(Bitu callback, Bitu type, PhysPt physAddress, bool use_
 		phys_writeb(physAddress+0x0e,(uint8_t)0xcf);		//An IRET Instruction
 		return (use_cb?0x13:0x0f);
 	case CB_IRQ1:	// keyboard int9
-		phys_writeb(physAddress+0x00,(uint8_t)0x50);			// push ax
-        if (machine == MCH_PCJR || IS_PC98_ARCH) {
-            /* NTS: NEC PC-98 does not have keyboard input on port 60h, it's a 8251 UART elsewhere.
-             *
-             *      IBM PCjr reads the infared input on NMI interrupt, which then calls INT 48h to
-             *      translate to IBM PC/XT scan codes before passing AL directly to IRQ1 (INT 9).
-             *      PCjr keyboard handlers, including games made for the PCjr, assume the scan code
-             *      is in AL and do not read the I/O port */
-            phys_writew(physAddress+0x01,(uint16_t)0x9090);		// nop, nop
-        }
-        else {
-            phys_writew(physAddress+0x01,(uint16_t)0x60e4);		// in al, 0x60
-        }
-        if (IS_PC98_ARCH || IS_TANDY_ARCH) {
-            phys_writew(physAddress+0x03,(uint16_t)0x9090);		// nop, nop
-            phys_writeb(physAddress+0x05,(uint8_t)0x90);			// nop
-            phys_writew(physAddress+0x06,(uint16_t)0x9090);		// nop, nop (PC-98 does not have INT 15h keyboard hook)
-        }
-        else {
-            phys_writew(physAddress+0x03,(uint16_t)0x4fb4);		// mov ah, 0x4f
-            phys_writeb(physAddress+0x05,(uint8_t)0xf9);			// stc
-            phys_writew(physAddress+0x06,(uint16_t)0x15cd);		// int 15
-        }
+		if (machine == MCH_PCJR) {
+			/*      IBM PCjr reads the infrared input on NMI interrupt, which then calls INT 48h to
+			 *      translate to IBM PC/XT scan codes before passing AL directly to IRQ1 (INT 9).
+			 *      PCjr keyboard handlers, including games made for the PCjr, assume the scan code
+			 *      is in AL and do not read the I/O port. */
+			if (use_cb) {
+				phys_writeb(physAddress+0x00,(uint8_t)0xFE);		//GRP 4
+				phys_writeb(physAddress+0x01,(uint8_t)0x38);		//Extra Callback instruction
+				phys_writew(physAddress+0x02,(uint16_t)callback);	//The immediate word
+				physAddress+=4;
+			}
 
-		if (use_cb) {
-            if (IS_PC98_ARCH || IS_TANDY_ARCH)
-                phys_writew(physAddress+0x08,(uint16_t)0x9090);	// nop nop
-            else
-                phys_writew(physAddress+0x08,(uint16_t)0x0473);	// jc skip
-
-			phys_writeb(physAddress+0x0a,(uint8_t)0xFE);		//GRP 4
-			phys_writeb(physAddress+0x0b,(uint8_t)0x38);		//Extra Callback instruction
-			phys_writew(physAddress+0x0c,(uint16_t)callback);			//The immediate word
-			// jump here to (skip):
-			physAddress+=6;
+			/* It wasn't an interrupt, so there's no need to ack */
+			phys_writeb(physAddress+0x00,(uint8_t)0xcf);			//An IRET Instruction
+			return (use_cb?0x05:0x01);
 		}
-		phys_writeb(physAddress+0x08,(uint8_t)0xfa);			// cli
-		phys_writew(physAddress+0x09,(uint16_t)0x20b0);		// mov al, 0x20
-		phys_writew(physAddress+0x0b,(uint16_t)(IS_PC98_ARCH ? 0x00e6 : 0x20e6));		// out 0x20, al
-		phys_writeb(physAddress+0x0d,(uint8_t)0x58);			// pop ax
-		phys_writeb(physAddress+0x0e,(uint8_t)0xcf);			//An IRET Instruction
-        phys_writeb(physAddress+0x0f,(uint8_t)0xfa);			// cli
-        phys_writew(physAddress+0x10,(uint16_t)0x20b0);		// mov al, 0x20
-        phys_writew(physAddress+0x12,(uint16_t)0x20e6);		// out 0x20, al
-        phys_writeb(physAddress+0x14,(uint8_t)0x55);			// push bp
-        phys_writew(physAddress+0x15,(uint16_t)0x05cd);		// int 5
-        phys_writeb(physAddress+0x17,(uint8_t)0x5d);			// pop bp
-        phys_writeb(physAddress+0x18,(uint8_t)0x58);			// pop ax
-        phys_writeb(physAddress+0x19,(uint8_t)0xcf);			//An IRET Instruction
-        return (use_cb ?0x20:0x1a);
+		else {
+			phys_writeb(physAddress+0x00,(uint8_t)0x50);			// push ax
+			if (IS_PC98_ARCH) {
+				/* NTS: NEC PC-98 does not have keyboard input on port 60h, it's a 8251 UART elsewhere. */
+				phys_writew(physAddress+0x01,(uint16_t)0x9090);		// nop, nop
+			}
+			else {
+				phys_writew(physAddress+0x01,(uint16_t)0x60e4);		// in al, 0x60
+			}
+			if (IS_PC98_ARCH || IS_TANDY_ARCH) {
+				phys_writew(physAddress+0x03,(uint16_t)0x9090);		// nop, nop
+				phys_writeb(physAddress+0x05,(uint8_t)0x90);		// nop
+				phys_writew(physAddress+0x06,(uint16_t)0x9090);		// nop, nop (PC-98 does not have INT 15h keyboard hook)
+			}
+			else {
+				phys_writew(physAddress+0x03,(uint16_t)0x4fb4);		// mov ah, 0x4f
+				phys_writeb(physAddress+0x05,(uint8_t)0xf9);			// stc
+				phys_writew(physAddress+0x06,(uint16_t)0x15cd);		// int 15
+			}
+
+			if (use_cb) {
+				if (IS_PC98_ARCH || IS_TANDY_ARCH)
+					phys_writew(physAddress+0x08,(uint16_t)0x9090);	// nop nop
+				else
+					phys_writew(physAddress+0x08,(uint16_t)0x0473);	// jc skip
+
+				phys_writeb(physAddress+0x0a,(uint8_t)0xFE);		//GRP 4
+				phys_writeb(physAddress+0x0b,(uint8_t)0x38);		//Extra Callback instruction
+				phys_writew(physAddress+0x0c,(uint16_t)callback);	//The immediate word
+				// jump here to (skip):
+				physAddress+=6;
+			}
+			phys_writeb(physAddress+0x08,(uint8_t)0xfa);			// cli
+			phys_writew(physAddress+0x09,(uint16_t)0x20b0);			// mov al, 0x20
+			phys_writew(physAddress+0x0b,(uint16_t)(IS_PC98_ARCH ? 0x00e6 : 0x20e6)); // out 0x20, al
+			phys_writeb(physAddress+0x0d,(uint8_t)0x58);			// pop ax
+			phys_writeb(physAddress+0x0e,(uint8_t)0xcf);			//An IRET Instruction
+			phys_writeb(physAddress+0x0f,(uint8_t)0xfa);			// cli
+			phys_writew(physAddress+0x10,(uint16_t)0x20b0);			// mov al, 0x20
+			phys_writew(physAddress+0x12,(uint16_t)0x20e6);			// out 0x20, al
+			phys_writeb(physAddress+0x14,(uint8_t)0x55);			// push bp
+			phys_writew(physAddress+0x15,(uint16_t)0x05cd);			// int 5
+			phys_writeb(physAddress+0x17,(uint8_t)0x5d);			// pop bp
+			phys_writeb(physAddress+0x18,(uint8_t)0x58);			// pop ax
+			phys_writeb(physAddress+0x19,(uint8_t)0xcf);			//An IRET Instruction
+			return (use_cb?0x20:0x1a);
+		}
 	case CB_IRQ1_BREAK:	// return from int9, when Ctrl-Break is detected; invokes int 1b
 		phys_writew(physAddress+0x00,(uint16_t)0x1bcd);		// int 1b
 		phys_writeb(physAddress+0x02,(uint8_t)0xfa);		// cli
@@ -747,6 +704,11 @@ Bitu CALLBACK_SetupExtra(Bitu callback, Bitu type, PhysPt physAddress, bool use_
 		phys_writeb(physAddress+0x01,(uint8_t)0xCF);		//An IRET Instruction
 		phys_writew(physAddress+0x02,(uint16_t)0x0ECD);		// int 0e
 		phys_writeb(physAddress+0x04,(uint8_t)0xCF);		//An IRET Instruction
+		// for the image disk support to call
+		phys_writew(physAddress+0x05,(uint16_t)0x13CD);		// int 13
+		phys_writeb(physAddress+0x07,0xFE);
+		phys_writeb(physAddress+0x08,0x38);
+		phys_writew(physAddress+0x09,(uint16_t)call_idle);
 		return (use_cb?9:5);
 	case CB_VESA_WAIT:
 		if (use_cb) E_Exit("VESA wait must not implement a callback handler!");
@@ -876,7 +838,7 @@ void CALLBACK_HandlerObject::Uninstall(){
 		//Do nothing. Merely DeAllocate the callback
 	} else E_Exit("what kind of callback is this!");
 	if(CallBack_Description[m_callback]) delete [] CallBack_Description[m_callback];
-	CallBack_Description[m_callback] = 0;
+	CallBack_Description[m_callback] = nullptr;
 	CALLBACK_DeAllocate(m_callback);
 	installed=false;
 }

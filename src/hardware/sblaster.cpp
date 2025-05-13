@@ -40,6 +40,27 @@
  *        FIFO anyway, and which cards have it? Would it also be possible to eliminate
  *        the need for sb.dma.min? */
 
+/* Notes:
+ *
+ *   - Windows 95, when using the Creative SB16 drivers, seems to always use a 62ms
+ *     DSP block size, DSP and DMA auto-init, within a 124ms buffer
+ *     (DSP block size 1376 / DMA base count 2751 / sample rate 22050 for example).
+ *
+ *     The calculation seems to be Nhalf = ((sample_rate / 16) & (~3)) * bytes_per_sample
+ *     and N = Nhalf * 2. It appears to round down to a multiple of 4 to correctly handle
+ *     up to 16-bit stereo, of course.
+ *
+ *     What I'm trying to investigate are the cases where something, like CD-ROM IDE
+ *     access, throws that off and causes audible popping and crackling.
+ *
+ *   - Windows 3.1 SB16: Holy Hell, do NOT attempt to play audio at 48KHz or higher!
+ *     There seems to be a serious bug with the Creative SB16 driver where 48KHz playback
+ *     results in garbled audio and soon a driver crash. 44.1KHz or lower is OK.
+ *     Is this some kind of DMA vs timing bug? It also appears to take whatever sample
+ *     rate is given by the Windows application and give it as-is to the DSP. The breaking
+ *     point seems to be 45,100Hz.
+ */
+
 #if defined(_MSC_VER)
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 # pragma warning(disable:4305) /* truncation from double to float */
@@ -98,10 +119,11 @@ bool MIDI_Available(void);
 #define SB_SH_MASK  ((1 << SB_SH)-1)
 
 enum {DSP_S_RESET,DSP_S_RESET_WAIT,DSP_S_NORMAL,DSP_S_HIGHSPEED};
-enum SB_TYPES {SBT_NONE=0,SBT_1=1,SBT_PRO1=2,SBT_2=3,SBT_PRO2=4,SBT_16=6,SBT_GB=7}; /* TODO: Need SB 2.0 vs SB 2.01 */
+enum SB_TYPES {SBT_NONE=0,SBT_GB=1,SBT_1=2,SBT_2=3,SBT_PRO1=4,SBT_PRO2=5,SBT_16=6};
+enum SB_SUBTYPES {SBST_NONE,SBST_100,SBST_105,SBST_200,SBST_201};
 enum REVEAL_SC_TYPES {RSC_NONE=0,RSC_SC400=1};
 enum SB_IRQS {SB_IRQ_8,SB_IRQ_16,SB_IRQ_MPU};
-enum ESS_TYPES {ESS_NONE=0,ESS_688=1};
+enum ESS_TYPES {ESS_NONE=0,ESS_688=1,ESS_1688=2};
 
 enum DSP_MODES {
     MODE_NONE,
@@ -174,6 +196,7 @@ struct SB_INFO {
     bool busy_cycle_always;
     bool ess_playback_mode;
     bool no_filtering;
+    bool cms;
     uint8_t sc400_cfg;
     uint8_t time_constant;
     uint8_t sc400_dsp_major,sc400_dsp_minor;
@@ -181,6 +204,7 @@ struct SB_INFO {
     uint8_t sc400_jumper_status_2;
     DSP_MODES mode;
     SB_TYPES type;
+    SB_SUBTYPES subtype;
     REVEAL_SC_TYPES reveal_sc_type; // Reveal SC400 type
     ESS_TYPES ess_type; // ESS chipset emulation, to be set only if type == SBT_PRO2
     bool ess_extended_mode;
@@ -228,9 +252,11 @@ struct SB_INFO {
         uint8_t mic;
         bool stereo;
         bool enabled;
-        bool filtered;
+        bool filter_bypass;
         bool sbpro_stereo; /* Game or OS is attempting SB Pro type stereo */
         uint8_t unhandled[0x48];
+        uint8_t ess_id_str[4];
+        uint8_t ess_id_str_pos;
     } mixer;
     struct {
         uint8_t reference;
@@ -458,6 +484,9 @@ void sb_update_recording_source_settings() {
 
 static void DSP_DMA_CallBack(DmaChannel * chan, DMAEvent event) {
     if (chan!=sb.dma.chan || event==DMA_REACHED_TC) return;
+    else if (event==DMA_READ_COUNTER) {
+        sb.chan->FillUp();
+    }
     else if (event==DMA_MASKED) {
         if (sb.mode==MODE_DMA) {
             //Catch up to current time, but don't generate an IRQ!
@@ -478,13 +507,13 @@ static void DSP_DMA_CallBack(DmaChannel * chan, DMAEvent event) {
                 if (s) GenerateDMASound(s);
             }
             sb.mode = MODE_DMA_MASKED;
-            LOG(LOG_SB,LOG_NORMAL)("DMA masked, stopping %s, left %d",sb.dma.recording?"input":"output",chan->currcnt);
+            LOG(LOG_SB,LOG_NORMAL)("DMA masked, stopping %s, dsp left %d, dma left %d, by %s",sb.dma.recording?"input":"output",(unsigned int)sb.dma.left,chan->currcnt+1,DMAActorStr(chan->masked_by));
         }
     } else if (event==DMA_UNMASKED) {
         if (sb.mode==MODE_DMA_MASKED && sb.dma.mode!=DSP_DMA_NONE) {
             DSP_ChangeMode(MODE_DMA);
             CheckDMAEnd();
-            LOG(LOG_SB,LOG_NORMAL)("DMA unmasked, starting %s, auto %d block %d",sb.dma.recording?"input":"output",chan->autoinit,chan->basecnt);
+            LOG(LOG_SB,LOG_NORMAL)("DMA unmasked, starting %s, auto %d dma left %d, by %s dma init count %d",sb.dma.recording?"input":"output",chan->autoinit,chan->currcnt+1,DMAActorStr(chan->masked_by),chan->basecnt+1);
         }
     }
 }
@@ -987,6 +1016,7 @@ static void DMA_DAC_Event(Bitu val) {
     if (!sb.dma.left)
         return;
 
+    const bool psingle_sample = sb.single_sample_dma;
     /* Fix for 1994 Demoscene entry myth_dw: The demo's Sound Blaster Pro initialization will start DMA with
      * count == 1 or 2 (triggering Goldplay mode) but will change the DMA initial counter when it begins
      * normal playback. If goldplay stereo hack is enabled and we do not catch this case, the first 0.5 seconds
@@ -997,7 +1027,7 @@ static void DMA_DAC_Event(Bitu val) {
     else
         sb.single_sample_dma = 0;
 
-    if (!sb.single_sample_dma) {
+    if (psingle_sample && !sb.single_sample_dma) {
         // WARNING: This assumes Sound Blaster Pro emulation!
         LOG(LOG_SB,LOG_NORMAL)("Goldplay mode unexpectedly switched off, normal DMA playback follows");
         sb.dma_dac_mode = 0;
@@ -1168,7 +1198,7 @@ static void DSP_DoDMATransfer(DMA_MODES mode,Bitu freq,bool stereo,bool dontInit
      * program, before it is divided by two for stereo.
      *
      * Of course, some demos like Crystal Dream take the approach of just setting the
-     * sample rate to the max supported by the card and then letting it's timer interrupt
+     * sample rate to the max supported by the card and then letting its timer interrupt
      * define the sample rate. So of course anything below 44.1KHz sounds awful. */
     if (sb.dma_dac_mode && sb.goldplay_stereo && (stereo || sb.mixer.sbpro_stereo) && sb.single_sample_dma)
         sb.dma_dac_srcrate = sb.freq;
@@ -1238,12 +1268,14 @@ static void DSP_DoDMATransfer(DMA_MODES mode,Bitu freq,bool stereo,bool dontInit
     }
 
 #if (C_DEBUG)
-    LOG(LOG_SB,LOG_NORMAL)("DMA Transfer:%s %s %s %s freq %d rate %d size %d gold %d",
+    LOG(LOG_SB,LOG_NORMAL)("DMA Transfer:%s %s %s dsp %s dma %s freq %d rate %d dspsize %d dmasize %d gold %d",
         type,
         sb.dma.recording ? "Recording" : "Playback",
         sb.dma.stereo ? "Stereo" : "Mono",
         sb.dma.autoinit ? "Auto-Init" : "Single-Cycle",
+        sb.dma.chan ? (sb.dma.chan->autoinit ? "Auto-Init" : "Single-Cycle") : "n/a",
         (int)freq,(int)sb.dma.rate,(int)sb.dma.total,
+        sb.dma.chan ? (sb.dma.chan->basecnt+1) : 0,
         (int)sb.dma_dac_mode
     );
 #else
@@ -1298,10 +1330,12 @@ static unsigned int DSP_RateLimitedFinalSB16Freq_New(unsigned int freq) {
 }
 
 static void DSP_PrepareDMA_Old(DMA_MODES mode,bool autoinit,bool sign,bool hispeed) {
+    /* this must be processed BEFORE forcing auto-init because the non-autoinit case provides the DSP transfer block size (fix for "Jump" by Public NMI) */
+    if (!autoinit) sb.dma.total=1u+(unsigned int)sb.dsp.in.data[0]+(unsigned int)(sb.dsp.in.data[1] << 8u);
+
     if (sb.dma.force_autoinit)
         autoinit = true;
 
-    if (!autoinit) sb.dma.total=1u+(unsigned int)sb.dsp.in.data[0]+(unsigned int)(sb.dsp.in.data[1] << 8u);
     sb.dma.autoinit=autoinit;
     sb.dsp.highspeed=hispeed;
     sb.dma.sign=sign;
@@ -1484,7 +1518,7 @@ static void DSP_E2_DMA_CallBack(DmaChannel * /*chan*/, DMAEvent event) {
     if (event==DMA_UNMASKED) {
         uint8_t val = sb.e2.valadd;
         DmaChannel * chan=GetDMAChannel(sb.hw.dma8);
-        chan->Register_Callback(0);
+        chan->Register_Callback(nullptr);
         chan->Write(1,&val);
     }
 }
@@ -1496,7 +1530,7 @@ static void DSP_SC400_E6_DMA_CallBack(DmaChannel * /*chan*/, DMAEvent event) {
         static const char *string = "\x01\x02\x04\x08\x10\x20\x40\x80"; /* Confirmed response via DMA from actual Reveal SC400 card */
         DmaChannel * chan=GetDMAChannel(sb.hw.dma8);
         LOG(LOG_SB,LOG_DEBUG)("SC400 returning DMA test pattern on DMA channel=%u",sb.hw.dma8);
-        chan->Register_Callback(0);
+        chan->Register_Callback(nullptr);
         chan->Write(8,(uint8_t*)string);
         chan->Clear_Request();
         if (!chan->tcount) LOG(LOG_SB,LOG_DEBUG)("SC400 warning: DMA did not reach terminal count");
@@ -1512,7 +1546,7 @@ static void DSP_ADC_CallBack(DmaChannel * /*chan*/, DMAEvent event) {
         ch->Write(1,&val);
     }
     SB_RaiseIRQ(SB_IRQ_8);
-    ch->Register_Callback(0);
+    ch->Register_Callback(nullptr);
 }
 
 static void DSP_ChangeRate(Bitu freq) {
@@ -1529,6 +1563,7 @@ Bitu DEBUG_EnableDebugger(void);
 
 #define DSP_SB16_ONLY if (sb.type != SBT_16) { LOG(LOG_SB,LOG_ERROR)("DSP:Command %2X requires SB16",sb.dsp.cmd); break; }
 #define DSP_SB2_ABOVE if (sb.type <= SBT_1) { LOG(LOG_SB,LOG_ERROR)("DSP:Command %2X requires SB2 or above",sb.dsp.cmd); break; }
+#define DSP_SB201_ABOVE if (sb.type <= SBT_1 || (sb.type == SBT_2 && sb.subtype == SBST_200)) { LOG(LOG_SB,LOG_ERROR)("DSP:Command %2X requires SB2.01 or above",sb.dsp.cmd); break; }
 
 static unsigned int ESS_DMATransferCount() {
     unsigned int r;
@@ -1921,7 +1956,7 @@ static void DSP_DoCommand(void) {
             // so there's no point below that rate in additional rendering.
             if (rt < 1000) rt = 1000;
 
-            // FIXME: What does the ESS AudioDrive do to it's filter/sample rate divider registers when emulating this Sound Blaster command?
+            // FIXME: What does the ESS AudioDrive do to its filter/sample rate divider registers when emulating this Sound Blaster command?
             ESSreg(0xA1) = 128 - (397700 / 22050);
             ESSreg(0xA2) = 256 - (7160000 / (82 * ((4 * 22050) / 10)));
 
@@ -1929,7 +1964,7 @@ static void DSP_DoCommand(void) {
             // The sound card isn't given any hint what the actual sample rate is, only that it's given
             // instruction when to change the 8-bit value being output to the DAC which is why older DOS
             // games using this method tend to sound "grungy" compared to DMA playback. We recreate the
-            // effect here by asking the mixer to do it's linear interpolation as if at 23KHz while
+            // effect here by asking the mixer to do its linear interpolation as if at 23KHz while
             // rendering the audio at whatever rate the DOS game is giving it to us.
             sb.chan->SetFreq((Bitu)(rt * 0x100),0x100);
             updateSoundBlasterFilter(sb.freq);
@@ -1942,7 +1977,7 @@ static void DSP_DoCommand(void) {
         }
         break;
     case 0x99:  /* Single Cycle 8-Bit DMA High speed DAC */
-        DSP_SB2_ABOVE;
+        DSP_SB201_ABOVE;
         /* fall through */
     case 0x24:  /* Single Cycle 8-Bit DMA ADC */
         sb.dma.recording=true;
@@ -1950,13 +1985,14 @@ static void DSP_DoCommand(void) {
         LOG(LOG_SB,LOG_WARN)("Guest recording audio using SB/SBPro commands");
         break;
     case 0x98:  /* Auto Init 8-bit DMA High Speed */
+        DSP_SB201_ABOVE;
     case 0x2c:  /* Auto Init 8-bit DMA */
         DSP_SB2_ABOVE; /* Note: 0x98 is documented only for DSP ver.2.x and 3.x, not 4.x */
         sb.dma.recording=true;
         DSP_PrepareDMA_Old(DSP_DMA_8,true,false,/*hispeed*/(sb.dsp.cmd&0x80)!=0);
         break;
     case 0x91:  /* Single Cycle 8-Bit DMA High speed DAC */
-        DSP_SB2_ABOVE;
+        DSP_SB201_ABOVE;
         /* fall through */
     case 0x14:  /* Single Cycle 8-Bit DMA DAC */
     case 0x15:  /* Wari hack. Waru uses this one instead of 0x14, but some weird stuff going on there anyway */
@@ -1965,6 +2001,7 @@ static void DSP_DoCommand(void) {
         DSP_PrepareDMA_Old(DSP_DMA_8,false,false,/*hispeed*/(sb.dsp.cmd&0x80)!=0);
         break;
     case 0x90:  /* Auto Init 8-bit DMA High Speed */
+        DSP_SB201_ABOVE;
     case 0x1c:  /* Auto Init 8-bit DMA */
         DSP_SB2_ABOVE; /* Note: 0x90 is documented only for DSP ver.2.x and 3.x, not 4.x */
         sb.dma.recording=false;
@@ -2215,9 +2252,13 @@ static void DSP_DoCommand(void) {
         DSP_FlushData();
         switch (sb.type) {
         case SBT_1:
-            DSP_AddData(0x1);DSP_AddData(0x05);break;
+            if (sb.subtype == SBST_100) { DSP_AddData(0x1);DSP_AddData(0x0); }
+            else { DSP_AddData(0x1);DSP_AddData(0x5); }
+            break;
         case SBT_2:
-            DSP_AddData(0x2);DSP_AddData(0x1);break;
+            if (sb.subtype == SBST_200) { DSP_AddData(0x2);DSP_AddData(0x0); }
+            else { DSP_AddData(0x2);DSP_AddData(0x1); }
+            break;
         case SBT_PRO1:
             DSP_AddData(0x3);DSP_AddData(0x0);break;
         case SBT_PRO2:
@@ -2288,8 +2329,19 @@ static void DSP_DoCommand(void) {
     case 0xe7:  /* ESS detect/read config */
         if (sb.ess_type != ESS_NONE) {
             DSP_FlushData();
-            DSP_AddData(0x68);
-            DSP_AddData(0x80 | 0x04/*ESS 688 version*/);
+            switch (sb.ess_type) {
+            case ESS_NONE:
+                break;
+            case ESS_688:
+                DSP_AddData(0x68);
+                DSP_AddData(0x80 | 0x04);
+                break;
+            case ESS_1688:
+                // Determined via Windows driver debugging.
+                DSP_AddData(0x68);
+                DSP_AddData(0x80 | 0x09);
+                break;
+            }
         }
         break;
     case 0xe8:  /* Read Test Register */
@@ -2330,7 +2382,7 @@ static void DSP_DoCommand(void) {
         break;
     case 0x37: /* MIDI Read Timestamp Interrupt & Write Poll */
         DSP_SB2_ABOVE;
-        LOG(LOG_SB,LOG_DEBUG)("DSP:Entering MIDI Read Timstamp Interrupt/Write Poll mode");
+        LOG(LOG_SB,LOG_DEBUG)("DSP:Entering MIDI Read Timestamp Interrupt/Write Poll mode");
         sb.dsp.midi_rwpoll_mode = true;
         sb.dsp.midi_read_interrupt = true;
         sb.dsp.midi_read_with_timestamps = true;
@@ -2601,7 +2653,7 @@ static void CTMIXER_UpdateVolumes(void) {
 }
 
 static void CTMIXER_Reset(void) {
-    sb.mixer.filtered=0; // Creative Documentation: filtered bit 0 by default
+    sb.mixer.filter_bypass=0; // Creative Documentation: filter_bypass bit is 0 by default
     sb.mixer.fm[0]=
     sb.mixer.fm[1]=
     sb.mixer.cda[0]=
@@ -2671,7 +2723,7 @@ void updateSoundBlasterFilter(Bitu rate) {
     }
     else if (sb.type == SBT_PRO1 || sb.type == SBT_PRO2) { // Sound Blaster Pro (DSP 3.x). Tested against real hardware (CT1600) by Jonathan C.
         sb.chan->SetSlewFreq(23000 * sb.chan->freq_d_orig);
-        if (sb.mixer.filtered/*setting the bit means to bypass the lowpass filter*/)
+        if (sb.mixer.filter_bypass)
             sb.chan->SetLowpassFreq(23000); // max sample rate 46000Hz. slew rate filter does the rest of the filtering for us.
         else
             sb.chan->SetLowpassFreq(3800); // NOT documented by Creative, guess based on listening tests with a CT1600, and documented Input filter freqs
@@ -2774,7 +2826,7 @@ static void CTMIXER_Write(uint8_t val) {
             sb.mixer.stereo=(val & 0x2) > 0;
 
         sb.mixer.sbpro_stereo=(val & 0x2) > 0;
-        sb.mixer.filtered=(val & 0x20) > 0;
+        sb.mixer.filter_bypass=(val & 0x20) > 0; /* filter is ON by default, set the bit to turn OFF the filter */
         DSP_ChangeStereo(sb.mixer.stereo);
         updateSoundBlasterFilter(sb.freq);
 
@@ -2997,7 +3049,7 @@ static uint8_t CTMIXER_Read(void) {
         if (sb.type==SBT_2) return (sb.mixer.dac[0]>>2);
         else return ((sb.mixer.mic >> 2) & (sb.type==SBT_16 ? 7:6));
     case 0x0e:      /* Output/Stereo Select */
-        return 0x11|(sb.mixer.stereo ? 0x02 : 0x00)|(sb.mixer.filtered ? 0x20 : 0x00);
+        return 0x11|(sb.mixer.stereo ? 0x02 : 0x00)|(sb.mixer.filter_bypass ? 0x20 : 0x00);
     case 0x14:      /* Audio 1 Play Volume (ESS 688) */
         if (sb.ess_type != ESS_NONE) return ((sb.mixer.dac[0] << 3) & 0xF0) + (sb.mixer.dac[1] >> 1);
         break;
@@ -3059,6 +3111,32 @@ static uint8_t CTMIXER_Read(void) {
         break;
     case 0x3e:      /* Line Volume (ESS 688) */
         if (sb.ess_type != ESS_NONE) return ((sb.mixer.lin[0] << 3) & 0xF0) + (sb.mixer.lin[1] >> 1);
+        break;
+    case 0x40:      /* ESS identification value (ES1488 and later) */
+        if (sb.ess_type != ESS_NONE) {
+            switch (sb.ess_type) {
+            case ESS_688:
+                ret=0xa;
+                break;
+            case ESS_1688:
+                ret=sb.mixer.ess_id_str[sb.mixer.ess_id_str_pos];
+                sb.mixer.ess_id_str_pos++;
+                if (sb.mixer.ess_id_str_pos >= 4) {
+                    sb.mixer.ess_id_str_pos = 0;
+                }
+                break;
+            default:
+                ret=0xa;
+                LOG(LOG_SB,LOG_WARN)("MIXER:FIXME:ESS identification function (0x%X) for selected card is not implemented",sb.mixer.index);
+            }
+        } else {
+            if (sb.type == SBT_16) {
+                ret=sb.mixer.unhandled[sb.mixer.index];
+            } else {
+                ret=0xa;
+            }
+            LOG(LOG_SB,LOG_WARN)("MIXER:Read from unhandled index %X",sb.mixer.index);
+        }
         break;
     case 0x80:      /* IRQ Select */
         ret=0;
@@ -3147,8 +3225,10 @@ static Bitu read_sb(Bitu port,Bitu /*iolen*/) {
             PIC_DeActivateIRQ(sb.hw.irq);
         }
 
-        if (sb.mode == MODE_DMA_REQUIRE_IRQ_ACK)
+        if (sb.mode == MODE_DMA_REQUIRE_IRQ_ACK) {
+            sb.chan->FillUp();
             sb.mode = MODE_DMA;
+        }
 
         extern const char* RunningProgram; // Wengier: Hack for Desert Strike & Jungle Strike
         if (!IS_PC98_ARCH && port>0x220 && port%0x10==0xE && !sb.dsp.out.used && (!strcmp(RunningProgram, "DESERT") || !strcmp(RunningProgram, "JUNGLE"))) {
@@ -3166,8 +3246,10 @@ static Bitu read_sb(Bitu port,Bitu /*iolen*/) {
                 PIC_DeActivateIRQ(sb.hw.irq);
             }
 
-            if (sb.mode == MODE_DMA_REQUIRE_IRQ_ACK)
+            if (sb.mode == MODE_DMA_REQUIRE_IRQ_ACK) {
+                sb.chan->FillUp();
                 sb.mode = MODE_DMA;
+            }
         }
         break;
     case DSP_WRITE_STATUS:
@@ -3180,7 +3262,7 @@ static Bitu read_sb(Bitu port,Bitu /*iolen*/) {
             /* NTS: DSP "busy cycle" is independent of whether the DSP is actually
              *      busy (executing a command) or highspeed mode. On SB16 hardware,
              *      writing a DSP command during the busy cycle means that the command
-             *      is remembered, but not acted on until the DSP leaves it's busy
+             *      is remembered, but not acted on until the DSP leaves its busy
              *      cycle. */
             sb.busy_cycle_io_hack++; /* NTS: busy cycle I/O timing hack! */
             if (DSP_busy_cycle())
@@ -3234,6 +3316,9 @@ static void write_sb(Bitu port,Bitu val,Bitu /*iolen*/) {
         break;
     case MIXER_INDEX:
         sb.mixer.index=val8;
+        if (sb.mixer.index == 0x40 && sb.ess_type != ESS_NONE) {
+            sb.mixer.ess_id_str_pos = 0;
+        }
         break;
     case MIXER_DATA:
         CTMIXER_Write(val8);
@@ -3474,10 +3559,10 @@ class ViBRA_PnP : public ISAPnPDevice {
 
             end_write_res();        // END
         }
-        void select_logical_device(Bitu val) {
+        void select_logical_device(Bitu val) override {
             logical_device = val;
         }
-        uint8_t read(Bitu addr) {
+        uint8_t read(Bitu addr) override {
             uint8_t ret = 0xFF;
             if (logical_device == 0) {
                 switch (addr) {
@@ -3513,7 +3598,7 @@ class ViBRA_PnP : public ISAPnPDevice {
 
             return ret;
         }
-        void write(Bitu addr,Bitu val) {
+        void write(Bitu addr,Bitu val) override {
             if (logical_device == 0) {
                 switch (addr) {
                     case 0x30:  /* activate range */
@@ -3619,10 +3704,15 @@ private:
         sb.ess_type = ESS_NONE;
         sb.reveal_sc_type = RSC_NONE;
         sb.ess_extended_mode = false;
+        sb.subtype = SBST_NONE;
         const char * sbtype=config->Get_string("sbtype");
         if (control->opt_silent) type = SBT_NONE;
-        else if (!strcasecmp(sbtype,"sb1")) type=SBT_1;
-        else if (!strcasecmp(sbtype,"sb2")) type=SBT_2;
+        else if (!strcasecmp(sbtype,"sb1.0")) { type=SBT_1; sb.subtype=SBST_100; }
+        else if (!strcasecmp(sbtype,"sb1.5")) { type=SBT_1; sb.subtype=SBST_105; }
+        else if (!strcasecmp(sbtype,"sb1")) { type=SBT_1; sb.subtype=SBST_105; } /* DOSBox SVN compat same as sb1.5 */
+        else if (!strcasecmp(sbtype,"sb2.0")) { type=SBT_2; sb.subtype=SBST_200; }
+        else if (!strcasecmp(sbtype,"sb2.01")) { type=SBT_2; sb.subtype=SBST_201; }
+        else if (!strcasecmp(sbtype,"sb2")) { type=SBT_2; sb.subtype=SBST_201; } /* DOSBox SVN compat same as sb2.01 */
         else if (!strcasecmp(sbtype,"sbpro1")) type=SBT_PRO1;
         else if (!strcasecmp(sbtype,"sbpro2")) type=SBT_PRO2;
         else if (!strcasecmp(sbtype,"sb16vibra")) type=SBT_16;
@@ -3641,6 +3731,14 @@ private:
             LOG(LOG_SB,LOG_DEBUG)("Reveal SC400 emulation enabled.");
             LOG(LOG_SB,LOG_WARN)("Reveal SC400 emulation is EXPERIMENTAL at this time and should not yet be used for normal gaming.");
             LOG(LOG_SB,LOG_WARN)("Additional WARNING: This code only emulates the Sound Blaster portion of the card. Attempting to use the Windows Sound System part of the card (i.e. the Voyetra/SC400 Windows drivers) will not work!");
+        }
+        else if (!strcasecmp(sbtype,"ess1688")) {
+            type=SBT_PRO2;
+            sb.ess_type=ESS_1688;
+            sb.mixer.ess_id_str[0] = 0x16;
+            sb.mixer.ess_id_str[1] = 0x88;
+            LOG(LOG_SB,LOG_DEBUG)("ESS ES1688 emulation enabled.");
+            LOG(LOG_SB,LOG_WARN)("ESS ES1688 emulation is EXPERIMENTAL at this time and should not yet be used for normal gaming.");
         }
         else type=SBT_16;
 
@@ -3666,21 +3764,20 @@ private:
         /* OPL/CMS Init */
         const char * omode=config->Get_string("oplmode");
         if (!strcasecmp(omode,"none")) opl_mode=OPL_none;
-        else if (!strcasecmp(omode,"cms")) opl_mode=OPL_cms;
+        else if (!strcasecmp(omode,"cms")); // Skip for backward compatibility with existing configurations
         else if (!strcasecmp(omode,"opl2")) opl_mode=OPL_opl2;
         else if (!strcasecmp(omode,"dualopl2")) opl_mode=OPL_dualopl2;
         else if (!strcasecmp(omode,"opl3")) opl_mode=OPL_opl3;
         else if (!strcasecmp(omode,"opl3gold")) opl_mode=OPL_opl3gold;
         else if (!strcasecmp(omode,"hardware")) opl_mode=OPL_hardware;
         else if (!strcasecmp(omode,"hardwaregb")) opl_mode=OPL_hardwareCMS;
+        else if (!strcasecmp(omode,"esfm")) opl_mode=OPL_esfm;
         /* Else assume auto */
         else {
             switch (type) {
             case SBT_NONE:
-                opl_mode=OPL_none;
-                break;
             case SBT_GB:
-                opl_mode=OPL_cms;
+                opl_mode=OPL_none;
                 break;
             case SBT_1:
             case SBT_2:
@@ -3691,7 +3788,11 @@ private:
                 break;
             case SBT_PRO2: // NTS: ESS 688 cards also had an OPL3 (http://www.dosdays.co.uk/topics/Manufacturers/ess.php)
             case SBT_16:
-                opl_mode=OPL_opl3;
+                if (sb.ess_type != ESS_NONE && sb.ess_type != ESS_688) {
+                    opl_mode=OPL_esfm;
+                } else {
+                    opl_mode=OPL_opl3;
+                }
                 break;
             }
         }
@@ -3722,6 +3823,11 @@ public:
         Section_prop * section=static_cast<Section_prop *>(configuration);
 
         sb.hw.base=(unsigned int)section->Get_hex("sbbase");
+
+        if (sb.ess_type != ESS_NONE && sb.ess_type != ESS_688) {
+            sb.mixer.ess_id_str[2] = (sb.hw.base >> 8) & 0xff;
+            sb.mixer.ess_id_str[3] = sb.hw.base & 0xff;
+        }
 
         if (IS_PC98_ARCH) {
             if (sb.hw.base >= 0x220 && sb.hw.base <= 0x2E0) /* translate IBM PC to PC-98 (220h -> D2h) */
@@ -3766,7 +3872,7 @@ public:
          *                   trick of reading port 22Ch to wait for bit 7 to clear (which is normal), then
          *                   using the value it read (left over from AL) as the byte to sum it's audio output
          *                   to before sending out to the DAC. This is why, if the write status port returns
-         *                   a different value like 0x2A, the audio crackes with saturation errors.
+         *                   a different value like 0x2A, the audio crackles with saturation errors.
          *
          *                   Overload's Sound Blaster output code:
          *
@@ -3867,20 +3973,13 @@ public:
             if (!IS_PC98_ARCH)
                 WriteHandler[0].Install(0x388,adlib_gusforward,IO_MB);
             break;
-        case OPL_cms:
-            assert(!IS_PC98_ARCH);
-            WriteHandler[0].Install(0x388,adlib_gusforward,IO_MB);
-            CMS_Init(section);
-            break;
         case OPL_opl2:
-            assert(!IS_PC98_ARCH);
-            CMS_Init(section);
-            // fall-through
         case OPL_dualopl2:
             assert(!IS_PC98_ARCH);
             // fall-through
         case OPL_opl3:
         case OPL_opl3gold:
+        case OPL_esfm:
             OPL_Init(section,oplmode);
             break;
         case OPL_hardwareCMS:
@@ -3899,6 +3998,48 @@ public:
 #endif
             break;
         }
+
+        // Backward compatibility with existing configurations
+        if(!strcmp(section->Get_string("oplmode"),"cms")) {
+            LOG(LOG_SB, LOG_WARN)("The 'cms' setting for 'oplmode' is deprecated; use 'cms = on' instead.");
+            sb.cms = true;
+        }
+        else {
+            const char *cms_str = section->Get_string("cms");
+            if(!strcmp(cms_str,"on")) {
+                sb.cms = true;
+            }
+            else if(!strcmp(cms_str,"auto")) {
+                sb.cms = (sb.type == SBT_1 || sb.type == SBT_GB);
+            }
+            else
+                sb.cms = false;
+        }
+
+        switch(sb.type) {
+        case SBT_1: // CMS is optional for Sound Blaster 1 and 2
+        case SBT_2:;
+        case SBT_GB:
+            if(!sb.cms) {
+                LOG(LOG_SB, LOG_WARN)("'cms' setting is 'off', but is forced to 'auto' on the Game Blaster.");
+                auto* sect_updater = static_cast<Section_prop*>(control->GetSection("sblaster"));
+                sect_updater->Get_prop("cms")->SetValue("auto");
+            }
+            sb.cms = true; // Game Blaster is CMS
+            break;
+        default:
+            if(sb.cms) {
+                LOG(LOG_SB, LOG_WARN)("'cms' setting 'on' not supported on this card, forcing 'auto'.");
+                auto* sect_updater = static_cast<Section_prop*>(control->GetSection("sblaster"));
+                sect_updater->Get_prop("cms")->SetValue("auto");
+            }
+            sb.cms = false;
+        }
+
+        if(sb.cms && !IS_PC98_ARCH) {
+            CMS_Init(section);
+        }
+
         if (sb.type==SBT_NONE || sb.type==SBT_GB) return;
 
         sb.chan=MixerChan.Install(&SBLASTER_CallBack,22050,"SB");
@@ -3914,6 +4055,8 @@ public:
             ReadHandler[i].Install(sb.hw.base+(IS_PC98_ARCH ? ((i+0x20u) << 8u) : i),read_sb,IO_MB);
             WriteHandler[i].Install(sb.hw.base+(IS_PC98_ARCH ? ((i+0x20u) << 8u) : i),write_sb,IO_MB);
         }
+
+        // TODO: read/write handler for ESS AudioDrive ES1688 (and later) MPU-401 ports (3x0h/3x1h; prevents Windows drivers from working with default settings if missing)
 
         // NTS: Unknown/undefined registers appear to return the register index you requested rather than the actual contents,
         //      according to real SB16 CSP/ASP hardware (chip version id 0x10).
@@ -4070,7 +4213,7 @@ public:
         if (sb.hw.irq != 0 && sb.hw.irq != 0xFF) {
             s = section->Get_string("irq hack");
             if (!s.empty() && s != "none") {
-                LOG(LOG_SB,LOG_NORMAL)("Sound Blaster emulation: Assigning IRQ hack '%s' as instruced",s.c_str());
+                LOG(LOG_SB,LOG_NORMAL)("Sound Blaster emulation: Assigning IRQ hack '%s' as instructed",s.c_str());
                 PIC_Set_IRQ_hack((int)sb.hw.irq,PIC_parse_IRQ_hack_string(s.c_str()));
             }
         }
@@ -4162,19 +4305,18 @@ ASP>
         switch (oplmode) {
         case OPL_none:
             break;
-        case OPL_cms:
-            CMS_ShutDown(m_configuration);
-            break;
         case OPL_opl2:
-            CMS_ShutDown(m_configuration);
-            // fall-through
         case OPL_dualopl2:
         case OPL_opl3:
         case OPL_opl3gold:
+        case OPL_esfm:
             OPL_ShutDown(m_configuration);
             break;
         default:
             break;
+        }
+        if(sb.cms) {
+            CMS_ShutDown(m_configuration);
         }
         if (sb.type==SBT_NONE || sb.type==SBT_GB) return;
         DSP_Reset(); // Stop everything
@@ -4193,7 +4335,7 @@ void SBLASTER_ShutDown(Section* /*sec*/) {
         test = NULL;
     }
 #if HAS_HARDOPL
-    HWOPL_Cleanup();
+    HARDOPL_Cleanup();
 #endif
 }
 
@@ -4206,7 +4348,7 @@ void SBLASTER_OnReset(Section *sec) {
         test = NULL;
     }
 #if HAS_HARDOPL
-    HWOPL_Cleanup();
+    HARDOPL_Cleanup();
 #endif
 
     if (test == NULL) {

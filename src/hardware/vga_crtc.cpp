@@ -73,7 +73,7 @@ Bitu vga_read_p3d4(Bitu port,Bitu iolen) {
     (void)port;//UNUSED
     (void)iolen;//UNUSED
 
-    /* NOTES: Paradise/Westdern Digital SVGA decodes only bits [5:0] inclusive and repeat every 0x40 */
+    /* NOTES: Paradise/Western Digital SVGA decodes only bits [5:0] inclusive and repeat every 0x40 */
 
 	return crtc(index);
 }
@@ -366,14 +366,9 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 		if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
 		crtc(mode_control)=(uint8_t)val;
 		vga.tandy.line_mask = (~val) & 3u;
-
-		if ( vga.tandy.line_mask ) {
-			vga.tandy.line_shift = 13u;
-			vga.tandy.addr_mask = (1u << 13u) - 1u;
-		} else {
-			vga.tandy.addr_mask = ~0u;
-			vga.tandy.line_shift = 0;
-		}
+		vga.tandy.line_shift = vga.tandy.line_mask ? 13u : 0u;
+		vga.tandy.addr_mask = ~0u;
+		vga.tandy.addr_mask &= ~(vga.tandy.line_mask << 13u);
 
 		VGA_CheckAddrShift();
 		VGA_CheckScanLength();

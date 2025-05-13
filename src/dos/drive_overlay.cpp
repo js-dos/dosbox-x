@@ -317,13 +317,13 @@ bool Overlay_Drive::TestDir(const char * dir) {
 }
 
 
-class OverlayFile: public localFile {
+class OverlayFile: public LocalFile {
 public:
-	OverlayFile(const char* name, FILE * handle):localFile(name,handle){
+	OverlayFile(const char* name, FILE * handle):LocalFile(name,handle){
 		overlay_active = false;
 		if (logoverlay) LOG_MSG("constructing OverlayFile: %s",name);
 	}
-	bool Write(const uint8_t * data,uint16_t * size) {
+	bool Write(const uint8_t * data,uint16_t * size) override {
 		uint32_t f = flags&0xf;
 		if (!overlay_active && (f == OPEN_READWRITE || f == OPEN_WRITE)) {
 			if (logoverlay) LOG_MSG("write detected, switching file for %s",GetName());
@@ -339,7 +339,7 @@ public:
 			overlay_active = true;
 			
 		}
-		return localFile::Write(data,size);
+		return LocalFile::Write(data,size);
 	}
 	bool create_copy();
 //private:
@@ -470,8 +470,8 @@ bool OverlayFile::create_copy() {
 
 
 static OverlayFile* ccc(DOS_File* file) {
-	localFile* l = dynamic_cast<localFile*>(file);
-	if (!l) E_Exit("overlay input file is not a localFile");
+	LocalFile* l = dynamic_cast<LocalFile*>(file);
+	if (!l) E_Exit("overlay input file is not a LocalFile");
 	//Create an overlayFile
 	OverlayFile* ret = new OverlayFile(l->GetName(),l->fhandle);
 	ret->flags = l->flags;
@@ -590,7 +590,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,const char * name,uint32_t flags)
 
 	//Flush the buffer of handles for the same file. (Betrayal in Antara)
 	uint8_t i,drive = DOS_DRIVES;
-	localFile *lfp;
+	LocalFile *lfp;
 	for (i=0;i<DOS_DRIVES;i++) {
 		if (Drives[i]==this) {
 			drive=i;
@@ -600,7 +600,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,const char * name,uint32_t flags)
 	if (!dos_kernel_disabled)
 	for (i=0;i<DOS_FILES;i++) {
 		if (Files[i] && Files[i]->IsOpen() && Files[i]->GetDrive()==drive && Files[i]->IsName(name)) {
-			lfp=dynamic_cast<localFile*>(Files[i]);
+			lfp=dynamic_cast<LocalFile*>(Files[i]);
 			if (lfp) lfp->Flush();
 		}
 	}
@@ -639,7 +639,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,const char * name,uint32_t flags)
 	bool fileopened = false;
 	if (hand) {
 		if (logoverlay) LOG_MSG("overlay file opened %s",newname);
-		*file=new localFile(name,hand);
+		*file=new LocalFile(name,hand);
 		(*file)->flags=flags;
 		fileopened = true;
 	} else {
@@ -685,7 +685,7 @@ bool Overlay_Drive::FileCreate(DOS_File * * file,const char * name,uint16_t /*at
 		if (logoverlay) LOG_MSG("File creation in overlay system failed %s",name);
 		return false;
 	}
-	*file = new localFile(name,f);
+	*file = new LocalFile(name,f);
 	(*file)->flags = OPEN_READWRITE;
 	OverlayFile* of = ccc(*file);
 	of->overlay_active = true;
@@ -722,7 +722,7 @@ bool Overlay_Drive::Sync_leading_dirs(const char* dos_filename){
 	if (!lastdir) return true; 
 	
 	const char* leaddir = dos_filename;
-	while ( (leaddir=strchr_dbcs((char *)leaddir,'\\')) != 0) {
+	while ((leaddir=strchr_dbcs((char *)leaddir,'\\'))) {
 		char dirname[CROSS_LEN] = {0};
 		strncpy(dirname,dos_filename,leaddir-dos_filename);
 
@@ -1129,7 +1129,7 @@ again:
 #else
     localtime
 #endif
-    (&stat_block.st_mtime))!=0){
+    (&stat_block.st_mtime))!=nullptr){
 		find_date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 		find_time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 	} else {
@@ -1499,7 +1499,7 @@ void Overlay_Drive::add_deleted_file(const char* name,bool create_on_disk) {
 		strcat(tname,temp_name);
 	if (!is_deleted_file(tname)) {
 		deleted_files_in_base.emplace_back(tname);
-		if (create_on_disk) add_special_file_to_disk(tname, "DEL");
+		if (create_on_disk) add_special_file_to_disk(name, "DEL");
 	}
 }
 
@@ -2080,7 +2080,7 @@ bool Overlay_Drive::FileStat(const char* name, FileStat_Block * const stat_block
 #else
     localtime
 #endif
-    (&temp_stat.st_mtime))!=0) {
+    (&temp_stat.st_mtime))!=nullptr) {
 		stat_block->time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 		stat_block->date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 	} else {

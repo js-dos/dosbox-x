@@ -124,10 +124,10 @@ static const char *def_menu__toplevel[] =
     "VideoMenu",
     "SoundMenu",
     "DOSMenu",
+    "DriveMenu",
 #if !defined(C_EMSCRIPTEN)
     "CaptureMenu",
 #endif
-    "DriveMenu",
 #if C_DEBUG
     "DebugMenu",
 #endif
@@ -263,7 +263,7 @@ static const char *def_menu_cpu_speed[] =
     "cpu586-120",
     "cpu586-133",
     "cpu586-166",
-    "cpuak6-166",
+    "cpu586-200",
     "cpuak6-200",
     "cpuak6-300",
     "cpuath-600",
@@ -349,6 +349,15 @@ static const char *def_menu_video_frameskip[] =
     NULL
 };
 
+/* video prevent capture menu ("VideoPreventCaptureMenu") */
+static const char *def_menu_video_preventcapture[] =
+{
+    "prevcap_none",
+    "prevcap_blank",
+    "prevcap_invisible",
+    NULL
+};
+
 /* video scaler menu ("VideoRatioMenu") */
 static const char *def_menu_video_ratio[] =
 {
@@ -392,6 +401,8 @@ static const char *def_menu_video_output[] =
     "doublescan",
 #if !defined(C_SDL2)
     "doublebuf",
+#else
+    "modeswitch",
 #endif
     NULL
 };
@@ -511,8 +522,14 @@ static const char *def_menu_video_pc98[] =
 /* video menu ("VideoMenu") */
 static const char *def_menu_video[] =
 {
+#if defined(WIN32) || defined(MACOSX)
+    "VideoPreventCaptureMenu",
+#endif
     "VideoRatioMenu",
     "mapper_aspratio",
+#if defined(C_SDL2)
+    "center_window",
+#endif
 #if !defined(C_SDL2) && defined(MACOSX)
     "highdpienable",
 #endif
@@ -694,9 +711,9 @@ static const char *def_menu_capture[] =
     "mapper_capnetrf",
     "--",
 #endif
-    "saveoptionmenu",
     "mapper_savestate",
     "mapper_loadstate",
+    "saveoptionmenu",
     "saveslotmenu",
     "autosavecfg",
     "browsesavefile",
@@ -845,7 +862,7 @@ static const char* def_menu_help_debug[] =
 static const char *def_menu_help[] =
 {
     "help_intro",
-    "HelpCommandMenu",
+    "help_about",
 #if !defined(HX_DOS)
     "--",
     "help_homepage",
@@ -865,7 +882,7 @@ static const char *def_menu_help[] =
 #if C_PCAP || C_PRINTER && defined(WIN32) || !C_DEBUG && !defined(MACOSX) && !defined(LINUX) && !defined(HX_DOS) && !defined(C_EMSCRIPTEN)
     "--",
 #endif
-    "help_about",
+    "HelpCommandMenu",
     NULL
 };
 
@@ -891,7 +908,7 @@ DOSBoxMenu::displaylist::displaylist() {
 
 DOSBoxMenu::displaylist::~displaylist() {
 }
-        
+
 bool DOSBoxMenu::item_exists(const std::string &name) {
     const auto i = name_map.find(name);
 
@@ -1235,7 +1252,7 @@ bool DOSBoxMenu::nsMenuInit(void) {
             item.nsAppendMenu(nsMenu);
         }
 
-        /* release our handle on the nsMenus. Mac OS X will keep them alive with it's
+        /* release our handle on the nsMenus. Mac OS X will keep them alive with its
            reference until the menu is destroyed at which point all items and submenus
            will be automatically destroyed */
         for (auto &id : master_list) {
@@ -1523,7 +1540,7 @@ void ConstructSubMenu(DOSBoxMenu::item_handle_t item_id, const char * const * li
         const char *ref = list[i];
 
         /* NTS: This code calls mainMenu.get_item(item_id) every iteration.
-         *      
+         *
          *      This seemingly inefficient method of populating the display
          *      list is REQUIRED because DOSBoxMenu::item& is a reference
          *      to a std::vector, and the reference becomes invalid when
@@ -1545,7 +1562,7 @@ void ConstructSubMenu(DOSBoxMenu::item_handle_t item_id, const char * const * li
                 mainMenu.get_item(item_id).display_list, separator_handle);
         }
         else if (!strcmp(ref,"||")) {
-            /* dito */
+            /* ditto */
             DOSBoxMenu::item_handle_t separator_handle = separator_get(DOSBoxMenu::vseparator_type_id);
             mainMenu.displaylist_append(
                 mainMenu.get_item(item_id).display_list, separator_handle);
@@ -1599,6 +1616,11 @@ void ConstructMenu(void) {
 
     /* video ratio menu */
     ConstructSubMenu(mainMenu.get_item("VideoRatioMenu").get_master_id(), def_menu_video_ratio);
+
+#if defined(WIN32) || defined(MACOSX)
+    /* video prevent capture menu */
+    ConstructSubMenu(mainMenu.get_item("VideoPreventCaptureMenu").get_master_id(), def_menu_video_preventcapture);
+#endif
 
     /* video frameskip menu */
     ConstructSubMenu(mainMenu.get_item("VideoFrameskipMenu").get_master_id(), def_menu_video_frameskip);
@@ -1805,7 +1827,7 @@ std::string MSCDEX_Output(int num) {
     case 4: return MSCDEX_MSG + MSCDEX_MSG_Failure + "Too many CDRom-drives (max: 5). MSCDEX Installation failed";
     case 5: return MSCDEX_MSG + "Mounted subdirectory: limited support.";
     case 6: return MSCDEX_MSG + MSCDEX_MSG_Failure + "Unknown error";
-    default: return 0;
+    default: return {};
     }
 }
 
@@ -2222,7 +2244,7 @@ void BrowseFolder( char drive , std::string drive_type ) {
 void mem_conf(std::string memtype, int option) {
     std::string tmp;
     Section* sec = control->GetSection("dos");
-    Section_prop * section=static_cast<Section_prop *>(sec); 
+    Section_prop * section=static_cast<Section_prop *>(sec);
     if (!option) {
         tmp = section->Get_bool(memtype) ? "false" : "true";
     } else {
@@ -2258,7 +2280,7 @@ umount:
         switch (DriveManager::UnmountDrive(i_drive-'A')) {
         case 0:
             Drives[i_drive-'A'] = 0;
-            if(i_drive-'A' == DOS_GetDefaultDrive()) 
+            if(i_drive-'A' == DOS_GetDefaultDrive())
                 DOS_SetDrive(toupper('Z') - 'A');
             LOG_MSG("GUI:Drive %c has successfully been removed.",i_drive); break;
         case 1:

@@ -32,6 +32,7 @@
 #include "mem.h"
 #include "mapper.h"
 #include "pic.h"
+#include "vga.h"
 #include "mixer.h"
 #include "render.h"
 #include "cross.h"
@@ -525,6 +526,11 @@ void ffmpeg_reopen_video(double fps,const int bpp) {
 }
 #endif
 
+static char filtercapname(char c) {
+	if (c < 32 || c > 126 || c == '.' || c == '<' || c == '>' || c == '[' || c == ']' || c == '\\' || c == '/' || c == ':' || c == '\"' || c == '\'' || c == '?' || c == '*') return '_';
+	return c;
+}
+
 std::string GetCaptureFilePath(const char * type,const char * ext) {
 	if(capturedir.empty()) {
 		LOG_MSG("Please specify a capture directory");
@@ -542,11 +548,12 @@ std::string GetCaptureFilePath(const char * type,const char * ext) {
 		dir=open_directory(capturedir.c_str());
 		if(!dir) {
 			LOG_MSG("Can't open dir %s for capturing %s",capturedir.c_str(),type);
-			return 0;
+			return {};
 		}
 	}
 	strcpy(file_start,RunningProgram);
 	lowcase(file_start);
+	for (char *s=(char*)file_start;*s;s++) *s = filtercapname(*s);
 	strcat(file_start,"_");
 	bool is_directory;
     char tempname[CROSS_LEN], sname[15];
@@ -573,7 +580,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
     if (!strcmp(type, "Parallel Port Stream")) pathprt = "";
 	if(capturedir.empty()) {
 		LOG_MSG("Please specify a capture directory");
-		return 0;
+		return nullptr;
 	}
 
 	Bitu last=0;
@@ -587,11 +594,12 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 		dir=open_directory(capturedir.c_str());
 		if(!dir) {
 			LOG_MSG("Can't open dir %s for capturing %s",capturedir.c_str(),type);
-			return 0;
+			return nullptr;
 		}
 	}
 	strcpy(file_start,RunningProgram);
 	lowcase(file_start);
+	for (char *s=(char*)file_start;*s;s++) *s = filtercapname(*s);
 	strcat(file_start,"_");
 	bool is_directory;
     char tempname[CROSS_LEN], sname[15];
@@ -793,6 +801,13 @@ void CAPTURE_VideoStop() {
 #endif
 }
 
+#ifdef PNG_pHYs_SUPPORTED
+static inline unsigned long math_gcd_png_uint_32(const png_uint_32 a,const png_uint_32 b) {
+        if (b) return math_gcd_png_uint_32(b,a%b);
+        return a;
+}
+#endif
+
 void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, uint8_t * data, uint8_t * pal) {
 #if (C_SSHOT)
 	Bitu i;
@@ -837,7 +852,17 @@ void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags,
 		png_set_compression_window_bits(png_ptr, 15);
 		png_set_compression_method(png_ptr, 8);
 		png_set_compression_buffer_size(png_ptr, 8192);
-	
+
+#ifdef PNG_pHYs_SUPPORTED
+		if (width >= 8 && height >= 8) {
+			png_uint_32 x=0,y=0,g;
+			x = (png_uint_32)(4 * height);
+			y = (png_uint_32)(3 * width);
+			g = math_gcd_png_uint_32(x,y);
+			png_set_pHYs(png_ptr, info_ptr, x/g, y/g, PNG_RESOLUTION_UNKNOWN);
+		}
+#endif
+
 		if (bpp==8) {
 			png_set_IHDR(png_ptr, info_ptr, (png_uint_32)width, (png_uint_32)height,
 				8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE,
@@ -944,7 +969,7 @@ void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags,
 			png_write_row(png_ptr, (png_bytep)rowPointer);
 		}
 		/* Finish writing */
-		png_write_end(png_ptr, 0);
+		png_write_end(png_ptr, nullptr);
 		/*Destroy PNG structs*/
 		png_destroy_write_struct(&png_ptr, &info_ptr);
 		/*close file*/
@@ -2032,7 +2057,7 @@ void CAPTURE_MidiEvent(bool pressed) {
 		fwrite(&size,1,4,capture.midi.handle);
 		fclose(capture.midi.handle);
 		if (show_recorded_filename && pathmid.size()) systemmessagebox("Recording completed",("Saved MIDI output to the file:\n\n"+pathmid).c_str(),"ok", "info", 1);
-		capture.midi.handle=0;
+		capture.midi.handle = nullptr;
 		CaptureState &= ~((unsigned int)CAPTURE_MIDI);
 		mainMenu.get_item("mapper_caprawmidi").check(false).refresh_item(mainMenu);
 		return;
@@ -2043,7 +2068,7 @@ void CAPTURE_MidiEvent(bool pressed) {
 		LOG_MSG("Preparing for raw midi capture, will start with first data.");
 		capture.midi.used=0;
 		capture.midi.done=0;
-		capture.midi.handle=0;
+		capture.midi.handle = nullptr;
 	} else {
 		LOG_MSG("Stopped capturing raw midi before any data arrived.");
 	}
@@ -2243,7 +2268,7 @@ void HARDWARE_Destroy(Section * sec) {
 void HARDWARE_Init() {
 	LOG(LOG_MISC,LOG_DEBUG)("HARDWARE_Init: initializing");
 
-	/* TODO: Hardware init. We moved capture init to it's own function. */
+	/* TODO: Hardware init. We moved capture init to its own function. */
 	AddExitFunction(AddExitFunctionFuncPair(HARDWARE_Destroy),true);
 }
 

@@ -38,15 +38,15 @@ public:
 	CNullModem(Bitu id, CommandLine* cmd);
 	~CNullModem();
 
-	void updatePortConfig(uint16_t divider, uint8_t lcr);
-	void updateMSR();
-	void transmitByte(uint8_t val, bool first);
-	void setBreak(bool value);
+	void updatePortConfig(uint16_t divider, uint8_t lcr) override;
+	void updateMSR() override;
+	void transmitByte(uint8_t val, bool first) override;
+	void setBreak(bool value) override;
 	
-	void setRTSDTR(bool rts, bool dtr);
-	void setRTS(bool val);
-	void setDTR(bool val);
-	void handleUpperEvent(uint16_t type);
+	void setRTSDTR(bool rts, bool dtr) override;
+	void setRTS(bool val) override;
+	void setDTR(bool val) override;
+	void handleUpperEvent(uint16_t type) override;
 
 	SocketTypesE socketType = SOCKET_TYPE_TCP;
 
@@ -85,7 +85,7 @@ private:
 	Bitu rx_retry;		// counter of retries
 
 	Bitu rx_retry_max;	// how many POLL_EVENTS to wait before causing
-						// a overrun error.
+						// an overrun error.
 
 	Bitu tx_gather;		// how long to gather tx data before
 						// sending all of them [milliseconds]

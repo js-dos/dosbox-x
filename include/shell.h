@@ -45,11 +45,13 @@ extern DOS_Shell * first_shell;
 
 const std::map<int, std::string> langcp_map {
 	{437, "en_US"},
-	{850, "de_DE"},
-	{857, "tr_TR"},
+	//{850, "de_DE"},
+    {852, "hu_HU"},
+    {857, "tr_TR"},
 	{858, "es_ES"},
 	{859, "fr_FR"},
 	{860, "pt_BR"},
+	{866, "ru_RU"},
 	{932, "ja_JP"},
 	{936, "zh_CN"},
 	{949, "ko_KR"},
@@ -111,7 +113,7 @@ public:
 	void Prepare(void);
     /*! \brief      Program entry point, when the command is run
      */
-	void Run(void);
+	void Run(void) override;
 
     /*! \brief      Alternate execution if /C switch is given
      */
@@ -162,7 +164,7 @@ public:
      */
 	void CMD_HELP(char * args);
 
-    /*! \brief      Exteneded Ctrl+C switch
+    /*! \brief      Extended Ctrl+C switch
      */
 	void CMD_BREAK(char * args);
 
@@ -373,7 +375,7 @@ struct SHELL_Cmd {
 
 /* Object to manage lines in the autoexec.bat The lines get removed from
  * the file if the object gets destroyed. The environment is updated
- * as well if the line set a a variable */
+ * as well if the line set a variable */
 class AutoexecObject{
 private:
 	bool installed = false;

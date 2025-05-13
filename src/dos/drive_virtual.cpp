@@ -179,7 +179,7 @@ char* VFILE_Generate_SFN(const char *name, unsigned int onpos) {
         if (!found) return sfn;
 		k++;
 	}
-	return 0;
+	return nullptr;
 }
 
 void VFILE_Shutdown(void) {
@@ -311,11 +311,11 @@ uint32_t VFILE_GetCPIData(const char *filename, std::vector<uint8_t> &cpibuf) {
 class Virtual_File : public DOS_File {
 public:
 	Virtual_File(uint8_t * in_data,uint32_t in_size);
-	bool Read(uint8_t * data,uint16_t * size);
-	bool Write(const uint8_t * data,uint16_t * size);
-	bool Seek(uint32_t * new_pos,uint32_t type);
-	bool Close();
-	uint16_t GetInformation(void);
+	bool Read(uint8_t * data,uint16_t * size) override;
+	bool Write(const uint8_t * data,uint16_t * size) override;
+	bool Seek(uint32_t * new_pos,uint32_t type) override;
+	bool Close() override;
+	uint16_t GetInformation(void) override;
 private:
 	uint32_t file_size;
     uint32_t file_pos = 0;
@@ -378,7 +378,7 @@ uint16_t Virtual_File::GetInformation(void) {
 
 Virtual_Drive::Virtual_Drive() {
 	strcpy(info,"Internal Virtual Drive");
-	for (int i=0; i<256; i++) {lfn_id[i] = 0;lfn_search[i] = 0;}
+	for (int i=0; i<256; i++) {lfn_id[i] = 0;lfn_search[i] = nullptr;}
     const Section_prop * section=static_cast<Section_prop *>(control->GetSection("dos"));
     hidefiles = section->Get_string("drive z hide files");
     if (parent_dir == NULL) parent_dir = new VFILE_Block;
@@ -570,7 +570,7 @@ bool Virtual_Drive::FindNext(DOS_DTA & dta) {
 		}
 	if (lfn_filefind_handle<LFN_FILEFIND_MAX) {
 		lfn_id[lfn_filefind_handle]=0;
-		lfn_search[lfn_filefind_handle]=0;
+		lfn_search[lfn_filefind_handle]=nullptr;
 	}
 	DOS_SetError(DOSERR_NO_MORE_FILES);
 	return false;

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2021  The DOSBox Team
+ *  Copyright (C) 2002-2024  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,31 +16,18 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include <cfenv> /* for std::feholdexcept */
 #include <math.h> /* for isinf, etc */
 #include "cpu/lazyflags.h"
 
-#ifdef __GNUC__
-# if defined(__MINGW32__) || (defined(MACOSX) && !defined(__arm64__))
-#  include "fpu_control_x86.h"
-# elif defined(ANDROID) || defined(__ANDROID__) || (defined(MACOSX) && defined(__arm64__)) || defined(EMSCRIPTEN) || defined(__powerpc__)
-/* ? */
-#  define _FPU_SETCW(x) /* dummy */
-# else
-#  include <fpu_control.h>
-# endif
-static inline void FPU_SyncCW(void) {
-    uint16_t tmp = fpu.cw | 0x80 | 0x3F; // HACK: Disable all FPU exceptions until DOSBox-X can catch and reflect FPU exceptions to the guest
-    _FPU_SETCW(tmp);
-}
-#else
-static inline void FPU_SyncCW(void) {
-    /* nothing */
-}
-#endif
-
 static void FPU_FINIT(void) {
+	fenv_t buf;
+
 	fpu.cw.init();
-    FPU_SyncCW();
+
+	// HACK: Disable all FPU exceptions until DOSBox-X can catch and reflect FPU exceptions to the guest
+	std::feholdexcept(&buf);
+
     fpu.sw.init();
 	fpu.tags[0] = TAG_Empty;
 	fpu.tags[1] = TAG_Empty;
@@ -173,7 +160,7 @@ static void FPU_FBLD(PhysPt addr,Bitu store_to) {
 	uint64_t base = 1;
 	for(Bitu i = 0;i < 9;i++){
 		in = mem_readb(addr + i);
-		val += ( (in&0xf) * base); //in&0xf shouldn't be higher then 9
+		val += ( (in&0xf) * base); //in&0xf shouldn't be higher than 9
 		base *= 10;
 		val += ((( in>>4)&0xf) * base);
 		base *= 10;
@@ -290,7 +277,8 @@ static void FPU_FBST(PhysPt addr) {
 #endif
 
 static void FPU_FADD(Bitu op1, Bitu op2){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	// HACK: Set the denormal flag according to whether the source or final result is a denormalized number.
 	//       This is vital if we don't want certain DOS programs to mis-detect our FPU emulation as an IIT clone chip when cputype == 286
 	bool was_not_normal = isdenormal(fpu.regs_80[op1].v);
@@ -324,7 +312,8 @@ static void FPU_FCOS(void){
 }
 
 static void FPU_FSQRT(void){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	fpu.regs_80[TOP].v = sqrtl(fpu.regs_80[TOP].v);
 	//flags and such :)
 	return;
@@ -343,35 +332,40 @@ static void FPU_FPTAN(void){
 	return;
 }
 static void FPU_FDIV(Bitu st, Bitu other){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	fpu.regs_80[st].v = fpu.regs_80[st].v/fpu.regs_80[other].v;
 	//flags and such :)
 	return;
 }
 
 static void FPU_FDIVR(Bitu st, Bitu other){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	fpu.regs_80[st].v = fpu.regs_80[other].v/fpu.regs_80[st].v;
 	// flags and such :)
 	return;
 }
 
 static void FPU_FMUL(Bitu st, Bitu other){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	fpu.regs_80[st].v *= fpu.regs_80[other].v;
 	//flags and such :)
 	return;
 }
 
 static void FPU_FSUB(Bitu st, Bitu other){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	fpu.regs_80[st].v = fpu.regs_80[st].v - fpu.regs_80[other].v;
 	//flags and such :)
 	return;
 }
 
 static void FPU_FSUBR(Bitu st, Bitu other){
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 	fpu.regs_80[st].v = fpu.regs_80[other].v - fpu.regs_80[st].v;
 	//flags and such :)
 	return;
@@ -562,7 +556,8 @@ static void FPU_FLDENV(PhysPt addr, bool op16){
 		tag    = static_cast<uint16_t>(mem_readd(addr+8));
 	}
 	FPU_SetTag(tag);
-    FPU_SyncCW();
+	fenv_t buf;
+	std::feholdexcept(&buf);
 }
 
 static void FPU_FSAVE(PhysPt addr, bool op16){

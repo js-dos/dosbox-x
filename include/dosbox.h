@@ -33,6 +33,14 @@
 #include "clockdomain.h"
 #include "config.h"
 
+#if defined(OS2) && defined(C_SDL2)
+#undef VERSION
+#endif
+
+#if defined(C_HAVE_LINUX_KVM) && (C_TARGETCPU == X86 || C_TARGETCPU == X86_64)
+# define C_HAVE_LINUX_KVM_X86
+#endif
+
 #if defined(C_ICONV)
 /* good */
 #elif defined(C_ICONV_WIN32)
@@ -183,8 +191,9 @@ extern bool				sse2_available;
 extern bool				avx2_available;
 #endif
 
-void					MSG_Add(const char*,const char*); //add messages to the internal languagefile
-const char*				MSG_Get(char const *);     //get messages from the internal languagefile
+void                    MSG_Add(const char*,const char*);      // Add messages to the internal languagefile
+const char*             MSG_Get(char const *);                 // Get messages from the internal languagefile
+std::string             formatString(const char* format, ...); // Generates a formatted string using a format specifier and variable arguments.
 
 void					DOSBOX_RunMachine();
 void					DOSBOX_SetLoop(LoopHandler * handler);
@@ -297,6 +306,18 @@ static inline constexpr bytecount_t _tebibytes(const bytecount_t x) {
     return x << bytecount_t(40u);
 }
 
+enum {
+	PREVCAP_NONE=0,
+	PREVCAP_BLANK,
+	PREVCAP_INVISIBLE
+};
+
+extern unsigned int preventcap;
+
+bool CheckPreventCap(void);
+void ApplyPreventCap(void);
+void ApplyPreventCapMenu(void);
+
 #endif /* DOSBOX_DOSBOX_H */
 
 #ifndef SAVE_STATE_H_INCLUDED
@@ -333,6 +354,7 @@ public:
     //initialization: register relevant components on program startup
     struct Component
     {
+        virtual ~Component() noexcept = default;
         virtual void getBytes(std::ostream& stream) = 0;
         virtual void setBytes(std::istream& stream) = 0;
     };
@@ -344,25 +366,10 @@ private:
     SaveState(const SaveState&);
     SaveState& operator=(const SaveState&);
 
-    class RawBytes
-    {
-    public:
-        RawBytes() {}
-        void set(const std::string& stream);
-        std::string get() const; //throw (Error)
-        void compress() const;   //throw (Error)
-        bool dataAvailable() const;
-    private:
-        bool dataExists = false; //determine whether set method (even with empty string) was called
-        mutable bool isCompressed = false; //design for logical not binary const
-        mutable std::string bytes; //
-    };
-
     struct CompData
     {
         CompData(Component& cmp) : comp(cmp) {}
         Component& comp;
-        std::vector<RawBytes> rawBytes = std::vector<RawBytes>(MAX_PAGE * SLOT_COUNT);
     };
 
     typedef std::map<std::string, CompData> CompEntry;
@@ -391,18 +398,18 @@ public:
     }
 
     template <class T>
-    void registerPOD(T& pod) //register POD for serializatioin
+    void registerPOD(T& pod) //register POD for serialization
     {
         podRef.push_back(POD(pod));
     }
 
 protected:
-    virtual void getBytes(std::ostream& stream)
+    void getBytes(std::ostream& stream) override
     {
         std::for_each(podRef.begin(), podRef.end(), std::bind1st(WriteGlobalPOD(), &stream));
     }
 
-    virtual void setBytes(std::istream& stream)
+    void setBytes(std::istream& stream) override
     {
         std::for_each(podRef.begin(), podRef.end(), std::bind1st(ReadGlobalPOD(), &stream));
     }

@@ -246,14 +246,14 @@ public:
 		}
 	}
 
-	virtual void config_write(uint8_t regnum,Bitu iolen,uint32_t value) {
+	void config_write(uint8_t regnum,Bitu iolen,uint32_t value) override {
 		if (iolen == 1) {
-            const unsigned char mask = config_writemask[regnum];
-            const unsigned char nmask = ~mask;
+			const unsigned char mask = config_writemask[regnum];
+			const unsigned char nmask = ~mask;
 
 			/* configuration write masks apply here as well */
 			config[regnum] =
-                ((unsigned char)value & mask) +
+				((unsigned char)value & mask) +
 				(config[regnum] & nmask);
 
 			switch (regnum) { /* FIXME: I hope I ported this right --J.C. */
@@ -280,7 +280,7 @@ public:
 			PCI_Device::config_write(regnum,iolen,value); /* which will break down I/O into 8-bit */
 		}
 	}
-	virtual uint32_t config_read(uint8_t regnum,Bitu iolen) {
+	uint32_t config_read(uint8_t regnum,Bitu iolen) override {
 		if (iolen == 1) {
 			switch (regnum) {
 				case 0x4c: /* FIXME: I hope I ported this right --J.C. */

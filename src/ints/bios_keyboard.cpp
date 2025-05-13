@@ -32,12 +32,14 @@
 #include "jfont.h"
 #include "render.h"
 
+extern bool kana_input;
+
 #if defined(_MSC_VER)
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 #endif
 
 /* SDL by default treats numlock and scrolllock different from all other keys.
- * In recent versions this can disabled by a environment variable which we set in sdlmain.cpp
+ * In recent versions this can disabled by an environment variable which we set in sdlmain.cpp
  * Define the following if this is the case */
 #if SDL_VERSION_ATLEAST(1, 2, 14)
 #define CAN_USE_LOCK 1
@@ -45,7 +47,9 @@
  * The proper way is in the mapper, but the repeating key is an unwanted side effect for lower versions of SDL */
 #endif
 
-static Bitu call_int16 = 0,call_irq1 = 0,irq1_ret_ctrlbreak_callback = 0,call_irq6 = 0,call_irq_pcjr_nmi = 0;
+extern Bitu BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION;
+
+static Bitu call_int16 = 0,call_irq1 = 0,irq1_ret_ctrlbreak_callback = 0,call_irq6 = 0,call_irq_pcjr_nmi = 0,call_int48_pcjr = 0;
 static uint8_t fep_line = 0x01;
 
 /* Nice table from BOCHS i should feel bad for ripping this */
@@ -159,7 +163,7 @@ static scancode_tbl scan_to_scanascii[MAX_SCAN_CODE + 1] = {
       };
 
 static scancode_tbl scan_to_scanascii_pc98[0x80] = {
-    //normal,  shift,   CTRL, GRPH, Kana, Kana+shift
+    //normal,  shift,   CTRL,   GRPH, Kana, Kana+shift
     { 0x001b, 0x001b, 0x0016, 0x001b, 0x001b, 0x001b }, /* 00 escape */
     { 0x0131, 0x0121,   none,   none, 0x01c7, 0x01c7 }, /* 01 1! */
     { 0x0232, 0x0222,   none,   none, 0x02cc, 0x02cc }, /* 02 2" */
@@ -176,7 +180,7 @@ static scancode_tbl scan_to_scanascii_pc98[0x80] = {
     { 0x0d5c, 0x0d7c, 0x0d1c, 0x0df1, 0x0db0, 0x0db0 }, /* 0d \| */
     { 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08 }, /* 0e backspace */
     { 0x0f09, 0x0f09, 0x0f09, 0x0f09, 0x0f09, 0x0f09 }, /* 0f tab */
-    //normal, shift,CTRL, GRPH, Kana, Kana+shift
+    //normal,  shift,   CTRL,   GRPH, Kana, Kana+shift
     { 0x1071, 0x1051, 0x1011, 0x109c, 0x10c0, 0x10c0 }, /* 10 Q */
     { 0x1177, 0x1157, 0x1117, 0x119d, 0x11c3, 0x11c3 }, /* 11 W */
     { 0x1265, 0x1245, 0x1205, 0x12e4, 0x12b2, 0x12a8 }, /* 12 E */
@@ -295,6 +299,66 @@ static scancode_tbl scan_to_scanascii_pc98[0x80] = {
     {   none,   none,   none,   none,   none,   none }, /* 7e      */
     {   none,   none,   none,   none,   none,   none }  /* 7f      */
 };
+
+void BIOSKEY_PC98_Write_Tables(void) {
+	unsigned int i;
+	Bitu o = Real2Phys(BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION);
+
+	/* Assume this function will not be called unless BIOS_PC98_KEYBOARD_TRANSLATION_LOCATION points to ROM BIOS.
+	 * It's actually not exactly a 1:1 mapping, the empty range between 0x56-0x61 is skipped according to the
+	 * tables on real hardware. On real hardware the tables are noticeably 0x60 (not 0x80) bytes apart from each other.
+	 * Special processing is done for the shift state keys that do not involve the table. */
+
+	/* [0] Normal */
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [1] Shift */
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [2] Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [3] Shift+Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [4] Kana */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [5] Kana+Shift */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [6] Kana+Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [7] Kana+Shift+Caps */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [8] Graph (Alt) */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].normal);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].normal); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+
+	/* [9] Control */ //FIXME
+	for (i=0x00;i < 0x56;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i].shift);
+	for (i=0x62;i < 0x6C;i++) phys_writeb(o+i,scan_to_scanascii_pc98[i-0xC].shift); /* NTS: 0x62-0x0C = 0x56, 10 codes fill 0x56-0x5F. 0x60-0x56 = 0x0A (10). 0x60 bytes total */
+	o += 0x60;
+}
 
 std::queue <uint16_t>over_key_buffer;
 
@@ -543,7 +607,7 @@ static Bitu IRQ1_Handler(void) {
     flags1=mem_readb(BIOS_KEYBOARD_FLAGS1);
     flags2=mem_readb(BIOS_KEYBOARD_FLAGS2);
     flags3=mem_readb(BIOS_KEYBOARD_FLAGS3);
-    kanafl= mem_readb(BIOS_KEYBOARD_AX_KBDSTATUS);
+    kanafl=mem_readb(BIOS_KEYBOARD_AX_KBDSTATUS);
     leds  =mem_readb(BIOS_KEYBOARD_LEDS); 
     leds_orig = leds;
 #ifdef CAN_USE_LOCK
@@ -566,7 +630,7 @@ static Bitu IRQ1_Handler(void) {
         break;
     case 0x1d:                      /* Ctrl Pressed */
         if (INT16_AX_GetKBDBIOSMode() == 0x51 && (flags3 & 0x02))
-            trimKana();//英数カナ keycode not assignged in AX
+            trimKana();//英数カナ keycode not assigned in AX
         else if (!(flags3 &0x01)) {
             flags1 |=0x04;
             if (flags3 &0x02) flags3 |=0x04;
@@ -721,8 +785,8 @@ static Bitu IRQ1_Handler(void) {
     case 0x52:
     case 0x53: /* del . Not entirely correct, but works fine */
         if (scancode == 0x53 && !(flags3 & 0x01) && !(flags1 & 0x03) && (flags1 & 0x0c) == 0x0c && ((!(flags3 & 0x10) && (flags3 & 0x0c) == 0x0c) || ((flags3 & 0x10) && (flags2 & 0x03) == 0x03))) { /* Ctrl-Alt-Del? */
-			throw int(3);
-		}
+            throw int(3);
+        }
         if(flags3 &0x02) {  /*extend key. e.g key above arrows or arrows*/
             if(scancode == 0x52) flags2 |=0x80; /* press insert */         
             if(flags1 &0x08) {
@@ -752,24 +816,21 @@ static Bitu IRQ1_Handler(void) {
         uint16_t asciiscan;
         /* Now Handle the releasing of keys and see if they match up for a code */
         /* Handle the actual scancode */
+        if(kana_input) { kana_input = false; goto irq1_end; }
         if (scancode & 0x80) goto irq1_end;
         if (scancode > MAX_SCAN_CODE) goto irq1_end;
         if (flags1 & 0x08) {                    /* Alt is being pressed */
-            asciiscan=scan_to_scanascii[scancode].alt;
-#if 0 /* old unicode support disabled*/
-        } else if (ascii) {
-            asciiscan=(scancode << 8) | ascii;
-#endif
+            asciiscan = scan_to_scanascii[scancode].alt;
         } else if (flags1 & 0x04) {                 /* Ctrl is being pressed */
-            asciiscan=scan_to_scanascii[scancode].control;
+            asciiscan = scan_to_scanascii[scancode].control;
         } else if ((flags1 & 0x03) && (kanafl & 0x02)) { //for AX: Kana is active + Shift is being pressed
             asciiscan = scan_to_scanascii[scancode].kana_shift; //for AX
         } else if (flags1 & 0x03) {                 /* Either shift is being pressed */
-            asciiscan=scan_to_scanascii[scancode].shift;
+            asciiscan = scan_to_scanascii[scancode].shift;
         } else if (kanafl & 0x02) {
             asciiscan = scan_to_scanascii[scancode].kana; //for AX: Kana is active
         } else {
-            asciiscan=scan_to_scanascii[scancode].normal;
+            asciiscan = scan_to_scanascii[scancode].normal;
         }
         /* cancel shift is letter and capslock active */
         if(flags1&64) {
@@ -843,6 +904,7 @@ bool CPU_PUSHF(Bitu use32);
 void CPU_Push16(uint16_t value);
 unsigned char AT_read_60(void);
 extern bool pc98_force_ibm_layout;
+extern bool pc98_force_jis_layout;
 
 /* BIOS INT 18h output vs keys:
  *
@@ -867,8 +929,12 @@ static Bitu IRQ1_Handler_PC98(void) {
     unsigned char status;
     unsigned int patience = 32;
 
-    status = IO_ReadB(0x43); /* 8251 status */
-    while (status & 2/*RxRDY*/) {
+    /* NTS: CWSDPMI (the PC-98 patched version) has an IRQ 1 interrupt handler that reads the
+     *      keyboard scan code byte ahead of calling this ISR. If we check status first, this
+     *      ISR will never process keyboard input because RxRDY = 0 (CWSDPMI already read it!).
+     *      This suggests that perhaps most PC-98 BIOSes assume a ready data byte on IRQ 1
+     *      and that's how CWSDPMI can get away with doing that (TODO VERIFY THIS ON REAL HARDWARE) */
+    do {
         unsigned char sc_8251 = IO_ReadB(0x41); /* 8251 data */
 
         bool pressed = !(sc_8251 & 0x80);
@@ -964,6 +1030,7 @@ static Bitu IRQ1_Handler_PC98(void) {
         //                  KEY         UNSHIFT SHIFT   CTRL    KANA
         //                  ----------------------------------------
         if (pressed && sc_8251 <= 0x6f) { // skip shift-keys (0x70-0x74)
+            if(kana_input) { kana_input = false; goto pc98irq1_end;}
             if (sc_8251 == 0x60) { // STOP
                 // does not pass it on.
                 // According to Neko Project II source code, STOP invokes INT 6h
@@ -1017,10 +1084,18 @@ static Bitu IRQ1_Handler_PC98(void) {
             else {
                 if (!pc98_force_ibm_layout){
                     if (shift){
-                        if (scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
+                        if (!pc98_force_jis_layout) {
+                            if(scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
+                        }
+                        else {
+                            if(sc_8251 == 0x1a) add_key(scan_add + '`');
+                            else if(sc_8251 == 0x0c) add_key(scan_add + '~');
+                            else if(scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
+                        }
                     }
                     else{
-                        if (scan_to_scanascii_pc98[sc_8251].normal){
+                        if(pc98_force_jis_layout && sc_8251 == 0x33) add_key(scan_add + '\\');
+                        else if (scan_to_scanascii_pc98[sc_8251].normal){
                             add_key(scan_to_scanascii_pc98[sc_8251].normal);
                         }
                     }
@@ -1029,56 +1104,51 @@ static Bitu IRQ1_Handler_PC98(void) {
                     switch (sc_8251) {
                     case 0x02:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '@');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '2');
                         break;
                     case 0x06:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '^');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '6');
                         break;
                     case 0x07:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '&');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '7');
                         break;
                     case 0x08:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '*');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '8');
                         break;
                     case 0x09:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '(');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '9');
                         break;
                     case 0x0A:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + ')');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '0');
                         break;
                     case 0x0B:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '_');
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + '-');
                         break;
                     case 0x0C:  // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + '+');
                         else add_key(scan_add + '=');
                         break;
-                    case 0x1A: // pc98_force_ibm_layout
-                        if (!modflags){
+                    case 0x1A: // pc98_force_ibm_layout  key for '@'(0x1a) is reused in PC-98 mode
+                        if (shift) add_key(scan_add + '~');
+                        else if (!modflags){
                             add_key(scan_add + '`');
-                            break;
                         }
                         break;
                     case 0x26: // pc98_force_ibm_layout
                         if (shift) add_key(scan_add + ':'); // Shift - semicolon = ':'
-                        else add_key(scan_to_scanascii_pc98[sc_8251].normal);
+                        else add_key(scan_add + ';');
                         break;
                     case 0x27: // pc98_force_ibm_layout
                         // quote key
-                        if (shift) {
-                            add_key(scan_add + '\"');
-                            break;
-                        }
-                        else {
-                            add_key(scan_add + '\'');
-                            break;
-                        }
+                        if (shift) add_key(scan_add + '\"');
+                        else add_key(scan_add + '\'');
+                        break;
                     default:
                         if (shift){
                             if (scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
@@ -1092,9 +1162,10 @@ static Bitu IRQ1_Handler_PC98(void) {
                 }
             }
         }
+pc98irq1_end:
         if (--patience == 0) break; /* in case of stuck 8251 */
         status = IO_ReadB(0x43); /* 8251 status */
-    }
+    } while (status & 2/*RxRDY*/);
 
     return CBRET_NONE;
 }
@@ -1107,6 +1178,66 @@ static Bitu PCjr_NMI_Keyboard_Handler(void) {
     if (IO_ReadB(0x64) & 1) /* while data is available */
         reg_eip++; /* skip over EIP to IRQ1 call through */
 
+    return CBRET_NONE;
+}
+
+/* On PCjr the purpose of INT 48h normally is to translate PCjr scan codes to 83-key scan codes
+ * and then call INT 9h with that scan code.
+ *
+ * Some 83-key codes can only be entered by holding Fn and typing another key, and the raw scan
+ * codes reflect that. For compatibility with DOS programs, INT 48h has to translate, for example,
+ * Fn + 1 into the scan code for F1. */
+static Bitu PCjr_INT48_Keyboard_Handler(void) {
+    uint8_t pcjr_f = mem_readb(BIOS_KEYBOARD_PCJR_FLAG2);
+    uint8_t flags1 = mem_readb(BIOS_KEYBOARD_FLAGS1);
+
+    if ((reg_al&0x7F) == 0x54) {
+        if (reg_al&0x80/*release*/) pcjr_f &= ~BIOS_KEYBOARD_PCJR_FLAG2_FN_FLAG;
+        else pcjr_f |= BIOS_KEYBOARD_PCJR_FLAG2_FN_FLAG;
+        goto skip_int9;
+    }
+
+#define UPDATESHIFT(x) if (x) { flags1 &= ~0x3; /*break*/ } else { flags1 |= 0x3; /*make*/ }
+#define CLEARSHIFT() UPDATESHIFT(1/*break*/)
+
+    if (pcjr_f & (BIOS_KEYBOARD_PCJR_FLAG2_FN_FLAG|BIOS_KEYBOARD_PCJR_FLAG2_FN_LOCK)) {
+        const uint8_t bc = reg_al & 0x80;
+        switch (reg_al&0x7F) {
+            case 0x02: reg_al=0x3B|bc; break;/*Fn+1 = F1*/
+            case 0x03: reg_al=0x3C|bc; break;/*Fn+2 = F2*/
+            case 0x04: reg_al=0x3D|bc; break;/*Fn+3 = F3*/
+            case 0x05: reg_al=0x3E|bc; break;/*Fn+4 = F4*/
+            case 0x06: reg_al=0x3F|bc; break;/*Fn+5 = F5*/
+            case 0x07: reg_al=0x40|bc; break;/*Fn+6 = F6*/
+            case 0x08: reg_al=0x41|bc; break;/*Fn+7 = F7*/
+            case 0x09: reg_al=0x42|bc; break;/*Fn+8 = F8*/
+            case 0x0A: reg_al=0x43|bc; break;/*Fn+9 = F9*/
+            case 0x0B: reg_al=0x44|bc; break;/*Fn+10 = F10*/
+            case 0x10: goto skip_int9;/*Fn+Q = Pause*/
+            case 0x12: goto skip_int9;/*Fn+E = Echo*/
+            case 0x19: goto skip_int9;/*Fn+P = Print Screen*/
+            case 0x1A: reg_al=0x2B|bc; UPDATESHIFT(bc); break;/*Fn+[ = | which is SHIFT+\ */
+            case 0x1B: reg_al=0x29|bc; UPDATESHIFT(bc); break;/*Fn+] = ~ which is SHIFT+` */
+            case 0x1F: reg_al=0x46|bc; break;/*Fn+S = Scroll lock*/
+            case 0x28: reg_al=0x29|bc; CLEARSHIFT(); break;/*Fn+' = ` which is unshifted ` */
+            case 0x35: reg_al=0x2B|bc; CLEARSHIFT(); break;/*Fn+/ = \\ which is unshifted \\ */
+            case 0x48: reg_al=0x47|bc; break;/*Fn+Up = Home*/
+            case 0x4B: reg_al=0x49|bc; break;/*Fn+Left = Page Up*/
+            case 0x4D: reg_al=0x51|bc; break;/*Fn+Right = Page Down*/
+            case 0x50: reg_al=0x4F|bc; break;/*Fn+Down = End*/
+            default: break;
+        }
+    }
+
+#undef UPDATESHIFT
+#undef CLEARSHIFT
+
+    IO_Write(0x60,reg_al); /* According to the PCjr BIOS listing, INT 48h does "OUT KB_PORT,AL" before calling INT 9h */
+    reg_eip++; /* skip over IRET */
+skip_int9: /* if we do not skip IRET, then INT 48h returns without calling INT 9h */
+
+    mem_writeb(BIOS_KEYBOARD_FLAGS1,flags1);
+    mem_writeb(BIOS_KEYBOARD_PCJR_FLAG2,pcjr_f);
     return CBRET_NONE;
 }
 
@@ -1510,6 +1641,10 @@ void BIOS_UnsetupKeyboard(void) {
         CALLBACK_DeAllocate(call_irq_pcjr_nmi);
         call_irq_pcjr_nmi = 0;
     }
+    if (call_int48_pcjr != 0) {
+        CALLBACK_DeAllocate(call_int48_pcjr);
+        call_int48_pcjr = 0;
+    }
     if (call_irq6 != 0) {
         CALLBACK_DeAllocate(call_irq6);
         call_irq6 = 0;
@@ -1540,29 +1675,43 @@ void BIOS_SetupKeyboard(void) {
 
     call_irq1=CALLBACK_Allocate();
     if (machine == MCH_PCJR) { /* PCjr keyboard interrupt connected to NMI */
+        uint32_t a;
+ 
+        /* NMI: Read bits from infared port to decode keyboard scan code. If valid, pass it to INT 48h.
+         * INT 48h: Track Fn key and other state, convert PCjr scan codes to 83-key compatible scan codes, pass it to INT 9h.
+         * INT 9h: Process scan code same as you would on normal IBM PC hardware. */
         call_irq_pcjr_nmi=CALLBACK_Allocate();
-
         CALLBACK_Setup(call_irq_pcjr_nmi,&PCjr_NMI_Keyboard_Handler,CB_IRET,"PCjr NMI Keyboard");
-
-        uint32_t a = CALLBACK_RealPointer(call_irq_pcjr_nmi);
-
+        a = CALLBACK_RealPointer(call_irq_pcjr_nmi);
         RealSetVec(0x02/*NMI*/,a);
 
-        /* TODO: PCjr calls INT 48h to convert PCjr scan codes to IBM PC/XT compatible */
+        a = ((a >> 16) << 4) + (a & 0xFFFF);
+        /* a+0 = callback instruction (4 bytes)
+         * a+4 = iret (1 bytes)
+         *
+         * NTS: PCjr NMI doesn't read it from port 60h! But this makes it work in this emulator! */
+        phys_writeb(a+5,0x50);		/* push ax */
+        phys_writeb(a+6,0x1e);		/* push ds */
+        phys_writew(a+7,0xC0C7);	/* mov ax,0x0040    NTS: Do not use PUSH <imm>, that opcode does not exist on the 8086 */
+        phys_writew(a+9,0x0040);	/* <---------' */
+        phys_writew(a+11,0xD88E);	/* mov ds,ax */
+        phys_writew(a+13,0x60E4);	/* in al,60h */
+        phys_writew(a+15,0x48CD);	/* int 48h */
+        phys_writeb(a+17,0x1f);		/* pop ds */
+        phys_writeb(a+18,0x58);		/* pop ax */
+        phys_writew(a+19,0x00EB + ((256-21)<<8)); /* jmp a+0 */
 
-	a = ((a >> 16) << 4) + (a & 0xFFFF);
-	/* a+0 = callback instruction (4 bytes)
-	 * a+4 = iret (1 bytes) */
-	phys_writeb(a+5,0x50);		/* push ax */
-	phys_writeb(a+6,0x1e);		/* push ds */
-	phys_writew(a+7,0xC0C7);	/* mov ax,0x0040    NTS: Do not use PUSH <imm>, that opcode does not exist on the 8086 */
-	phys_writew(a+9,0x0040);	/* <---------' */
-	phys_writew(a+11,0xD88E);	/* mov ds,ax */
-	phys_writew(a+13,0x60E4);	/* in al,60h */
-	phys_writew(a+15,0x09CD);	/* int 9h */
-	phys_writeb(a+17,0x1f);		/* pop ds */
-	phys_writeb(a+18,0x58);		/* pop ax */
-	phys_writew(a+19,0x00EB + ((256-21)<<8)); /* jmp a+0 */
+        /* INT 48h. NMI handler protects AX already, no need to PUSH AX/POP AX */
+        call_int48_pcjr=CALLBACK_Allocate();
+        CALLBACK_Setup(call_int48_pcjr,&PCjr_INT48_Keyboard_Handler,CB_IRET,"PCjr INT 48h translation");
+        a = CALLBACK_RealPointer(call_int48_pcjr);
+        RealSetVec(0x48/*translation*/,a);
+
+        a = ((a >> 16) << 4) + (a & 0xFFFF);
+        /* a+0 = callback instruction (4 bytes)
+         * a+4 = iret (1 bytes) */
+        phys_writew(a+5,0x09CD);	/* int 9 */
+        phys_writeb(a+7,0xCF);	        /* iret */
     }
 
     if (IS_PC98_ARCH) {

@@ -1,5 +1,5 @@
 dnl Init.
-AC_INIT(dosbox-x,2023.10.06,[https://github.com/joncampbell123/dosbox-x/issues],[],[https://dosbox-x.com])
+AC_INIT(dosbox-x,2025.05.03,[https://github.com/joncampbell123/dosbox-x/issues],[],[https://dosbox-x.com])
 AC_PREREQ(2.60)
 AC_CONFIG_SRCDIR(README.md)
 
@@ -123,8 +123,8 @@ AC_CHECK_HEADERS([sys/socket.h  netinet/in.h pwd.h], [], [],
 #endif
 ])
 
-dnl C++11 is mandatory in this codebase.
-dnl C++14 is optional at this time, will eventually become mandatory.
+dnl C++11 is deprecated in this codebase.
+dnl C++14 is recommended at this time, will eventually become mandatory.
 
 dnl AC_CHECK_CXXFLAGS will prepend gnu++11 to CXXFLAGS if supported, for us.
 OLDCFLAGS="$CFLAGS"
@@ -157,7 +157,7 @@ dnl Allow devs to force compile as C++11 as long as this code supports C++11 as 
 AC_ARG_ENABLE(force-cxx11,AC_HELP_STRING([--enable-force-cxx11],[Force compile as C++11]),force_cxx11=yes)
 
 if test x$warn_cpp11 = x1; then
-    AC_MSG_WARN([ Your compiler does not support C++14. Currently it is optional. At some point in the future, it will be required ])
+    AC_MSG_WARN([ Your compiler does not support C++14. Currently it is recommended. At some point in the future, it will be required ])
     CFLAGS="$CFLAGS -std=gnu11";
     CXXFLAGS="$CXXFLAGS -std=gnu++11";
 elif test x$force_cxx11 = xyes; then
@@ -300,6 +300,10 @@ int x=10;if( __builtin_expect ((x==1),0) ) ;
 #switch language back
 AC_LANG_POP(C++)
 
+dnl Check for linux/kvm.h
+AH_TEMPLATE(C_HAVE_LINUX_KVM,[Define to 1 if you have linux/kvm.h and KVM virtualization])
+AC_CHECK_HEADER([linux/kvm.h], [AC_DEFINE(C_HAVE_LINUX_KVM,1)])
+
 dnl Check for mach_vm_remap (Darwin)
 AH_TEMPLATE(C_HAVE_MACH_VM_REMAP,[Define to 1 if you have the mach_vm_remap function])
 AC_CHECK_HEADER([mach/mach.h], [
@@ -365,11 +369,13 @@ else
     esac
 fi
 
-dnl Some needed libaries for OS2
-dnl perharps join this with the other target depended checks. move them upwards
+dnl Some needed libraries for OS2
+dnl perhaps join this with the other target depended checks. move them upwards
+AM_CONDITIONAL(OS2, test x$host = xi386-pc-os2-emx)
 if test x$host = xi386-pc-os2-emx ; then
-    CXXFLAGS="$CXXFLAGS -Zmt"
-    LDFLAGS="$LDFLAGS -Zomf -Zmt"
+    CXXFLAGS="$CXXFLAGS -DOS2 -march=pentium4 -idirafter /@unixroot/usr/include/os2tk45"
+    CFLAGS="$CFLAGS -DOS2 -march=pentium4 -idirafter /@unixroot/usr/include/os2tk45"
+    LDFLAGS="$LDFLAGS -Zomf -Zhigh-mem -lcx"
 fi
 
 dnl I would like to know of any concerns given by the C++ compiler.
@@ -379,12 +385,15 @@ AC_CHECK_CXXFLAGS([ -Wextra ])
 AC_CHECK_CXXFLAGS([ -Wunused ])
 AC_CHECK_CXXFLAGS([ -pedantic ])
 AC_CHECK_CXXFLAGS([ -Wno-error=format-security ])     # imfc.cpp and later versions of GCC, see https://github.com/joncampbell123/dosbox-x/issues/4436
+AC_CHECK_CXXFLAGS([ -Wno-error=incompatible-pointer-types ]) # required to compile speexdsp/fftwrap.c with GCC 14
 #AC_CHECK_CXXFLAGS([ -Wconversion ])      DO NOT ENABLE. THIS WARNING IS WAY TOO PEDANTIC TO BE USEFUL, EXCEPT FOR SPECIFIC CASES
 #AC_CHECK_CXXFLAGS([ -Wsign-conversion ])
 AC_CHECK_CXXFLAGS([ -Wlogical-op ])
 AC_CHECK_CXXFLAGS([ -Wsign-promo ])
 AC_CHECK_CXXFLAGS([ -Wconversion-null ])
 #AC_CHECK_CXXFLAGS([ -Woverloaded-virtual ])    NOT TOO USEFUL
+AC_CHECK_CXXFLAGS([ -Wsuggest-override ])
+AC_CHECK_CXXFLAGS([ -Wnon-virtual-dtor ])
 AC_CHECK_CXXFLAGS([ -Wno-deprecated-declarations ])
 
 dnl Let GCC 7.3.x know that the "fall through" switch cases in this codebase
@@ -568,6 +577,10 @@ case "$host" in
        AC_DEFINE(OS2, 1, [Compiling on OS/2 EMX])
        dnl FEATURE: Whether to support direct serial port pass-through
        AC_DEFINE(C_DIRECTSERIAL, 1, [ Define to 1 if you want serial pass-through support (Win32, Posix and OS/2).])
+       dnl If we have SDL2, we need to link the multimedia extensions.
+       if test "x$SDL2_LIBS" != "x"; then
+         LIBS="$LIBS -lmmpm2"
+       fi
        ;;
     *-*-riscos*)
        AC_DEFINE(RISCOS, 1, [Compiling on RISC OS])
@@ -629,6 +642,12 @@ case "$host_cpu" in
     c_targetcpu="m68k"
     c_unalignedmemory=yes
     ;;
+   loongarch64*)
+    AC_DEFINE(C_TARGETCPU,LOONGARCH64)
+    AC_MSG_RESULT(LoongArch)
+    c_targetcpu="loongarch64"
+    c_unalignedmemory=yes
+    ;;
    armv7*)
     AC_DEFINE(C_TARGETCPU,ARMV7LE)
     AC_MSG_RESULT(ARMv7 Little Endian)
@@ -660,7 +679,7 @@ case "$host_cpu" in
     ;;
 esac
 
-dnl TODO: Need GCC to know this code is using C++ lamda functions
+dnl TODO: Need GCC to know this code is using C++ lambda functions
 
 dnl LIBRARY TEST: ALSA
 AM_PATH_ALSA(0.9.0, AC_DEFINE(HAVE_ALSA,1,[Define to 1 to use ALSA for MIDI]) , : )
@@ -867,6 +886,10 @@ if test x$enable_mt32 = xyes ; then
       AC_DEFINE(C_MT32,1)
       ;;
     aarch64)
+      AC_MSG_RESULT(yes)
+      AC_DEFINE(C_MT32,1)
+      ;;
+    loongarch64)
       AC_MSG_RESULT(yes)
       AC_DEFINE(C_MT32,1)
       ;;
@@ -1085,17 +1108,17 @@ AH_TEMPLATE(C_LIBPNG,[Define to 1 if you have libpng])
 AH_TEMPLATE(C_SSHOT,[Define to 1 to enable screenshots, requires libpng])
 AC_ARG_ENABLE(screenshots,AC_HELP_STRING([--disable-screenshots],[Disable screenshots and movie recording]),,enable_screenshots=yes)
 AC_MSG_CHECKING([whether screenshots will be enabled])
-if test x$enable_screenshots = xyes; then 
-    if test x$have_png_lib = xyes -a x$have_png_h = xyes ; then
+if test x$have_png_lib = xyes -a x$have_png_h = xyes ; then
     LIBS="$LIBS -lpng -lz"
     AC_DEFINE(C_LIBPNG,1)
-    AC_DEFINE(C_SSHOT,1)
-    AC_MSG_RESULT([yes])
-  else
-    AC_MSG_RESULT([no, can't find libpng.])
-  fi
+    if test x$enable_screenshots = xyes; then 
+        AC_DEFINE(C_SSHOT,1)
+        AC_MSG_RESULT([yes])
+    else
+        AC_MSG_RESULT([no])
+    fi
 else
-  AC_MSG_RESULT([no])
+    AC_MSG_ERROR([Can't find libpng, install or try building the in-tree code])
 fi
 
 dnl FEATURE: Whether to use libpcap, and enable ethernet pass-through
@@ -1131,8 +1154,8 @@ if test x$enable_libslirp = xyes ; then
     have_slirp=yes
     AC_DEFINE(C_SLIRP,1)
     LIBS="$LIBS "`pkg-config slirp --libs`
-    CFLAGS="$CFLAGS "`pkg-config slirp --cflags`
-    CPPFLAGS="$CPPFLAGS "`pkg-config slirp --cflags`
+    CFLAGS="$CFLAGS -DLIBSLIRP_STATIC "`pkg-config slirp --cflags`
+    CPPFLAGS="$CPPFLAGS -DLIBSLIRP_STATIC "`pkg-config slirp --cflags`
     case "$host" in
       *-*-cygwin* | *-*-mingw32*)
          LIBS="$LIBS -lintl"

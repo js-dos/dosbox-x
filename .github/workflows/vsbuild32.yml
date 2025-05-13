@@ -18,11 +18,11 @@ jobs:
         shell: pwsh
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.12.0
+        uses: styfle/cancel-workflow-action@0.12.1
         with:
           access_token: ${{ github.token }}
       - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v1.3
+      - uses: microsoft/setup-msbuild@v2
       - name: Prepare Visual Studio Win32
         shell: bash
         run: |
@@ -107,12 +107,12 @@ jobs:
           $top/vs/tool/zip.exe -r -9 $top/dosbox-x-vsbuild-win32-${{ env.timestamp }}.zip *
           cd $top
       - name: Upload preview package
-        uses: actions/upload-artifact@v4.0.0
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: dosbox-x-vsbuild-win32-${{ env.timestamp }}
           path: ${{ github.workspace }}/package/
       - name: Upload release package
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dosbox-x-vsbuild-win32-${{ env.timestamp }}.zip
@@ -128,14 +128,15 @@ jobs:
         shell: pwsh
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.12.0
+        uses: styfle/cancel-workflow-action@0.12.1
         with:
           access_token: ${{ github.token }}
       - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v1.3
+      - uses: microsoft/setup-msbuild@v2
       - name: Prepare Visual Studio ARM32
         shell: bash
         run: |
+          ls -1 vs/dosbox-x.vcxproj vs/freetype/builds/windows/vc2010/freetype.vcxproj vs/libpdcurses/libpdcurses.vcxproj vs/libpng/projects/vstudio/libpng/libpng.vcxproj vs/libpng/projects/vstudio/libpng/libpng.vcxproj vs/sdl/VisualC/SDL/SDL.vcxproj vs/sdl/VisualC/SDLmain/SDLmain.vcxproj vs/sdl2/VisualC/SDL/SDL.vcxproj vs/sdl2/VisualC/SDLmain/SDLmain.vcxproj vs/sdlnet/VisualC/SDL_net_VS2008.vcxproj vs/sdlnet/VisualC/SDL_net_VS2008.vcxproj vs/zlib/zlib/zlib.vcxproj | xargs sed -b -i 's/>10.0</>10.0.22621.0</g'
           echo "timestamp=`git show -s --format=%at | xargs -I# date -d @# +%Y%m%d%H%M%S`" >> $GITHUB_ENV
           export shortsha=`echo ${GITHUB_SHA} | cut -c1-7`
           export copyrightyear=`git show -s --format=%at | xargs -I# date -d @# +'%Y'`
@@ -208,12 +209,12 @@ jobs:
           $top/vs/tool/zip.exe -r -9 $top/dosbox-x-vsbuild-arm32-${{ env.timestamp }}.zip *
           cd $top
       - name: Upload preview package
-        uses: actions/upload-artifact@v4.0.0
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: dosbox-x-vsbuild-arm32-${{ env.timestamp }}
           path: ${{ github.workspace }}/package/
       - name: Upload release package
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dosbox-x-vsbuild-arm32-${{ env.timestamp }}.zip

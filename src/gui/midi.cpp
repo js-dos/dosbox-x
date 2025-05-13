@@ -65,13 +65,14 @@ uint8_t MIDI_evt_len[256] = {
   0,2,3,2, 0,0,1,0, 1,0,1,1, 1,0,1,0   // 0xf0
 };
 
-MidiHandler * handler_list = 0;
+MidiHandler * handler_list = nullptr;
 
 MidiHandler::MidiHandler(){
 	next = handler_list;
 	handler_list = this;
 }
 
+bool roland_gs_sysex = true;
 MidiHandler Midi_none;
 DB_Midi midi;
 std::string sffile="Not available";
@@ -528,8 +529,8 @@ void MIDI_RawOutByte(uint8_t data) {
 		midi.rt_buf[0]=data;
 		midi.handler->PlayMsg(midi.rt_buf);
 		return;
-	}
-	/* Test for a active sysex transfer */
+	}	 
+	/* Test for an active sysex transfer */
 	if (midi.status==0xf0) {
 		if (!(data&0x80)) {
 			if (midi.sysex.used<(SYSEX_SIZE-1)) midi.sysex.buf[midi.sysex.used++] = data;
@@ -542,6 +543,27 @@ void MIDI_RawOutByte(uint8_t data) {
 			} else {
 //				LOG(LOG_ALL,LOG_NORMAL)("Play sysex; address:%02X %02X %02X, length:%4d, delay:%3d", midi.sysex.buf[5], midi.sysex.buf[6], midi.sysex.buf[7], midi.sysex.used, midi.sysex.delay);
 				midi.handler->PlaySysex(midi.sysex.buf, midi.sysex.used);
+
+				if (roland_gs_sysex) {
+					if (midi.sysex.buf[1] == 0x41/*Roland*/ && midi.sysex.buf[3] == 0x42/*GS*/ && midi.sysex.buf[4] == 0x12/*Send*/) {
+						const uint32_t addr =
+							((uint32_t)midi.sysex.buf[5] << 16) +
+							((uint32_t)midi.sysex.buf[6] <<  8) +
+							(uint32_t)midi.sysex.buf[7];
+
+						switch (addr) {
+							case 0x40007F: /* GS reset */
+								{
+									uint8_t msg[] = {0xFF};
+									midi.handler->PlayMsg(msg); /* MIDI reset */
+								}
+								break;
+							default:
+								break;
+						};
+					}
+				}
+
 				if (midi.sysex.start) {
 					if (midi.sysex.buf[5] == 0x7F) {
 						midi.sysex.delay = 290; // All Parameters reset
@@ -609,6 +631,8 @@ public:
 		MidiHandler * handler;
 		bool opened = false;
 
+		roland_gs_sysex = section->Get_bool("roland gs sysex");
+
 //		MAPPER_AddHandler(MIDI_SaveRawEvent,MK_f8,MMOD1|MMOD2,"caprawmidi","Cap MIDI");
 		midi.sysex.delay = 0;
 		midi.sysex.start = 0;
@@ -670,7 +694,7 @@ public:
 		}
 		if(midi.available) midi.handler->Close();
 		midi.available = false;
-		midi.handler = 0;
+		midi.handler = nullptr;
 	}
 };
 
@@ -721,7 +745,7 @@ public:
     {}
 
 private:
-    virtual void getBytes(std::ostream& stream)
+    void getBytes(std::ostream& stream) override
     {
 				if( !test ) return;
 
@@ -764,7 +788,7 @@ private:
 				}
     }
 
-    virtual void setBytes(std::istream& stream)
+    void setBytes(std::istream& stream) override
     {
 				if( !test ) return;
 

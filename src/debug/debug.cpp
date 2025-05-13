@@ -51,6 +51,10 @@ using namespace std;
 #include "keyboard.h"
 #include "control.h"
 
+bool Clear_SYSENTER_Debug();
+bool Toggle_BreakSYSEnter();
+bool Toggle_BreakSYSExit();
+
 /* [https://github.com/joncampbell123/dosbox-x/issues/1264] ncurses non-ASCII keys are outside ASCII range (start at octal 0400 == hex 0x100) */
 static inline int ncurses_aware_toupper(int x) {
 	if (x >= 0x00 && x <= 0xFF) return toupper(x);
@@ -75,6 +79,8 @@ const char *egc_fgc_modes[4] = {
 char *FormatDate(uint16_t year, uint8_t month, uint8_t day);
 void GFX_SetTitle(int32_t cycles, int frameskip, Bits timing, bool paused);
 bool pc98_pegc_linear_framebuffer_enabled(void);
+
+bool DEBUG_HaltOnRetrace = false;
 
 extern bool                 dos_kernel_disabled;
 extern bool                 is_paused;
@@ -178,7 +184,6 @@ void DOS_AddDays(uint8_t days);
 void DEBUG_BeginPagedContent(void);
 void DEBUG_EndPagedContent(void);
 Bitu MEM_PageMaskActive(void);
-uint32_t MEM_get_address_bits();
 Bitu MEM_TotalPages(void);
 Bitu MEM_PageMask(void);
 
@@ -212,6 +217,7 @@ static void LogEMUMachine(void) {
             case SVGA_TsengET4K:        cardName ="Tseng ET4000";    break;
             case SVGA_TsengET3K:        cardName ="Tseng ET3000";    break;
             case SVGA_ParadisePVGA1A:   cardName ="Paradise PVGA1A"; break;
+            case SVGA_ATI:              cardName ="ATI";             break;
         }
 
         DEBUG_ShowMsg("Machine: %s %s",m, cardName);
@@ -515,7 +521,7 @@ std::vector<CDebugVar*> CDebugVar::varList;
 bool mustCompleteInstruction = false;
 bool skipFirstInstruction = false;
 
-enum EBreakpoint { BKPNT_UNKNOWN, BKPNT_PHYSICAL, BKPNT_INTERRUPT, BKPNT_MEMORY, BKPNT_MEMORY_PROT, BKPNT_MEMORY_LINEAR };
+enum EBreakpoint { BKPNT_UNKNOWN, BKPNT_PHYSICAL, BKPNT_INTERRUPT, BKPNT_MEMORY, BKPNT_MEMORY_PROT, BKPNT_MEMORY_LINEAR, BKPNT_MEMORY_FREEZE };
 
 #define BPINT_ALL 0x100
 
@@ -619,7 +625,7 @@ void CBreakpoint::Activate(bool _active)
 					DEBUG_ShowMsg("DEBUG: Internal error while deactivating breakpoint.\n");
 
 				// Check if we are the last active breakpoint at this location
-				bool otherActive = (FindOtherActiveBreakpoint(location, this) != 0);
+				bool otherActive = (FindOtherActiveBreakpoint(location, this) != nullptr);
 
 				// If so, remove 0xCC and set old value
 				if (!otherActive)
@@ -723,7 +729,7 @@ bool CBreakpoint::CheckBreakpoint(uint16_t seg, uint32_t off)
 #if C_HEAVY_DEBUG
 		// Memory breakpoint support
 		else if (bp->IsActive()) {
-			if ((bp->GetType()==BKPNT_MEMORY) || (bp->GetType()==BKPNT_MEMORY_PROT) || (bp->GetType()==BKPNT_MEMORY_LINEAR)) {
+			if ((bp->GetType()==BKPNT_MEMORY) || (bp->GetType()==BKPNT_MEMORY_PROT) || (bp->GetType()==BKPNT_MEMORY_LINEAR) || (bp->GetType()==BKPNT_MEMORY_FREEZE)) {
 				// Watch Protected Mode Memoryonly in pmode
 				if (bp->GetType()==BKPNT_MEMORY_PROT) {
 					// Check if pmode is active
@@ -741,6 +747,10 @@ bool CBreakpoint::CheckBreakpoint(uint16_t seg, uint32_t off)
 				if (mem_readb_checked((PhysPt)address,&value)) return false;
 				if (bp->GetValue() != value) {
 					// Yup, memory value changed
+                    if (bp->GetType()==BKPNT_MEMORY_FREEZE){
+                        mem_writeb_checked((PhysPt)address,bp->GetValue());
+                        return false;
+                    }
 					DEBUG_ShowMsg("DEBUG: Memory breakpoint %s: %04X:%04X - %02X -> %02X\n",(bp->GetType()==BKPNT_MEMORY_PROT)?"(Prot)":"",bp->GetSegment(),bp->GetOffset(),bp->GetValue(),value);
 					bp->SetValue(value);
 					return true;
@@ -814,7 +824,7 @@ bool CBreakpoint::DeleteByIndex(uint16_t index)
 
 CBreakpoint* CBreakpoint::FindPhysBreakpoint(uint16_t seg, uint32_t off, bool once)
 {
-	if (BPoints.empty()) return 0;
+	if (BPoints.empty()) return nullptr;
 #if !C_HEAVY_DEBUG
 	PhysPt adr = GetAddress(seg, off);
 #endif
@@ -835,7 +845,7 @@ CBreakpoint* CBreakpoint::FindPhysBreakpoint(uint16_t seg, uint32_t off, bool on
 			return bp;
 	}
 
-	return 0;
+	return nullptr;
 }
 
 CBreakpoint* CBreakpoint::FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* skip)
@@ -846,13 +856,13 @@ CBreakpoint* CBreakpoint::FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* ski
 		if (bp != skip && bp->GetType() == BKPNT_PHYSICAL && bp->GetLocation() == adr && bp->IsActive())
 			return bp;
 	}
-	return 0;
+	return nullptr;
 }
 
 // is there a permanent breakpoint at address ?
 bool CBreakpoint::IsBreakpoint(uint16_t seg, uint32_t off)
 {
-	return FindPhysBreakpoint(seg, off, false) != 0;
+	return FindPhysBreakpoint(seg, off, false) != nullptr;
 }
 
 bool CBreakpoint::DeleteBreakpoint(uint16_t seg, uint32_t off)
@@ -887,6 +897,8 @@ void CBreakpoint::ShowList(void)
 			DEBUG_ShowMsg("%02X. BPPM %04X:%08X (%02X)\n",nr,bp->GetSegment(),bp->GetOffset(),bp->GetValue());
 		} else if (bp->GetType()==BKPNT_MEMORY_LINEAR ) {
 			DEBUG_ShowMsg("%02X. BPLM %08X (%02X)\n",nr,bp->GetOffset(),bp->GetValue());
+        } else if (bp->GetType()==BKPNT_MEMORY_FREEZE ) {
+	        DEBUG_ShowMsg("%02X. FM %08X (%02X)\n",nr,bp->GetOffset(),bp->GetValue());
 		}
 		nr++;
 	}
@@ -964,120 +976,104 @@ static void DrawData(void) {
 	uint8_t ch;
 	uint32_t add = dataOfs;
 	uint64_t address;
-    int w,h,y;
+	int w,h,y;
 
 	/* Data win */	
-    getmaxyx(dbg.win_data,h,w);
+	getmaxyx(dbg.win_data,h,w);
 
-    if ((paging.enabled || cpu.pmode) && dbg.data_view != DBGBlock::DATV_PHYSICAL) h--;
+	if ((paging.enabled || cpu.pmode) && dbg.data_view != DBGBlock::DATV_PHYSICAL) h--;
 
 	for (y=0;y<h;y++) {
 		// Address
-        if (dbg.data_view == DBGBlock::DATV_SEGMENTED) {
-            wattrset (dbg.win_data,0);
-            mvwprintw (dbg.win_data,y,0,"%04X:%08X ",dataSeg,add);
-        }
-        else {
-            wattrset (dbg.win_data,0);
-            mvwprintw (dbg.win_data,y,0,"     %08X ",add);
-        }
+		if (dbg.data_view == DBGBlock::DATV_SEGMENTED) {
+			wattrset (dbg.win_data,0);
+			mvwprintw (dbg.win_data,y,0,"%04X:%08X ",dataSeg,add);
+		}
+		else {
+			wattrset (dbg.win_data,0);
+			mvwprintw (dbg.win_data,y,0,"     %08X ",add);
+		}
 
-        if (dbg.data_view == DBGBlock::DATV_PHYSICAL) {
-            for (int x=0; x<16; x++) {
-                address = add;
-
-                /* save the original page addr.
-                 * we must hack the phys page tlb to make the hardware handler map 1:1 the page for this call. */
-                PhysPt opg = paging.tlb.phys_page[address>>12];
-
-                paging.tlb.phys_page[address>>12] = (uint32_t)(address>>12);
-
-                PageHandler *ph = MEM_GetPageHandler((Bitu)(address>>12));
-
-                if (ph->flags & PFLAG_READABLE)
-	                ch = ph->GetHostReadPt((Bitu)(address>>12))[address&0xFFF];
-                else
-                    ch = ph->readb((PhysPt)address);
-
-                paging.tlb.phys_page[address>>12] = opg;
-
-                wattrset (dbg.win_data,0);
-                mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
-                if(showPrintable) {
-                    if (ch<32 || !isprint(ch)) ch='.';
-                    mvwaddch(dbg.win_data, y, 63 + x, ch);
-                } else {
+		if (dbg.data_view == DBGBlock::DATV_PHYSICAL) {
+			for (int x=0; x<16; x++) {
+				ch = physdev_readb(add);
+				wattrset (dbg.win_data,0);
+				mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
+				if(showPrintable) {
+					if (ch<32 || !isprint(ch)) ch='.';
+					mvwaddch(dbg.win_data, y, 63 + x, ch);
+				} else {
 #ifdef __PDCURSES__
-                    mvwaddrawch(dbg.win_data, y, 63 + x, ch);
+					mvwaddrawch(dbg.win_data, y, 63 + x, ch);
 #else
-                    if(ch < 32) ch = '.';
-                    mvwaddch(dbg.win_data, y, 63 + x, ch);
+					if(ch < 32) ch = '.';
+					mvwaddch(dbg.win_data, y, 63 + x, ch);
 #endif
-                }
+				}
 
-                add++;
-            }
-        }
-        else {
-            for (int x=0; x<16; x++) {
-                if (dbg.data_view == DBGBlock::DATV_SEGMENTED)
-                    address = GetAddress(dataSeg,add);
-                else
-                    address = add;
+				add++;
+			}
+		}
+		else {
+			for (int x=0; x<16; x++) {
+				if (dbg.data_view == DBGBlock::DATV_SEGMENTED)
+					address = GetAddress(dataSeg,add);
+				else
+					address = add;
 
-                if (address != mem_no_address) {
-                    if (!mem_readb_checked((PhysPt)address,&ch)) {
-                        wattrset (dbg.win_data,0);
-                        mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
-                        if(showPrintable) {
-                            if (ch<32 || !isprint(ch)) ch='.';
-                            mvwprintw (dbg.win_data,y,63+x,"%c",ch);
-                        } else mvwaddch(dbg.win_data,y,63+x,ch);
-                    }
-                    else {
-                        wattrset (dbg.win_data, COLOR_PAIR(PAIR_BYELLOW_BLACK));
-                        mvwprintw (dbg.win_data,y,14+3*x,"pf");
-                        mvwprintw (dbg.win_data,y,63+x,".");
-                    }
-                }
-                else {
-                    wattrset (dbg.win_data, COLOR_PAIR(PAIR_BYELLOW_BLACK));
-                    mvwprintw (dbg.win_data,y,14+3*x,"na");
-                    mvwprintw (dbg.win_data,y,63+x,".");
-                }
+				if (address != mem_no_address) {
+					if (!mem_readb_checked((PhysPt)address,&ch)) {
+						wattrset (dbg.win_data,0);
+						mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
+						if(showPrintable) {
+							if (ch<32 || !isprint(ch)) ch='.';
+							mvwprintw (dbg.win_data,y,63+x,"%c",ch);
+						} else mvwaddch(dbg.win_data,y,63+x,ch);
+					}
+					else {
+						wattrset (dbg.win_data, COLOR_PAIR(PAIR_BYELLOW_BLACK));
+						mvwprintw (dbg.win_data,y,14+3*x,"pf");
+						mvwprintw (dbg.win_data,y,63+x,".");
+					}
+				}
+				else {
+					wattrset (dbg.win_data, COLOR_PAIR(PAIR_BYELLOW_BLACK));
+					mvwprintw (dbg.win_data,y,14+3*x,"na");
+					mvwprintw (dbg.win_data,y,63+x,".");
+				}
 
-                add++;
-            }
-        }
+				add++;
+			}
+		}
 	}
 
-    if ((paging.enabled || cpu.pmode) && dbg.data_view != DBGBlock::DATV_PHYSICAL) {
-        /* one line was set aside for this information */
-        wattrset (dbg.win_data,0);
-        if (dbg.data_view == DBGBlock::DATV_SEGMENTED) {
-            address = GetAddress(dataSeg,dataOfs);
-            if (address != mem_no_address)
-                mvwprintw (dbg.win_data,y,0," LIN=%08X ",(unsigned int)address);
-            else
-                mvwprintw (dbg.win_data,y,0," LIN=XXXXXXXX ");
-        }
-        else {
-            address = dataOfs;
-            mvwprintw (dbg.win_data,y,0,"              ");
-        }
+	if ((paging.enabled || cpu.pmode) && dbg.data_view != DBGBlock::DATV_PHYSICAL) {
+		/* one line was set aside for this information */
+		wattrset (dbg.win_data,0);
+		if (dbg.data_view == DBGBlock::DATV_SEGMENTED) {
+			address = GetAddress(dataSeg,dataOfs);
+			if (address != mem_no_address)
+				mvwprintw (dbg.win_data,y,0," LIN=%08X ",(unsigned int)address);
+			else
+				mvwprintw (dbg.win_data,y,0," LIN=XXXXXXXX ");
+		}
+		else {
+			address = dataOfs;
+			mvwprintw (dbg.win_data,y,0,"              ");
+		}
 
-        if (!mem_readb_checked((PhysPt)address,&ch)) {
-            Bitu naddr = PAGING_GetPhysicalAddress((PhysPt)address);
-            mvwprintw (dbg.win_data,y,14,"PHY=%08X ",(unsigned int)naddr);
-        }
-        else {
-            mvwprintw (dbg.win_data,y,14,"PHY=XXXXXXXX ");
-        }
+		if (!mem_readb_checked((PhysPt)address,&ch)) {
+			Bitu naddr = PAGING_GetPhysicalAddress((PhysPt)address);
+			mvwprintw (dbg.win_data,y,14,"PHY=%08X ",(unsigned int)naddr);
+		}
+		else {
+			mvwprintw (dbg.win_data,y,14,"PHY=XXXXXXXX ");
+		}
 
-        wclrtoeol(dbg.win_data);
+		wclrtoeol(dbg.win_data);
 
-        y++;
-    }
+		y++;
+	}
 
 	wrefresh(dbg.win_data);
 }
@@ -1109,6 +1105,10 @@ void DrawRegistersUpdateOld(void) {
 
 	oldcpucpl=cpu.cpl;
 }
+
+extern bool do_pse;
+
+bool CPU_IsHLTed(void);
 
 static void DrawRegisters(void) {
 	if (dbg.win_main == NULL || dbg.win_reg == NULL)
@@ -1171,21 +1171,29 @@ static void DrawRegisters(void) {
 	mvwprintw (dbg.win_reg,1,77,"%01X",GETFLAG(TF) ? 1:0);
 
 	SetColor(changed_flags&FLAG_IOPL);
-	mvwprintw (dbg.win_reg,2,72,"%01X",GETFLAG(IOPL)>>12);
+	mvwprintw (dbg.win_reg,2,72,"%01X",(unsigned int)(GETFLAG(IOPL)>>12));
 
 
 	SetColor(cpu.cpl ^ oldcpucpl);
-	mvwprintw (dbg.win_reg,2,78,"%01X",cpu.cpl);
+	mvwprintw (dbg.win_reg,2,78,"%01X",(unsigned int)cpu.cpl);
 
 	if (cpu.pmode) {
 		if (reg_flags & FLAG_VM) mvwprintw(dbg.win_reg,0,76,"VM86");
 		else if (cpu.code.big) mvwprintw(dbg.win_reg,0,76,"Pr32");
 		else mvwprintw(dbg.win_reg,0,76,"Pr16");
-		mvwprintw(dbg.win_reg,2,62,paging.enabled ? "PAGE" : "NOPG");
+		if (paging.enabled) {
+			if (do_pse)
+				mvwprintw(dbg.win_reg,2,60,"PAGEPSE");
+			else
+				mvwprintw(dbg.win_reg,2,60,"PAGE");
+		}
+		else {
+			mvwprintw(dbg.win_reg,2,60,"NOPG");
+		}
 	} else {
 		mvwprintw(dbg.win_reg,0,76,"Real");
 		mvwprintw(dbg.win_reg,2,62,"NOPG");
-    }
+	}
 
 	// Selector info, if available
 	if ((cpu.pmode) && curSelectorName[0]) {
@@ -1196,7 +1204,13 @@ static void DrawRegisters(void) {
 	}
 
 	wattrset(dbg.win_reg,0);
-	mvwprintw(dbg.win_reg,3,60,"%u       ",cycle_count);
+
+	mvwprintw(dbg.win_reg,3,60,"cc=%-8u ",(unsigned int)cycle_count);
+	if (CPU_IsHLTed()) mvwprintw(dbg.win_reg,3,73,"HLT ");
+	else mvwprintw(dbg.win_reg,3,73,"RUN ");
+
+	mvwprintw(dbg.win_reg,4,60,"pfi=%-6.9f ",(double)PIC_FullIndex());
+
 	wrefresh(dbg.win_reg);
 }
 
@@ -1476,6 +1490,8 @@ void SkipSpace(char*& hex) {
     while (*hex == ' ') hex++;
 }
 
+extern uint32_t cpu_sep_eip;
+
 uint32_t GetHexValue(char* const str, char* &hex,bool *parsed,int exprge)
 {
     uint32_t regval = 0;
@@ -1539,6 +1555,8 @@ uint32_t GetHexValue(char* const str, char* &hex,bool *parsed,int exprge)
             else if (something == "CR0") { regval = (uint32_t)cpu.cr0; }
             else if (something == "CR2") { regval = (uint32_t)paging.cr2; }
             else if (something == "CR3") { regval = (uint32_t)paging.cr3; }
+            else if (something == "CR4") { regval = (uint32_t)cpu.cr4; }
+            else if (something == "SYSENTER") { regval = (uint32_t)cpu_sep_eip; }
             else if (something == "EAX") { regval = reg_eax; }
             else if (something == "EBX") { regval = reg_ebx; }
             else if (something == "ECX") { regval = reg_ecx; }
@@ -2118,6 +2136,66 @@ bool ParseCommand(char* str) {
 		return true;
 	}
 
+	if (command == "SMP") { // Set memory with following values (physical address)
+		uint32_t ofs = GetHexValue(found,found); SkipSpace(found);
+		uint16_t count = 0;
+		bool parsed;
+
+		while (*found) {
+			char prefix = 'B';
+			uint32_t value;
+
+			/* allow d: w: b: prefixes */
+			if ((*found == 'B' || *found == 'W' || *found == 'D') && found[1] == ':') {
+				prefix = *found; found += 2;
+				value = GetHexValue(found,found,&parsed);
+			}
+			else {
+				value = GetHexValue(found,found,&parsed);
+			}
+
+			SkipSpace(found);
+			if (!parsed) {
+				DEBUG_ShowMsg("GetHexValue parse error at %s",found);
+				break;
+			}
+
+			if (prefix == 'D') {
+				physdev_writed((PhysPt)(ofs+count),value);
+				count += 4;
+			}
+			else if (prefix == 'W') {
+				physdev_writew((PhysPt)(ofs+count),value);
+				count += 2;
+			}
+			else if (prefix == 'B') {
+				physdev_writeb((PhysPt)(ofs+count),value);
+				count++;
+			}
+		}
+
+		if (count > 0)
+			DEBUG_ShowMsg("DEBUG: Memory changed (%u bytes)\n",(unsigned int)count);
+
+		return true;
+	}
+
+	if (command == "BPSYSENTER") {
+		if (Toggle_BreakSYSEnter())
+			DEBUG_ShowMsg("DEBUG: Breakpoint on SYSENTER set\n");
+		else
+			DEBUG_ShowMsg("DEBUG: Breakpoint on SYSENTER cleared\n");
+		return true;
+	}
+
+	if (command == "BPSYSEXIT") {
+		if (Toggle_BreakSYSExit())
+			DEBUG_ShowMsg("DEBUG: Breakpoint on SYSEXIT set\n");
+		else
+			DEBUG_ShowMsg("DEBUG: Breakpoint on SYSEXIT cleared\n");
+		return true;
+	}
+
 	if (command == "BP") { // Add new breakpoint
 		uint16_t seg = (uint16_t)GetHexValue(found,found);found++; // skip ":"
 		uint32_t ofs = GetHexValue(found,found);
@@ -2186,17 +2264,38 @@ bool ParseCommand(char* str) {
         DEBUG_EndPagedContent();
 		return true;
 	}
+    
+    if (command == "FM") { // Freeze memory value at address
+		uint16_t seg = (uint16_t)GetHexValue(found,found);found++; // skip ":"
+		uint32_t ofs = GetHexValue(found,found);
+        uint8_t value;
+		CBreakpoint* bp = CBreakpoint::AddMemBreakpoint(seg,ofs);
+        Bitu address = (Bitu)GetAddress(bp->GetSegment(),bp->GetOffset());
+		mem_readb_checked((PhysPt)address,&value);
+        if (bp){ 
+            bp->SetType(BKPNT_MEMORY_FREEZE);
+            bp->SetValue(value);
+        }
+		DEBUG_ShowMsg("DEBUG: Set memory freeze at %04X:%04X with value: %02X\n",seg,ofs,value);
+		return true;
+	}
 
 	if (command == "BPDEL") { // Delete Breakpoints
 		uint8_t bpNr	= (uint8_t)GetHexValue(found,found); 
 		if ((bpNr==0x00) && (*found=='*')) { // Delete all
 			CBreakpoint::DeleteAll();
+			Clear_SYSENTER_Debug();
 			DEBUG_ShowMsg("DEBUG: Breakpoints deleted.\n");
 		} else {
 			// delete single breakpoint
 			DEBUG_ShowMsg("DEBUG: Breakpoint deletion %s.\n",(CBreakpoint::DeleteByIndex(bpNr)?"success":"failure"));
 		}
 		return true;
+	}
+
+	if (command == "VRT") {
+		DEBUG_HaltOnRetrace = true;
+		command = "RUN";
 	}
 
 	if (command == "RUN") {
@@ -3581,6 +3680,7 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("SR [reg] [value]          - Set register value. Multiple pairs allowed.\n");
 		DEBUG_ShowMsg("SM [seg]:[off] [val] [.]..- Set memory with following values.\n");
 		DEBUG_ShowMsg("SMV [addr] [val] [.]..    - Set memory with following values at linear (virtual) address.\n");
+		DEBUG_ShowMsg("FM [seg]:[off]            - Freeze memory value at address.\n");
 		DEBUG_ShowMsg("EV [value [value] ...]    - Show register value(s).\n");
 		DEBUG_ShowMsg("IV [seg]:[off] [name]     - Create var name for memory address.\n");
 		DEBUG_ShowMsg("SV [filename]             - Save var list in file.\n");
@@ -3611,6 +3711,7 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("TIMERIRQ                  - Run the system timer.\n");
 		DEBUG_ShowMsg("TIME [time]               - Display or change the internal time.\n");
 		DEBUG_ShowMsg("DATE [date]               - Display or change the internal date.\n");
+		DEBUG_ShowMsg("VRT                       - Run, then enter debugger at next vertical retrace.\n");
 
 		DEBUG_ShowMsg("IN[P|W|D] [port]          - I/O port read byte/word/dword.\n");
 		DEBUG_ShowMsg("OUT[P|W|D] [port] [data]  - I/O port write byte/word/dword.\n");
@@ -3870,8 +3971,23 @@ void win_code_ui_up(int count) {
 extern "C" INPUT_RECORD * _pdcurses_hax_inputrecord(void);
 #endif
 
+/* NTS: DOSBox SVN and almost (or all?) forks of DOSBox
+ *      zero CPU_Cycles and CPU_CyclesLeft, which is a
+ *      perfectly fine way to enter the debugger, but
+ *      a side effect of this is that emulator time is
+ *      effectively jumped forward to the start of the
+ *      next 1ms tick. If you're debugging time-dependent
+ *      code this has the effect of code that magically
+ *      works when you debug it but crashes normally, or
+ *      code that magically breaks when you debug it but
+ *      runs fine otherwise.
+ *
+ *      See include/pic.h for how these variables affect
+ *      emulator time used everywhere else in this code,
+ *      specifically PIC_TickIndex() and PIC_FullIndex(). */
 int32_t DEBUG_Run(int32_t amount,bool quickexit) {
 	skipFirstInstruction = true;
+	CPU_CycleLeft += CPU_Cycles - amount;
 	CPU_Cycles = amount;
 	int32_t ret = (int32_t)(*cpudecoder)();
 	if (quickexit) SetCodeWinStart();
@@ -4490,11 +4606,11 @@ void DEBUG_Enable_Handler(bool pressed) {
 		showhelp=true;
 		DEBUG_ShowMsg("***| TYPE HELP (+ENTER) TO GET AN OVERVIEW OF ALL COMMANDS |***\n");
 	}
-	KEYBOARD_ClrBuffer();
+	//KEYBOARD_ClrBuffer();
     GFX_SetTitle(-1,-1,-1,false);
     runnormal = false;
-    if (debugrunmode==1) ParseCommand("RUN");
-    else if (debugrunmode==2) ParseCommand("RUNWATCH");
+    if (debugrunmode==1) {char command[] = "RUN"; ParseCommand(command);}
+    else if (debugrunmode==2) {char command[] = "RUNWATCH"; ParseCommand(command);}
 }
 
 void DEBUG_DrawScreen(void) {
@@ -4633,8 +4749,8 @@ static void LogEMS(void) {
     Bitu GetEMSPageFrameSize(void);
 
     DEBUG_ShowMsg("EMS page frame 0x%08lx-0x%08lx",
-        GetEMSPageFrameSegment()*16UL,
-        (GetEMSPageFrameSegment()*16UL)+GetEMSPageFrameSize()-1UL);
+        (long unsigned int)(GetEMSPageFrameSegment()*16UL),
+        (long unsigned int)((GetEMSPageFrameSegment()*16UL)+GetEMSPageFrameSize()-1UL));
     DEBUG_ShowMsg("Handle Page(p/l) Address");
 
     for (Bitu p=0;p < (GetEMSPageFrameSize() >> 14UL);p++) {
@@ -4656,14 +4772,14 @@ static void LogEMS(void) {
 
             DEBUG_ShowMsg("%6lu %4lu/%4lu %08lx-%08lx%s",(unsigned long)handle,
                 (unsigned long)p,(unsigned long)log_page,
-                (GetEMSPageFrameSegment()*16UL)+(p << 14UL),
-                (GetEMSPageFrameSegment()*16UL)+((p+1UL) << 14UL)-1,
+                (long unsigned int)((GetEMSPageFrameSegment()*16UL)+(p << 14UL)),
+                (long unsigned int)((GetEMSPageFrameSegment()*16UL)+((p+1UL) << 14UL)-1),
                 tmp);
         }
         else {
             DEBUG_ShowMsg("--     %4lu/     %08lx-%08lx",(unsigned long)p,
-                (GetEMSPageFrameSegment()*16UL)+(p << 14UL),
-                (GetEMSPageFrameSegment()*16UL)+((p+1UL) << 14UL)-1);
+                (long unsigned int)((GetEMSPageFrameSegment()*16UL)+(p << 14UL)),
+                (long unsigned int)((GetEMSPageFrameSegment()*16UL)+((p+1UL) << 14UL)-1));
         }
     }
 
@@ -4841,49 +4957,49 @@ static void LogIDT(void) {
 void LogPages(char* selname) {
     DEBUG_BeginPagedContent();
 
-	if (paging.enabled) {
-		char out1[512];
-		Bitu sel = GetHexValue(selname,selname);
-		if ((sel==0x00) && ((*selname==0) || (*selname=='*'))) {
-			for (unsigned int i=0; i<0xfffff; i++) {
-				Bitu table_addr=(paging.base.page<<12u)+(i >> 10u)*(Bitu)4u;
-				X86PageEntry table;
-				table.load=phys_readd((PhysPt)table_addr);
-				if (table.block.p) {
-					X86PageEntry entry;
-                    PhysPt entry_addr=(table.block.base<<12u)+(i & 0x3ffu)* 4u;
-					entry.load=phys_readd(entry_addr);
-					if (entry.block.p) {
-						sprintf(out1,"page %05Xxxx -> %04Xxxx  flags [uw] %x:%x::%x:%x [d=%x|a=%x]",
-							i,entry.block.base,entry.block.us,table.block.us,
-							entry.block.wr,table.block.wr,entry.block.d,entry.block.a);
-                        DEBUG_ShowMsg("%s",out1);
-					}
-				}
-			}
-		} else {
-			Bitu table_addr=(paging.base.page<<12u)+(sel >> 10u)*4u;
-			X86PageEntry table;
-			table.load=phys_readd((PhysPt)table_addr);
-			if (table.block.p) {
-				X86PageEntry entry;
-				Bitu entry_addr=((Bitu)table.block.base<<12u)+(sel & 0x3ffu)*4u;
-				entry.load=phys_readd((PhysPt)entry_addr);
-				sprintf(out1,"page %05lXxxx -> %04lXxxx  flags [puw] %x:%x::%x:%x::%x:%x",
-					(unsigned long)sel,
-					(unsigned long)entry.block.base,
-					entry.block.p,table.block.p,entry.block.us,table.block.us,entry.block.wr,table.block.wr);
-                DEBUG_ShowMsg("%s",out1);
-			} else {
-				sprintf(out1,"pagetable %03X not present, flags [puw] %x::%x::%x",
-					(int)(sel >> 10),
-					(int)table.block.p,
-					(int)table.block.us,
-					(int)table.block.wr);
-                DEBUG_ShowMsg("%s",out1);
-			}
-		}
-	}
+    if (paging.enabled) {
+	    char out1[512];
+	    Bitu sel = GetHexValue(selname,selname);
+	    if ((sel==0x00) && ((*selname==0) || (*selname=='*'))) {
+		    for (unsigned int i=0; i<0xfffff; i++) {
+			    Bitu table_addr=(paging.base.page<<12u)+(i >> 10u)*(Bitu)4u;
+			    X86PageEntry table;
+			    table.load=phys_readd((PhysPt)table_addr);
+			    if (table.block.p) {
+				    X86PageEntry entry;
+				    PhysPt entry_addr=(table.block.base<<12u)+(i & 0x3ffu)* 4u;
+				    entry.load=phys_readd(entry_addr);
+				    if (entry.block.p) {
+					    sprintf(out1,"page %05Xxxx -> %04Xxxx  flags [uw] %x:%x::%x:%x [d=%x|a=%x]",
+							    i,entry.block.base,entry.block.us,table.block.us,
+							    entry.block.wr,table.block.wr,entry.block.d,entry.block.a);
+					    DEBUG_ShowMsg("%s",out1);
+				    }
+			    }
+		    }
+	    } else {
+		    Bitu table_addr=(paging.base.page<<12u)+(sel >> 10u)*4u;
+		    X86PageEntry table;
+		    table.load=phys_readd((PhysPt)table_addr);
+		    if (table.block.p) {
+			    X86PageEntry entry;
+			    Bitu entry_addr=((Bitu)table.block.base<<12u)+(sel & 0x3ffu)*4u;
+			    entry.load=phys_readd((PhysPt)entry_addr);
+			    sprintf(out1,"page %05lXxxx -> %04lXxxx  flags [puw] %x:%x::%x:%x::%x:%x",
+					    (unsigned long)sel,
+					    (unsigned long)entry.block.base,
+					    entry.block.p,table.block.p,entry.block.us,table.block.us,entry.block.wr,table.block.wr);
+			    DEBUG_ShowMsg("%s",out1);
+		    } else {
+			    sprintf(out1,"pagetable %03X not present, flags [puw] %x::%x::%x",
+					    (int)(sel >> 10),
+					    (int)table.block.p,
+					    (int)table.block.us,
+					    (int)table.block.wr);
+			    DEBUG_ShowMsg("%s",out1);
+		    }
+	    }
+    }
 
     DEBUG_EndPagedContent();
 }
@@ -5126,7 +5242,8 @@ Bitu DEBUG_EnableDebugger(void)
 	if (!debugging || (debugging && debug_running))
 		DEBUG_Enable_Handler(true);
 
-	CPU_Cycles=CPU_CycleLeft=0;
+	CPU_CycleLeft += CPU_Cycles;
+	CPU_Cycles = 0;
 	return 0;
 }
 
@@ -5234,14 +5351,14 @@ void CDebugVar::DeleteAll(void)
 
 CDebugVar* CDebugVar::FindVar(PhysPt pt)
 {
-	if (varList.empty()) return 0;
+	if (varList.empty()) return nullptr;
 
 	std::vector<CDebugVar*>::size_type s = varList.size();
 	for(std::vector<CDebugVar*>::size_type i = 0; i != s; i++) {
 		CDebugVar* bp = varList[i];
 		if (bp->GetAdr() == pt) return bp;
 	}
-	return 0;
+	return nullptr;
 }
 
 bool CDebugVar::SaveVars(char* name) {

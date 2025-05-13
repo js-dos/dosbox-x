@@ -269,6 +269,7 @@ Bitu OUTPUT_SURFACE_GetBestMode(Bitu flags)
 
     flags &= ~GFX_LOVE_8;       //Disable love for 8bpp modes
                                 /* Check if we can satisfy the depth it loves */
+    flags &= ~GFX_SCALING;      //This output does not scale, and the aspect ratio correction looks like 1990s laptop hardware scaler crap
     if (flags & GFX_LOVE_8) testbpp = 8;
     else if (flags & GFX_LOVE_15) testbpp = 15;
     else if (flags & GFX_LOVE_16) testbpp = 16;
@@ -604,6 +605,7 @@ retry:
     mainMenu.setRedraw();
     GFX_DrawSDLMenu(mainMenu, mainMenu.display_list);
 #endif
+    ApplyPreventCap();
 
     return retFlags;
 }
@@ -737,7 +739,7 @@ void OUTPUT_SURFACE_EndUpdate(const uint16_t *changedLines)
         if (SDL_MUSTLOCK(sdl.surface)) {
             if (sdl.blit.surface) {
                 SDL_UnlockSurface(sdl.blit.surface);
-                int Blit = SDL_BlitSurface(sdl.blit.surface, 0, sdl.surface, &sdl.clip);
+                int Blit = SDL_BlitSurface(sdl.blit.surface, nullptr, sdl.surface, &sdl.clip);
                 LOG(LOG_MISC, LOG_WARN)("BlitSurface returned %d", Blit);
             }
             else {

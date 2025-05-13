@@ -47,6 +47,7 @@
 #include "../libs/physfs/physfs_platform_windows.c"
 #include "../libs/physfs/physfs_platform_winrt.cpp"
 #include "../libs/physfs/physfs_platform_haiku.cpp"
+#include "../libs/physfs/physfs_platform_os2.c"
 #include "../libs/physfs/physfs_unicode.c"
 
 extern int lfn_filefind_handle;
@@ -92,14 +93,14 @@ static char *normalize(char * name, const char *basedir) {
 class physfsFile : public DOS_File {
 public:
 	physfsFile(const char* name, PHYSFS_file * handle,uint16_t devinfo, const char* physname, bool write);
-	bool Read(uint8_t * data,uint16_t * size);
-	bool Write(const uint8_t * data,uint16_t * size);
-	bool Seek(uint32_t * pos,uint32_t type);
+	bool Read(uint8_t * data,uint16_t * size) override;
+	bool Write(const uint8_t * data,uint16_t * size) override;
+	bool Seek(uint32_t * pos,uint32_t type) override;
 	bool prepareRead();
 	bool prepareWrite();
-	bool Close();
-	uint16_t GetInformation(void);
-	bool UpdateDateTimeFromHost(void);
+	bool Close() override;
+	uint16_t GetInformation(void) override;
+	bool UpdateDateTimeFromHost(void) override;
 private:
 	PHYSFS_file * fhandle;
 	enum { READ,WRITE } last_action;
@@ -198,7 +199,7 @@ bool physfsDrive::FileStat(const char* name, FileStat_Block * const stat_block) 
     time_t mytime = statbuf.modtime;
 	/* Convert the stat to a FileStat */
 	struct tm *time;
-	if((time=localtime(&mytime))!=0) {
+	if((time=localtime(&mytime))!=nullptr) {
 		stat_block->time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 		stat_block->date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 	} else {
@@ -658,7 +659,7 @@ again:
 	find_size=(uint32_t)PHYSFS_fileLength(lfull_name);
     time_t mytime = statbuf.modtime;
 	struct tm *time;
-	if((time=localtime(&mytime))!=0){
+	if((time=localtime(&mytime))!=nullptr){
 		find_date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 		find_time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 	} else {
@@ -817,9 +818,6 @@ bool physfsFile::prepareWrite() {
 		//LOG_MSG("noCOW",pname,PHYSFS_tell(fhandle));
 		PHYSFS_close(fhandle);
 		fhandle = PHYSFS_openAppend(pname);
-#ifndef WIN32
-		fcntl(**(int**)fhandle->opaque,F_SETFL,0);
-#endif
 		PHYSFS_seek(fhandle, pos);
 	}
 	return true;
@@ -829,7 +827,7 @@ bool physfsFile::Close() {
 	// only close if one reference left
 	if (refCtr==1) {
 		PHYSFS_close(fhandle);
-		fhandle = 0;
+		fhandle = nullptr;
 		open = false;
 	};
 	return true;
@@ -848,7 +846,7 @@ physfsFile::physfsFile(const char* _name, PHYSFS_file * handle,uint16_t devinfo,
     time_t mytime = statbuf.modtime;
 	/* Convert the stat to a FileStat */
 	struct tm *time;
-	if((time=localtime(&mytime))!=0) {
+	if((time=localtime(&mytime))!=nullptr) {
 		this->time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 		this->date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 	} else {
@@ -860,7 +858,7 @@ physfsFile::physfsFile(const char* _name, PHYSFS_file * handle,uint16_t devinfo,
 	last_action=(write?WRITE:READ);
 
 	open=true;
-	name=0;
+	name=nullptr;
 	SetName(_name);
 }
 
@@ -871,7 +869,7 @@ bool physfsFile::UpdateDateTimeFromHost(void) {
     time_t mytime = statbuf.modtime;
 	/* Convert the stat to a FileStat */
 	struct tm *time;
-	if((time=localtime(&mytime))!=0) {
+	if((time=localtime(&mytime))!=nullptr) {
 		this->time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 		this->date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 	} else {

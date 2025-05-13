@@ -222,8 +222,8 @@ public:
 class IDEATADevice:public IDEDevice {
 public:
     IDEATADevice(IDEController *c,unsigned char disk_index,bool _slave);
-    virtual ~IDEATADevice();
-    virtual void writecommand(uint8_t cmd);
+    ~IDEATADevice();
+    void writecommand(uint8_t cmd) override;
 public:
     std::string id_serial;
     std::string id_firmware_rev;
@@ -231,8 +231,8 @@ public:
     unsigned char bios_disk_index;
     imageDisk *getBIOSdisk();
     void update_from_biosdisk();
-    virtual Bitu data_read(Bitu iolen); /* read from 1F0h data port from IDE device */
-    virtual void data_write(Bitu v,Bitu iolen);/* write to 1F0h data port to IDE device */
+    virtual Bitu data_read(Bitu iolen) override; /* read from 1F0h data port from IDE device */
+    virtual void data_write(Bitu v,Bitu iolen) override;/* write to 1F0h data port to IDE device */
     virtual void generate_identify_device();
     virtual void prepare_read(Bitu offset,Bitu size);
     virtual void prepare_write(Bitu offset,Bitu size);
@@ -240,7 +240,7 @@ public:
     virtual bool increment_current_address(Bitu count=1);
 public:
     Bitu multiple_sector_max,multiple_sector_count;
-    Bitu heads,sects,cyls,headshr,progress_count;
+    Bitu heads,sects,cyls,progress_count;
     Bitu phys_heads,phys_sects,phys_cyls;
     unsigned char sector[512 * 128] = {};
     Bitu sector_i,sector_total;
@@ -259,17 +259,18 @@ enum {
 class IDEATAPICDROMDevice:public IDEDevice {
 public:
     IDEATAPICDROMDevice(IDEController *c,unsigned char drive_index,bool _slave);
-    virtual ~IDEATAPICDROMDevice();
-    virtual void writecommand(uint8_t cmd);
+    ~IDEATAPICDROMDevice();
+    void writecommand(uint8_t cmd) override;
 public:
     std::string id_serial;
     std::string id_firmware_rev;
     std::string id_model;
     unsigned char drive_index;
+    Bitu sector_transfer_limit = 16;
     CDROM_Interface *getMSCDEXDrive();
     void update_from_cdrom();
-    virtual Bitu data_read(Bitu iolen); /* read from 1F0h data port from IDE device */
-    virtual void data_write(Bitu v,Bitu iolen);/* write to 1F0h data port to IDE device */
+    Bitu data_read(Bitu iolen) override; /* read from 1F0h data port from IDE device */
+    void data_write(Bitu v,Bitu iolen) override; /* write to 1F0h data port to IDE device */
     virtual void generate_identify_device();
     virtual void generate_mmc_inquiry();
     virtual void prepare_read(Bitu offset,Bitu size);
@@ -347,7 +348,30 @@ private:// Sorry, IDE devices and external code don't get to force IDE IRQs anym
     void lower_irq();
 };
 
+const char* ideslot[] = { "Primary", "Secondary", "Tertiary", "Quaternary", "Quinternary","Sexternary", "Septernary", "Octernary" };
+const char* master_slave[] = { "Master", "Slave" };
+
 static IDEController* idecontroller[MAX_IDE_CONTROLLERS]={NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
+
+int IDE_MatchCDROMDrive(char drv) {
+	for (unsigned int c=0;c < MAX_IDE_CONTROLLERS;c++) {
+		IDEController *cnt = idecontroller[c];
+		if (cnt != NULL) {
+			for (unsigned int d=0;d < 2;d++) {
+				IDEDevice *dev = cnt->device[d];
+				if (dev != NULL) {
+					if (dev->type == IDE_TYPE_CDROM) {
+						IDEATAPICDROMDevice *atapi = reinterpret_cast<IDEATAPICDROMDevice*>(dev);
+						if (atapi->drive_index == (unsigned char)(drv - 'A'))
+							return (c * 2) + d;
+					}
+				}
+			}
+		}
+	}
+
+	return -1;
+}
 
 static void IDE_DelayedCommand(Bitu pk/*which IDE device*/);
 static IDEController* GetIDEController(Bitu idx);
@@ -457,6 +481,16 @@ bool IDEATAPICDROMDevice::common_spinup_response(bool trigger,bool wait) {
 			PIC_RemoveSpecificEvents(IDE_ATAPI_SpinDown,pk);
 			PIC_RemoveSpecificEvents(IDE_ATAPI_CDInsertion,pk);
 			PIC_AddEvent(IDE_ATAPI_SpinDown,spindown_timeout/*ms*/,pk);
+		}
+	}
+
+	/* if the CD-ROM drive has mounted the empty drive, then ALWAYS return Medium Not Present */
+	CDROM_Interface *cdrom = getMSCDEXDrive();
+	if (cdrom) {
+		if (cdrom->class_id == CDROM_Interface::INTERFACE_TYPE::ID_FAKE) {
+			set_sense(/*SK=*/0x02,/*ASC=*/0x3A); /* Medium Not Present */
+//			LOG_MSG("ATAPI: Medium Not Ready");
+			return false;
 		}
 	}
 
@@ -689,7 +723,7 @@ void IDEATAPICDROMDevice::mode_sense() {
                                  *      1 (0x20) = Tray
                                  *      2 (0x40) = Popup
                                  *      3 (0x60) = Reserved
-                                 *      4 (0x80) = Changer with indivually changeable discs
+                                 *      4 (0x80) = Changer with individually changeable discs
                                  *      5 (0xA0) = Changer using a magazine mechanism
                                  *      6 (0xC0) = Reserved
                                  *      6 (0xE0) = Reserved */
@@ -856,7 +890,7 @@ void IDEATAPICDROMDevice::read_toc() {
     /* NTS: The SCSI MMC standards say we're allowed to indicate the return data
      *      is longer than it's allocation length. But here's the thing: some MS-DOS
      *      CD-ROM drivers will ask for the TOC but only provide enough room for one
-     *      entry (OAKCDROM.SYS) and if we signal more data than it's buffer, it will
+     *      entry (OAKCDROM.SYS) and if we signal more data than its buffer, it will
      *      reject our response and render the CD-ROM drive inaccessible. So to make
      *      this emulation work, we have to cut our response short to the driver's
      *      allocation length */
@@ -1179,9 +1213,16 @@ void IDEATAPICDROMDevice::on_atapi_busy_time() {
                     status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRQ|IDE_STATUS_DRIVE_SEEK_COMPLETE;
                 }
                 else {
-                    LOG_MSG("ATAPI: Failed to read %lu sectors at %lu\n",
-                        (unsigned long)TransferLength,(unsigned long)LBA);
-                    set_sense(/*SK=*/0x03,/*ASC=*/0x11); /* Medium Error: Unrecovered Read Error */
+                    if (cdrom->class_id == CDROM_Interface::INTERFACE_TYPE::ID_FAKE) {
+                        set_sense(/*SK=*/0x02,/*ASC=*/0x3A); /* Not Ready: Medium Not Present */
+                        LOG_MSG("ATAPI: Rejecting read %lu sectors at %lu as Medium Not Present\n",
+                            (unsigned long)TransferLength,(unsigned long)LBA);
+                    }
+                    else {
+                        set_sense(/*SK=*/0x03,/*ASC=*/0x11); /* Medium Error: Unrecovered Read Error */
+                        LOG_MSG("ATAPI: Failed to read %lu sectors at %lu\n",
+                            (unsigned long)TransferLength,(unsigned long)LBA);
+                    }
                     feature = 0xF4; /* abort sense=0xF */
                     count = 0x03; /* no more transfer */
                     sector_total = 0;/*nothing to transfer */
@@ -1253,9 +1294,16 @@ void IDEATAPICDROMDevice::on_atapi_busy_time() {
                     status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRQ|IDE_STATUS_DRIVE_SEEK_COMPLETE;
                 }
                 else {
-                    LOG_MSG("ATAPI: Failed to read %lu sectors at %lu\n",
-                        (unsigned long)TransferLength,(unsigned long)LBA);
-                    set_sense(/*SK=*/0x03,/*ASC=*/0x11); /* Medium Error: Unrecovered Read Error */
+                    if (cdrom->class_id == CDROM_Interface::INTERFACE_TYPE::ID_FAKE) {
+                        set_sense(/*SK=*/0x02,/*ASC=*/0x3A); /* Not Ready: Medium Not Present */
+                        LOG_MSG("ATAPI: Rejecting read %lu sectors at %lu as Medium Not Present\n",
+                            (unsigned long)TransferLength,(unsigned long)LBA);
+                    }
+                    else {
+                        set_sense(/*SK=*/0x03,/*ASC=*/0x11); /* Medium Error: Unrecovered Read Error */
+                        LOG_MSG("ATAPI: Failed to read %lu sectors at %lu\n",
+                            (unsigned long)TransferLength,(unsigned long)LBA);
+                    }
                     feature = 0xF4; /* abort sense=0xF */
                     count = 0x03; /* no more transfer */
                     sector_total = 0;/*nothing to transfer */
@@ -1459,9 +1507,27 @@ IDEATAPICDROMDevice::IDEATAPICDROMDevice(IDEController *c,unsigned char drive_in
     id_model = "DOSBox-X ATAPI CD-ROM";
 
     /* INQUIRY strings */
-    id_mmc_vendor_id = "DOSBox-X";
-    id_mmc_product_id = "ATAPI CD-ROM";
-    id_mmc_product_rev = "0.84-X";
+    if (IS_PC98_ARCH) {
+        /* The OAK IDE CD-ROM driver that most PC-98 HDI game images use?
+         * It will NOT talk to this emulation unless we report ourself as an NEC CD-ROM drive.
+         * Yes, really. It will issue an INQUIRY and then do a REP CMPSW on the first 20 bytes
+         * to make sure it says "NEC CD-ROM DRIVE". */
+        id_mmc_vendor_id = "NEC";
+        id_mmc_product_id = "CD-ROM DRIVE";
+        id_mmc_product_rev = "FAKE";
+        /* Second thing: That particular driver seems to assume the CD-ROM drive only transfers
+         * one CD-ROM sector per DRQ (like many CD-ROM drives in the 1990s did because they had
+         * small transfer buffers).
+         *
+         * We HAVE to emulate this behavior or else the PC-98 driver will stall and error out
+         * if any attempt is made to read more than one sector at a time! */
+        sector_transfer_limit = 1;
+    }
+    else {
+        id_mmc_vendor_id = "DOSBox-X";
+        id_mmc_product_id = "ATAPI CD-ROM";
+        id_mmc_product_rev = "0.84-X";
+    }
 }
 
 IDEATAPICDROMDevice::~IDEATAPICDROMDevice() {
@@ -1525,6 +1591,8 @@ void IDEATAPICDROMDevice::atapi_io_completion() {
                 /* NTS: In case you're wondering, it's legal to issue READ(10) with transfer length == 0.
                    MSCDEX.EXE does it when starting up, for example */
                 TransferLength = TransferLengthRemaining;
+                if (TransferLength > sector_transfer_limit)
+                    TransferLength = sector_transfer_limit;
                 if ((TransferLength*2048) > sizeof(sector))
                     TransferLength = sizeof(sector)/2048;
                 if ((TransferLength*2048) > sector_total)
@@ -1555,6 +1623,8 @@ void IDEATAPICDROMDevice::atapi_io_completion() {
 
                 TransferLength = TransferLengthRemaining;
                 if (TransferSectorSize > 0) {
+                    if (TransferLength > sector_transfer_limit)
+                        TransferLength = sector_transfer_limit;
                     if ((TransferLength*TransferSectorSize) > sizeof(sector))
                         TransferLength = sizeof(sector)/TransferSectorSize;
                     if ((TransferLength*TransferSectorSize) > sector_total)
@@ -1752,6 +1822,12 @@ void IDEATADevice::io_completion() {
             status = IDE_STATUS_BUSY;
             PIC_RemoveSpecificEvents(IDE_DelayedCommand,pk);
             PIC_AddEvent(IDE_DelayedCommand,((progress_count == 0 && !faked_command) ? 0.1 : 0.00001)/*ms*/,pk);
+            break;
+        case 0xEC: /* IDENTIFY */
+            feature = 0;
+            status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRIVE_SEEK_COMPLETE;
+            state = IDE_DEV_READY;
+            allow_writing = true;
             break;
         default: /* most commands: signal drive ready, return to ready state */
             /* NTS: Some MS-DOS CD-ROM drivers will loop endlessly if we never set "drive seek complete"
@@ -1965,6 +2041,8 @@ void IDEATAPICDROMDevice::atapi_cmd_completion() {
                 TransferLengthRemaining = TransferLength;
 
                 if (TransferSectorSize > 0) {
+                    if (TransferLength > sector_transfer_limit)
+                        TransferLength = sector_transfer_limit;
                     if ((TransferLength*TransferSectorSize) > sizeof(sector))
                         TransferLength = sizeof(sector)/TransferSectorSize;
                     if ((TransferLength*TransferSectorSize) > sector_total)
@@ -2028,6 +2106,8 @@ void IDEATAPICDROMDevice::atapi_cmd_completion() {
                    happily set itself up to transfer that many sectors in one IDE command! */
                 /* NTS: In case you're wondering, it's legal to issue READ(10) with transfer length == 0.
                    MSCDEX.EXE does it when starting up, for example */
+                if (TransferLength > sector_transfer_limit)
+                    TransferLength = sector_transfer_limit;
                 if ((TransferLength*2048) > sizeof(sector))
                     TransferLength = sizeof(sector)/2048;
                 if ((TransferLength*2048) > sector_total)
@@ -2086,6 +2166,8 @@ void IDEATAPICDROMDevice::atapi_cmd_completion() {
                    happily set itself up to transfer that many sectors in one IDE command! */
                 /* NTS: In case you're wondering, it's legal to issue READ(10) with transfer length == 0.
                    MSCDEX.EXE does it when starting up, for example */
+                if (TransferLength > sector_transfer_limit)
+                    TransferLength = sector_transfer_limit;
                 if ((TransferLength*2048) > sizeof(sector))
                     TransferLength = sizeof(sector)/2048;
                 if ((TransferLength*2048) > sector_total)
@@ -2538,7 +2620,6 @@ IDEATADevice::IDEATADevice(IDEController *c,unsigned char disk_index,bool _slave
     : IDEDevice(c,_slave), id_serial("8086"), id_firmware_rev("8086"), id_model("DOSBox-X IDE disk"), bios_disk_index(disk_index) {
     sector_i = sector_total = 0;
 
-    headshr = 0;
     type = IDE_TYPE_HDD;
     multiple_sector_max = sizeof(sector) / 512;
     multiple_sector_count = 1;
@@ -2578,67 +2659,53 @@ void IDEATAPICDROMDevice::update_from_cdrom() {
 }
 
 void IDEATADevice::update_from_biosdisk() {
-    imageDisk *dsk = getBIOSdisk();
-    if (dsk == NULL) {
-        LOG_MSG("WARNING: IDE update from BIOS disk failed, disk not available\n");
-        return;
-    }
+	imageDisk *dsk = getBIOSdisk();
+	if (dsk == NULL) {
+		LOG_MSG("WARNING: IDE update from BIOS disk failed, disk not available\n");
+		return;
+	}
 
-    headshr = 0;
-    geo_translate = false;
-    cyls = dsk->cylinders;
-    heads = dsk->heads;
-    sects = dsk->sectors;
+	geo_translate = false;
+	cyls = dsk->cylinders;
+	heads = dsk->heads;
+	sects = dsk->sectors;
 
-    /* One additional correction: The disk image is probably using BIOS-style geometry
-       translation (such as C/H/S 1024/64/63) which is impossible given that the IDE
-       standard only allows up to 16 heads. So we have to translate the geometry. */
-    while (heads > 16 && (heads & 1) == 0) {
-        cyls <<= 1U;
-        heads >>= 1U;
-        headshr++;
-    }
+	if (heads > 16) {
+		geo_translate = true;
 
-    /* If we can't divide the heads down, then pick a LBA-like mapping that is good enough.
-     * Note that if what we pick does not evenly map to the INT 13h geometry, and the partition
-     * contained within is not an LBA type FAT16/FAT32 partition, then Windows 95's IDE driver
-     * will ignore this device and fall back to using INT 13h. For user convenience we will
-     * print a warning to reminder the user of exactly that. */
-    if (heads > 16) {
-        unsigned long tmp;
+		/* One additional correction: The disk image is probably using BIOS-style geometry
+		   translation (such as C/H/S 1024/64/63) which is impossible given that the IDE
+		   standard only allows up to 16 heads. So we have to translate the geometry. */
+		while (heads > 16 && (heads & 1) == 0)
+			heads >>= 1U;
 
-        geo_translate = true;
+		/* If we can't divide the heads down, then pick a LBA-like mapping that is good enough.
+		 * Note that if what we pick does not evenly map to the INT 13h geometry, and the partition
+		 * contained within is not an LBA type FAT16/FAT32 partition, then Windows 95's IDE driver
+		 * will ignore this device and fall back to using INT 13h. For user convenience we will
+		 * print a warning to reminder the user of exactly that. */
+		if (heads > 16) {
+			sects = 63;
+			heads = 16;
+		}
 
-        tmp = heads * cyls * sects;
-        sects = 63;
-        heads = 16;
-        cyls = (tmp + ((63 * 16) - 1)) / (63 * 16);
-        LOG_MSG("WARNING: Unable to reduce heads to 16 and below\n");
-        LOG_MSG("If at all possible, please consider using INT 13h geometry with a head\n");
-        LOG_MSG("count that is easier to map to the BIOS, like 240 heads or 128 heads/track.\n");
-        LOG_MSG("Some OSes, such as Windows 95, will not enable their 32-bit IDE driver if\n");
-        LOG_MSG("a clean mapping does not exist between IDE and BIOS geometry.\n");
-        LOG_MSG("Mapping BIOS DISK C/H/S %u/%u/%u as IDE %u/%u/%u (non-straightforward mapping)\n",
-            (unsigned int)dsk->cylinders,
-            (unsigned int)dsk->heads,
-            (unsigned int)dsk->sectors,
-            (unsigned int)cyls,
-            (unsigned int)heads,
-            (unsigned int)sects);
-    }
-    else {
-        LOG_MSG("Mapping BIOS DISK C/H/S %u/%u/%u as IDE %u/%u/%u\n",
-            (unsigned int)dsk->cylinders,
-            (unsigned int)dsk->heads,
-            (unsigned int)dsk->sectors,
-            (unsigned int)cyls,
-            (unsigned int)heads,
-            (unsigned int)sects);
-    }
+		{
+			uint64_t tmp = ((uint64_t)dsk->diskSizeK << (uint64_t)10) / (uint64_t)dsk->sector_size;
+			cyls = (tmp + (uint64_t)(sects * heads) - (uint64_t)1) / ((uint64_t)(sects * heads));
+		}
 
-    phys_heads = heads;
-    phys_sects = sects;
-    phys_cyls = cyls;
+		LOG_MSG("Mapping BIOS DISK C/H/S %u/%u/%u as IDE %u/%u/%u\n",
+			(unsigned int)dsk->cylinders,
+			(unsigned int)dsk->heads,
+			(unsigned int)dsk->sectors,
+			(unsigned int)cyls,
+			(unsigned int)heads,
+			(unsigned int)sects);
+	}
+
+	phys_heads = heads;
+	phys_sects = sects;
+	phys_cyls = cyls;
 }
 
 void IDE_Auto(signed char &index,bool &slave) {
@@ -2704,10 +2771,14 @@ void IDE_CDROM_Attach(signed char index,bool slave,unsigned char drive_index) {
 
     if (index < 0 || index >= MAX_IDE_CONTROLLERS) return;
     c = idecontroller[index];
-    if (c == NULL) return;
+    if(c == NULL) {
+        LOG_MSG("IDE: WARNING: IDE %s controller not available. Check setting or specify another controller.", ideslot[index]);
+        return;
+    }
+
 
     if (c->device[slave?1:0] != NULL) {
-        LOG_MSG("IDE: Controller %u %s already taken\n",index,slave?"slave":"master");
+        LOG_MSG("IDE: WARNING: IDE controller %s %s already occupied, specify another slot.",ideslot[index],master_slave[slave?1:0]);
         return;
     }
 
@@ -2717,9 +2788,13 @@ void IDE_CDROM_Attach(signed char index,bool slave,unsigned char drive_index) {
     }
 
     dev = new IDEATAPICDROMDevice(c,drive_index,slave);
-    if (dev == NULL) return;
+    if(dev == NULL) {
+        LOG_MSG("IMGMOUNT: Failed to allocate CD-ROM drive %c to IDE %s %s", drive_index + 'A', ideslot[index], master_slave[slave ? 1 : 0]);
+        return;
+    }
     dev->update_from_cdrom();
     c->device[slave?1:0] = (IDEDevice*)dev;
+    LOG_MSG("IMGMOUNT: CD-ROM image mounted to drive %c (IDE %s %s)", drive_index + 'A', ideslot[index], master_slave[slave ? 1 : 0]);
 }
 
 /* drive_index = drive letter 0...A to 25...Z */
@@ -2778,10 +2853,13 @@ void IDE_Hard_Disk_Attach(signed char index,bool slave,unsigned char bios_disk_i
 
     if (index < 0 || index >= MAX_IDE_CONTROLLERS) return;
     c = idecontroller[index];
-    if (c == NULL) return;
+    if(c == NULL) {
+        LOG_MSG("IDE: WARNING: IDE %s controller not available. Check setting or specify another controller.", ideslot[index]);
+        return;
+    }
 
     if (c->device[slave?1:0] != NULL) {
-        LOG_MSG("IDE: Controller %u %s already taken\n",index,slave?"slave":"master");
+        LOG_MSG("IDE: WARNING: IDE controller %s %s already occupied, specify another slot.", ideslot[index], master_slave[slave ? 1 : 0]);
         return;
     }
 
@@ -2794,6 +2872,7 @@ void IDE_Hard_Disk_Attach(signed char index,bool slave,unsigned char bios_disk_i
     if (dev == NULL) return;
     dev->update_from_biosdisk();
     c->device[slave?1:0] = (IDEDevice*)dev;
+    LOG_MSG("IMGMOUNT: HDD image mounted to drive no. %d (IDE %s %s)", bios_disk_index, ideslot[index], master_slave[slave?1:0]);
 }
 
 /* bios_disk_index = index into BIOS INT 13h disk array: imageDisk *imageDiskList[MAX_DISK_IMAGES]; */
@@ -2812,25 +2891,26 @@ void IDE_Hard_Disk_Detach(unsigned char bios_disk_index) {
     }
 }
 
-char idepos[4];
-char * GetIDEPosition(unsigned char bios_disk_index) {
+
+std::string GetIDEPosition(unsigned char bios_disk_index) {
+    std::string idepos;
     for (int index = 0; index < MAX_IDE_CONTROLLERS; index++) {
         IDEController *c = GetIDEController(index);
         if (c)
         for (int slave = 0; slave < 2; slave++) {
             IDEATADevice *dev = dynamic_cast<IDEATADevice*>(c->device[slave]);
             if (dev && dev->bios_disk_index == bios_disk_index) {
-                sprintf(idepos, "%d%c", index+1, slave?'s':'m');
+                idepos = std::to_string(index + 1) + (slave ? 's' : 'm');
                 return idepos;
             }
         }
     }
-    return (char*)("");
+    idepos = "n/a";
+    return idepos;
 }
 
-std::string info="";
 std::string GetIDEInfo() {
-    info="";
+    std::string info;
     for (int index = 0; index < MAX_IDE_CONTROLLERS; index++) {
         IDEController *c = GetIDEController(index);
         if (c)
@@ -2871,7 +2951,7 @@ static Bitu IDE_SelfIO_In(IDEController *ide,Bitu port,Bitu len) {
     if (ide->int13fakev86io && IDE_CPU_Is_Vm86()) {
         /* Trigger I/O in virtual 8086 mode, where the OS can trap it and act on it.
          * Windows 95 uses V86 traps to help "autodetect" what IDE drive and port the
-         * BIOS uses on INT 13h so that it's internal IDE driver can take over, which
+         * BIOS uses on INT 13h so that its internal IDE driver can take over, which
          * is the whole reason for this hack. */
         return CPU_ForceV86FakeIO_In(port,len);
     }
@@ -2986,7 +3066,7 @@ void IDE_EmuINT13DiskReadByBIOS_LBA(unsigned char disk,uint64_t lba) {
                          * what IDE hard disk and controller corresponds to what DOS
                          * drive. So to get 32-bit disk access to work in Windows 95,
                          * we have to put on a good show to convince Windows 95 we're
-                         * a legitimate BIOS INT 13h call doing it's job. */
+                         * a legitimate BIOS INT 13h call doing its job. */
                         IDE_SelfIO_In(ide,ide->base_io+7u,1);        /* dum de dum reading status */
                         IDE_SelfIO_Out(ide,ide->base_io+6u,(ms<<4u)+0xE0u+(lba>>24u),1); /* drive and head */
                         IDE_SelfIO_In(ide,ide->base_io+7u,1);        /* dum de dum reading status */
@@ -3128,7 +3208,7 @@ void IDE_EmuINT13DiskReadByBIOS(unsigned char disk,unsigned int cyl,unsigned int
                     }
 
                     /* translate BIOS INT 13h geometry to IDE geometry */
-                    if (ata->headshr != 0 || ata->geo_translate) {
+                    if (ata->geo_translate) {
                         unsigned long lba;
 
                         if (dsk == NULL) return;
@@ -3157,7 +3237,7 @@ void IDE_EmuINT13DiskReadByBIOS(unsigned char disk,unsigned int cyl,unsigned int
                          * what IDE hard disk and controller corresponds to what DOS
                          * drive. So to get 32-bit disk access to work in Windows 95,
                          * we have to put on a good show to convince Windows 95 we're
-                         * a legitimate BIOS INT 13h call doing it's job. */
+                         * a legitimate BIOS INT 13h call doing its job. */
                         IDE_SelfIO_In(ide,ide->base_io+7u,1);        /* dum de dum reading status */
                         IDE_SelfIO_Out(ide,ide->base_io+6u,(ms<<4u)+0xA0u+head,1); /* drive and head */
                         IDE_SelfIO_In(ide,ide->base_io+7u,1);        /* dum de dum reading status */
@@ -3856,6 +3936,19 @@ void IDEDevice::host_reset_complete() {
     asleep = false;
     allow_writing = true;
     state = IDE_DEV_READY;
+
+    /* device passed, according to ATA standard regarding result of diagnostics test. */
+    /* NTS: The Linux kernel WILL NOT talk to this IDE emulation unless we signal success through
+     *      the feature/error register. If we don't respond this way, then according to the
+     *      source code, it considers what we provide a possibly phantom drive. See Linux kernel
+     *      6.1.29 drivers/ata/libata-sff.c, functions ata_sff_softreset, ata_sff_dev_classify.
+     *      Another side effect of failing to set feature is that the Linux kernel will talk to
+     *      our hard drive emulation though with a warning about diagnostics failure, but will
+     *      then completely ignore any ATAPI CD-ROM emulation we provide.
+     *
+     *      Windows XP never issues a reset or DIAGNOSTIC to the drive and doesn't care, apparently. */
+    feature = 0x01;
+
     status = IDE_STATUS_DRIVE_READY | IDE_STATUS_DRIVE_SEEK_COMPLETE;
 }
 
@@ -4019,7 +4112,8 @@ void IDEATAPICDROMDevice::writecommand(uint8_t cmd) {
             break;
         case 0xEF: /* SET FEATURES */
             if (feature == 0x66/*Disable reverting to power on defaults*/ ||
-                feature == 0xCC/*Enable reverting to power on defaults*/) {
+                feature == 0xCC/*Enable reverting to power on defaults*/ ||
+                feature == 0x03/*Set transfer mode according to sector count register (required by Linux kernel)*/) {
                 /* ignore */
                 status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRIVE_SEEK_COMPLETE;
                 state = IDE_DEV_READY;
@@ -4228,7 +4322,8 @@ void IDEATADevice::writecommand(uint8_t cmd) {
             break;
         case 0xEF: /* SET FEATURES */
             if (feature == 0x66/*Disable reverting to power on defaults*/ ||
-                feature == 0xCC/*Enable reverting to power on defaults*/) {
+                feature == 0xCC/*Enable reverting to power on defaults*/ ||
+                feature == 0x03/*Set transfer mode according to sector count register (required by Linux kernel)*/) {
                 /* ignore */
                 status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRIVE_SEEK_COMPLETE;
                 state = IDE_DEV_READY;

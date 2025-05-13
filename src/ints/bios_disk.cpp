@@ -35,6 +35,7 @@
 #include "../dos/drives.h"
 #include "mapper.h"
 #include "ide.h"
+#include "cpu.h"
 
 #if defined(_MSC_VER)
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
@@ -45,7 +46,7 @@ extern const uint8_t freedos_mbr[];
 extern int bootdrive, tryconvertcp;
 extern bool int13_disk_change_detect_enable, skipintprog, rsize;
 extern bool int13_extensions_enable, bootguest, bootvm, use_quick_reboot;
-extern bool isDBCSCP(), isKanji1_gbk(uint8_t chr), shiftjis_lead_byte(int c);
+bool isDBCSCP(), isKanji1_gbk(uint8_t chr), shiftjis_lead_byte(int c), CheckDBCSCP(int32_t codepage);
 extern bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/);
 
 #define STATIC_ASSERTM(A,B) static_assertion_##A##_##B
@@ -518,7 +519,7 @@ struct fatFromDOSDrive
                         uint16_t uname[4];
 #if defined(WIN32)
                         uint16_t cp = GetACP(), cpbak = dos.loaded_codepage;
-                        if (tryconvertcp && cpbak == 437 && (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951))
+                        if (tryconvertcp && cpbak == 437 && CheckDBCSCP(cp))
                             dos.loaded_codepage = cp;
 #endif
                         for (size_t i=0; i < lfnlen; i++) {
@@ -659,7 +660,7 @@ struct fatFromDOSDrive
 			}
 
 			struct SumInfo { uint64_t used_bytes; const StringToPointerHashMap<void>* filter; };
-			static void SumFileSize(const char* path, bool is_dir, uint32_t size, uint16_t, uint16_t, uint8_t, Bitu data)
+			static void SumFileSize(const char* path, bool /*is_dir*/, uint32_t size, uint16_t, uint16_t, uint8_t, Bitu data)
 			{
 				if (!((SumInfo*)data)->filter || !((SumInfo*)data)->filter->Get(path))
 					((SumInfo*)data)->used_bytes += (size + (32*1024-1)) / (32*1024) * (32*1024); // count as 32 kb clusters
@@ -1103,11 +1104,11 @@ bool saveDiskImage(imageDisk *image, const char *name) {
 
 diskGeo DiskGeometryList[] = {
     { 160,  8, 1, 40, 0, 512,  64, 1, 0xFE},      // IBM PC double density 5.25" single-sided 160KB
-    { 180,  9, 1, 40, 0, 512,  64, 2, 0xFC},      // IBM PC double density 5.25" single-sided 180KB
-    { 200, 10, 1, 40, 0, 512,   0, 0,    0},      // DEC Rainbow double density 5.25" single-sided 200KB (I think...)
+    { 180,  9, 1, 40, 0, 512,  64, 1, 0xFC},      // IBM PC double density 5.25" single-sided 180KB
+    { 200, 10, 1, 40, 0, 512,  64, 2, 0xFC},      // DEC Rainbow double density 5.25" single-sided 200KB (I think...)
     { 320,  8, 2, 40, 1, 512, 112, 2, 0xFF},      // IBM PC double density 5.25" double-sided 320KB
     { 360,  9, 2, 40, 1, 512, 112, 2, 0xFD},      // IBM PC double density 5.25" double-sided 360KB
-    { 400, 10, 2, 40, 1, 512,   0, 0,    0},      // DEC Rainbow double density 5.25" double-sided 400KB (I think...)
+    { 400, 10, 2, 40, 1, 512, 112, 2, 0xFD},      // DEC Rainbow double density 5.25" double-sided 400KB (I think...)
     { 640,  8, 2, 80, 3, 512, 112, 2, 0xFB},      // IBM PC double density 3.5" double-sided 640KB
     { 720,  9, 2, 80, 3, 512, 112, 2, 0xF9},      // IBM PC double density 3.5" double-sided 720KB
     {1200, 15, 2, 80, 2, 512, 224, 1, 0xF9},      // IBM PC double density 5.25" double-sided 1.2MB
@@ -1116,6 +1117,8 @@ diskGeo DiskGeometryList[] = {
     {2880, 36, 2, 80, 6, 512, 240, 2, 0xF0},      // IBM PC high density 3.5" double-sided 2.88MB
 
     {1232,  8, 2, 77, 7, 1024,192, 1, 0xFE},      // NEC PC-98 high density 3.5" double-sided 1.2MB "3-mode"
+    {1520, 19, 2, 80, 2, 512, 224, 1, 0xF9},      // IBM PC high density 5.25" double-sided 1.52MB (XDF)
+    {1840, 23, 2, 80, 4, 512, 224, 1, 0xF0},      // IBM PC high density 3.5" double-sided 1.84MB (XDF)
 
     {   0,  0, 0,  0, 0,    0,  0, 0,    0}
 };
@@ -1132,7 +1135,7 @@ static bool swapping_requested;
 
 void CMOS_SetRegister(Bitu regNr, uint8_t val); //For setting equipment word
 
-/* 2 floppys and 2 harddrives, max */
+/* 2 floppies and 2 harddrives, max */
 bool imageDiskChange[MAX_DISK_IMAGES]={false};
 imageDisk *imageDiskList[MAX_DISK_IMAGES]={NULL};
 imageDisk *diskSwap[MAX_SWAPPABLE_DISKS]={NULL};
@@ -1265,7 +1268,9 @@ bool getSwapRequest(void) {
 }
 
 void swapInDrive(int drive, unsigned int position=0) {
-    if (drive>1||swapInDisksSpecificDrive!=drive) return;
+#if 0  /* FIX_ME: Disabled to swap CD by IMGSWAP command (Issue #4932). Revert this if any regression occurs */
+    //if (drive>1||swapInDisksSpecificDrive!=drive) return;
+#endif
     if (position<1) swapPosition++;
     else swapPosition=position-1;
     if(diskSwap[swapPosition] == NULL) swapPosition = 0;
@@ -1432,6 +1437,20 @@ imageDisk::imageDisk(FILE* diskimg, const char* diskName, uint32_t cylinders, ui
     active = true;
     this->hardDrive = hardDrive;
     floppytype = 0;
+}
+
+
+void imageDisk::UpdateFloppyType(void) {
+	uint8_t i=0;
+
+	while (DiskGeometryList[i].ksize!=0x0) {
+		if ((DiskGeometryList[i].ksize==diskSizeK) || (DiskGeometryList[i].ksize+1==diskSizeK)) {
+			floppytype = i;
+			LOG_MSG("Updating floppy type to %u BIOS type 0x%02x",floppytype,GetBiosType());
+			break;
+		}
+		i++;
+	}
 }
 
 imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint32_t imgSizeK, bool isHardDisk) : diskSizeK(imgSizeK), diskimg(imgFile), image_length((uint64_t)imgSizeK * 1024) {
@@ -1697,7 +1716,7 @@ void imageDisk::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSec
     Bitu bigdisk_shift = 0;
 
     if (IS_PC98_ARCH) {
-        /* TODO: PC-98 has it's own 4096 cylinder limit */
+        /* TODO: PC-98 has its own 4096 cylinder limit */
     }
     else {
         if(setCyl > 16384) LOG_MSG("Warning: This disk image is too big.");
@@ -1805,9 +1824,17 @@ void IDE_EmuINT13DiskReadByBIOS_LBA(unsigned char disk,uint64_t lba);
 
 void diskio_delay(Bits value/*bytes*/, int type = -1);
 
+/* For El Torito "No emulation" INT 13 services */
+unsigned char INT13_ElTorito_NoEmuDriveNumber = 0;
+signed char INT13_ElTorito_IDEInterface = -1; /* (controller * 2) + (is_slave?1:0) */
+char INT13_ElTorito_NoEmuCDROMDrive = 0;
+
+bool GetMSCDEXDrive(unsigned char drive_letter, CDROM_Interface **_cdrom);
+
+
 static Bitu INT13_DiskHandler(void) {
     uint16_t segat, bufptr;
-    uint8_t sectbuf[512];
+    uint8_t sectbuf[2048/*CD-ROM support*/];
     uint8_t  drivenum;
     Bitu  i,t;
     last_drive = reg_dl;
@@ -1899,7 +1926,7 @@ static Bitu INT13_DiskHandler(void) {
 
         /* INT 13h is limited to 512 bytes/sector (as far as I know).
          * The sector buffer in this function is limited to 512 bytes/sector,
-         * so this is also a protection against overruning the stack if you
+         * so this is also a protection against overrunning the stack if you
          * mount a PC-98 disk image (1024 bytes/sector) and try to read it with INT 13h. */
         if (imageDiskList[drivenum]->sector_size > sizeof(sectbuf)) {
             LOG(LOG_MISC,LOG_DEBUG)("INT 13h: Read failed because disk bytes/sector on drive %c is too large",(char)drivenum+'A');
@@ -1960,7 +1987,7 @@ static Bitu INT13_DiskHandler(void) {
 
         /* INT 13h is limited to 512 bytes/sector (as far as I know).
          * The sector buffer in this function is limited to 512 bytes/sector,
-         * so this is also a protection against overruning the stack if you
+         * so this is also a protection against overrunning the stack if you
          * mount a PC-98 disk image (1024 bytes/sector) and try to read it with INT 13h. */
         if (imageDiskList[drivenum]->sector_size > sizeof(sectbuf)) {
             LOG(LOG_MISC,LOG_DEBUG)("INT 13h: Write failed because disk bytes/sector on drive %c is too large",(char)drivenum+'A');
@@ -2125,7 +2152,7 @@ static Bitu INT13_DiskHandler(void) {
             }
             CALLBACK_SCF(false);
         } else {
-            if (drivenum <DOS_DRIVES && (Drives[drivenum] != 0 || drivenum <2)) {
+            if (drivenum <DOS_DRIVES && (Drives[drivenum] || drivenum <2)) {
                 if (drivenum <2) {
                     //TODO use actual size (using 1.44 for now).
                     reg_ah = (int13_disk_change_detect_enable?2:1); // type
@@ -2204,6 +2231,37 @@ static Bitu INT13_DiskHandler(void) {
             CALLBACK_SCF(true);
             return CBRET_NONE;
         }
+        if (INT13_ElTorito_NoEmuDriveNumber != 0 && INT13_ElTorito_NoEmuDriveNumber == reg_dl) {
+                CDROM_Interface *src_drive = NULL;
+                if (!GetMSCDEXDrive(INT13_ElTorito_NoEmuCDROMDrive - 'A', &src_drive)) {
+                        reg_ah = 0x01;
+                        CALLBACK_SCF(true);
+                        return CBRET_NONE;
+                }
+
+                segat = dap.seg;
+                bufptr = dap.off;
+                for(i=0;i<dap.num;i++) {
+                        static_assert( sizeof(sectbuf) >= 2048, "not big enough" );
+                        diskio_delay(512);
+                        if (killRead || !src_drive->ReadSectorsHost(sectbuf, false, dap.sector+i, 1)) {
+                                real_writew(SegValue(ds),reg_si+2,i); // According to RBIL this should update the number of blocks field to what was successfully transferred
+                                LOG_MSG("Error in CDROM read");
+                                killRead = false;
+                                reg_ah = 0x04;
+                                CALLBACK_SCF(true);
+                                return CBRET_NONE;
+                        }
+
+                        for(t=0;t<2048;t++) {
+                                real_writeb(segat,bufptr,sectbuf[t]);
+                                bufptr++;
+                        }
+                }
+                reg_ah = 0x00;
+                CALLBACK_SCF(false);
+                return CBRET_NONE;
+        }
 
         if (!any_images) {
             // Inherit the Earth cdrom (uses it as disk test)
@@ -2232,6 +2290,7 @@ static Bitu INT13_DiskHandler(void) {
             IDE_EmuINT13DiskReadByBIOS_LBA(reg_dl,dap.sector+i);
 
             if((last_status != 0x00) || killRead) {
+                real_writew(SegValue(ds),reg_si+2,i); // According to RBIL this should update the number of blocks field to what was successfully transferred
                 LOG_MSG("Error in disk read");
                 killRead = false;
                 reg_ah = 0x04;
@@ -2331,6 +2390,45 @@ static Bitu INT13_DiskHandler(void) {
         reg_ah = 0x00;
         CALLBACK_SCF(false);
         } break;
+    case 0x4B: /* Terminate disk emulation or get emulation status */
+        /* NTS: Windows XP CD-ROM boot requires this call to work or else setup cannot find its own files. */
+        if (reg_dl == 0x7F || (INT13_ElTorito_NoEmuDriveNumber != 0 && INT13_ElTorito_NoEmuDriveNumber == reg_dl)) {
+            if (reg_al <= 1) {
+                PhysPt p = (SegValue(ds) << 4) + reg_si;
+                phys_writeb(p + 0x00,0x13);
+                phys_writeb(p + 0x01,(0/*no emulation*/) + ((INT13_ElTorito_IDEInterface >= 0) ? 0x40 : 0));
+                phys_writeb(p + 0x02,INT13_ElTorito_NoEmuDriveNumber);
+                if (INT13_ElTorito_IDEInterface >= 0) {
+                        phys_writeb(p + 0x03,(unsigned char)(INT13_ElTorito_IDEInterface >> 1)); /* which IDE controller */
+                        phys_writew(p + 0x08,INT13_ElTorito_IDEInterface & 1);/* bit 0: IDE master/slave */
+                }
+                else {
+                        phys_writeb(p + 0x03,0);
+                        phys_writew(p + 0x08,0);
+                }
+                phys_writed(p + 0x04,0);
+                phys_writew(p + 0x0A,0);
+                phys_writew(p + 0x0C,0);
+                phys_writew(p + 0x0E,0);
+                phys_writeb(p + 0x10,0);
+                phys_writeb(p + 0x11,0);
+                phys_writeb(p + 0x12,0);
+                reg_ah = 0x00;
+                CALLBACK_SCF(false);
+                break;
+            }
+            else {
+                reg_ah=0xff;
+                CALLBACK_SCF(true);
+                return CBRET_NONE;
+            }
+        }
+        else {
+            reg_ah=0xff;
+            CALLBACK_SCF(true);
+            return CBRET_NONE;
+        }
+        break;
     default:
         LOG(LOG_BIOS,LOG_ERROR)("INT13: Function %x called on drive %x (dos drive %d)", (int)reg_ah, (int)reg_dl, (int)drivenum);
         reg_ah=0xff;
@@ -3597,7 +3695,7 @@ void LogPrintPartitionTable(const std::vector<_PC98RawPartition> &parts) {
 		const _PC98RawPartition &part = parts[i];
 
 		LOG(LOG_DOSMISC,LOG_DEBUG)("IPL #%u: boot=%u active=%u startchs=%u/%u/%u endchs=%u/%u/%u '%s'",
-			(unsigned int)i,(part.mid&0x80)?1:0,(part.sid&0x80)?1:0,
+        (unsigned int)i,(part.mid&0x80)?1:0,(part.sid&0x80)?1:0,
 			part.cyl,part.head,part.sector,part.end_cyl,part.end_head,part.end_sector,
 			std::string((char*)part.name,sizeof(part.name)).c_str());
 	}
@@ -3614,5 +3712,255 @@ void LogPrintPartitionTable(const std::vector<partTable::partentry_t> &parts) {
 			(unsigned long long)part.absSectStart,
 			(unsigned long long)part.partSize);
 	}
+}
+
+
+uint8_t imageDiskEmptyDrive::Read_Sector(uint32_t /*head*/,uint32_t /*cylinder*/,uint32_t /*sector*/,void * /*data*/,unsigned int /*req_sector_size*/) {
+	return 0x05;
+}
+
+uint8_t imageDiskEmptyDrive::Write_Sector(uint32_t /*head*/,uint32_t /*cylinder*/,uint32_t /*sector*/,const void * /*data*/,unsigned int /*req_sector_size*/) {
+	return 0x05;
+}
+
+uint8_t imageDiskEmptyDrive::Read_AbsoluteSector(uint32_t /*sectnum*/, void * /*data*/) {
+	return 0x05;
+}
+
+uint8_t imageDiskEmptyDrive::Write_AbsoluteSector(uint32_t /*sectnum*/, const void * /*data*/) {
+	return 0x05;
+}
+
+imageDiskEmptyDrive::imageDiskEmptyDrive() : imageDisk(ID_EMPTY_DRIVE) {
+	active = true;
+	sector_size = 512;
+	heads = 2;
+	cylinders = 80;
+	sectors = 18;
+	diskSizeK = 1440;
+}
+
+imageDiskEmptyDrive::~imageDiskEmptyDrive() {
+}
+
+/////
+
+unsigned int INT13Xfer = 0;
+size_t INT13XferSize = 4096;
+
+static void imageDiskCallINT13(void) {
+	unsigned int rv = CALLBACK_RealPointer(call_int13);
+	Bitu oldIF=GETFLAG(IF);
+	SETFLAGBIT(IF,true);
+	uint16_t oldcs=SegValue(cs);
+	uint32_t oldeip=reg_eip;
+	SegSet16(cs,rv>>16);
+	reg_eip=(rv&0xFFFF)+4+5;
+	DOSBOX_RunMachine();
+	reg_eip=oldeip;
+	SegSet16(cs,oldcs);
+	SETFLAGBIT(IF,oldIF);
+}
+
+uint8_t imageDiskINT13Drive::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
+	if (!enable_int13 || busy) return subdisk->Read_Sector(head,cylinder,sector,data,req_sector_size);
+
+	uint8_t ret = 0x05;
+	unsigned int retry = 3;
+
+	if (req_sector_size == 0) req_sector_size = sector_size;
+
+//	LOG_MSG("INT13 read C/H/S %u/%u/%u busy=%u",cylinder,head,sector,busy);
+
+	if (!busy && sector_size == req_sector_size && sector_size <= INT13XferSize) {
+		busy = true;
+
+		if (INT13Xfer == 0) INT13Xfer = DOS_GetMemory(INT13XferSize/16u,"INT 13 transfer buffer");
+
+		unsigned int s_eax = reg_eax;
+		unsigned int s_ebx = reg_ebx;
+		unsigned int s_ecx = reg_ecx;
+		unsigned int s_edx = reg_edx;
+		unsigned int s_esi = reg_esi;
+		unsigned int s_edi = reg_edi;
+		unsigned int s_esp = reg_esp;
+		unsigned int s_ebp = reg_ebp;
+		unsigned int s_es  = SegValue(es);
+		unsigned int s_fl  = reg_flags;
+
+again:
+		reg_eax = 0x200/*read command*/ | 1/*count*/;
+		reg_ebx = 0;
+		reg_ch = cylinder;
+		reg_cl = sector;
+		reg_dh = head;
+		reg_dl = bios_disk;
+		CPU_SetSegGeneral(es,INT13Xfer);
+
+		imageDiskCallINT13();
+
+		if (reg_flags & FLAG_CF) {
+			ret = reg_ah;
+			if (ret == 0) ret = 0x05;
+
+			if (ret == 6/*disk change*/) {
+				diskChangeFlag = true;
+				if (--retry > 0) goto again;
+			}
+		}
+		else {
+			MEM_BlockRead32(INT13Xfer<<4,data,sector_size);
+			data = (void*)((char*)data + sector_size);
+			if ((++sector) >= (sectors + 1)) {
+				assert(sector == (sectors + 1));
+				sector = 1;
+				if ((++head) >= heads) {
+					assert(head == heads);
+					head = 0;
+					cylinder++;
+				}
+			}
+		}
+
+		reg_eax = s_eax;
+		reg_ebx = s_ebx;
+		reg_ecx = s_ecx;
+		reg_edx = s_edx;
+		reg_esi = s_esi;
+		reg_edi = s_edi;
+		reg_esp = s_esp;
+		reg_ebp = s_ebp;
+		reg_flags = s_fl;
+		CPU_SetSegGeneral(es,s_es);
+
+		busy = false;
+	}
+
+	return ret;
+}
+
+uint8_t imageDiskINT13Drive::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
+	if (INT13Xfer == 0) INT13Xfer = DOS_GetMemory(INT13XferSize/16u,"INT 13 transfer buffer");
+
+	return subdisk->Write_Sector(head,cylinder,sector,data,req_sector_size);
+}
+
+uint8_t imageDiskINT13Drive::Read_AbsoluteSector(uint32_t sectnum, void * data) {
+	unsigned int c,h,s;
+
+	if (sectors == 0 || heads == 0)
+		return 0x05;
+
+	s = (sectnum % sectors) + 1;
+	h = (sectnum / sectors) % heads;
+	c = (sectnum / sectors / heads);
+	return Read_Sector(h,c,s,data);
+}
+
+uint8_t imageDiskINT13Drive::Write_AbsoluteSector(uint32_t sectnum, const void * data) {
+	unsigned int c,h,s;
+
+	if (sectors == 0 || heads == 0)
+		return 0x05;
+
+	s = (sectnum % sectors) + 1;
+	h = (sectnum / sectors) % heads;
+	c = (sectnum / sectors / heads);
+	return Write_Sector(h,c,s,data);
+}
+
+void imageDiskINT13Drive::UpdateFloppyType(void) {
+	subdisk->UpdateFloppyType();
+}
+
+void imageDiskINT13Drive::Set_Reserved_Cylinders(Bitu resCyl) {
+	subdisk->Set_Reserved_Cylinders(resCyl);
+}
+
+uint32_t imageDiskINT13Drive::Get_Reserved_Cylinders() {
+	return subdisk->Get_Reserved_Cylinders();
+}
+
+void imageDiskINT13Drive::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) {
+	heads = setHeads;
+	cylinders = setCyl;
+	sectors = setSect;
+	sector_size = setSectSize;
+	return subdisk->Set_Geometry(setHeads,setCyl,setSect,setSectSize);
+}
+
+void imageDiskINT13Drive::Get_Geometry(uint32_t * getHeads, uint32_t *getCyl, uint32_t *getSect, uint32_t *getSectSize) {
+	return subdisk->Get_Geometry(getHeads,getCyl,getSect,getSectSize);
+}
+
+uint8_t imageDiskINT13Drive::GetBiosType(void) {
+	return subdisk->GetBiosType();
+}
+
+uint32_t imageDiskINT13Drive::getSectSize(void) {
+	return subdisk->getSectSize();
+}
+
+bool imageDiskINT13Drive::detectDiskChange(void) {
+	if (enable_int13 && !busy) {
+		busy = true;
+
+		unsigned int s_eax = reg_eax;
+		unsigned int s_ebx = reg_ebx;
+		unsigned int s_ecx = reg_ecx;
+		unsigned int s_edx = reg_edx;
+		unsigned int s_esi = reg_esi;
+		unsigned int s_edi = reg_edi;
+		unsigned int s_esp = reg_esp;
+		unsigned int s_ebp = reg_ebp;
+		unsigned int s_fl  = reg_flags;
+
+		reg_eax = 0x1600/*disk change detect*/;
+		reg_dl = bios_disk;
+		CPU_SetSegGeneral(es,INT13Xfer);
+
+		imageDiskCallINT13();
+
+		if (reg_flags & FLAG_CF) {
+			if (reg_ah == 0x06) {
+				LOG(LOG_MISC,LOG_DEBUG)("INT13 image disk change flag");
+				diskChangeFlag = true;
+			}
+		}
+
+		reg_eax = s_eax;
+		reg_ebx = s_ebx;
+		reg_ecx = s_ecx;
+		reg_edx = s_edx;
+		reg_esi = s_esi;
+		reg_edi = s_edi;
+		reg_esp = s_esp;
+		reg_ebp = s_ebp;
+		reg_flags = s_fl;
+
+		busy = false;
+	}
+
+	return imageDisk::detectDiskChange();
+}
+
+imageDiskINT13Drive::imageDiskINT13Drive(imageDisk *sdisk) : imageDisk(ID_INT13) {
+	subdisk = sdisk;
+	subdisk->Addref();
+
+	drvnum         = subdisk->drvnum;
+	diskname       = subdisk->diskname;
+	active         = subdisk->active;
+	sector_size    = subdisk->sector_size;
+	heads          = subdisk->heads;
+	cylinders      = subdisk->cylinders;
+	sectors        = subdisk->sectors;
+	hardDrive      = subdisk->hardDrive;
+	diskSizeK      = subdisk->diskSizeK;
+	diskChangeFlag = subdisk->diskChangeFlag;
+}
+
+imageDiskINT13Drive::~imageDiskINT13Drive() {
+	subdisk->Release();
 }
 

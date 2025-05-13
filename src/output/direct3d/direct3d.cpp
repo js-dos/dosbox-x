@@ -1035,9 +1035,9 @@ HRESULT CDirect3D::LoadPixelShader(const char * shader, double scalex, double sc
 	// Compare optimal scaling factor
 	bool dblgfx=((scalex < scaley ? scalex : scaley) >= psEffect->getScale());
 
-	std::string message = "This pixel shader may be unneeded or have undesired effect:\n\n"+std::string(shader)+"\n\nDo you want to load the pixel shader anyway?\n\n(You may append 'forced' to the pixelshader setting to force load the pixel shader without this message)";
+	std::string message = formatString(MSG_Get("PIXEL_SHADER_WARN"), shader);
 	if(dblgfx || forced || systemmessagebox("Direct3D shader", message.c_str(), "yesno","question", 1)) {
-	    message = "Loaded pixel shader - "+std::string(shader);
+	    message = formatString(MSG_Get("PIXEL_SHADER_LOADED"), shader);
 	    if (informd3d) systemmessagebox("Direct3D shader", message.c_str(), "ok","info", 1);
 	    LOG_MSG("D3D:Pixel shader %s active", shader);
 	    RENDER_SetForceUpdate(psEffect->getForceUpdate());
@@ -1083,6 +1083,7 @@ HRESULT CDirect3D::LoadPixelShader(void)
 #endif
 
     psEffect->setinputDim((float)dwWidth, (float)dwHeight);
+    psEffect->setoutputDim((float)dwScaledWidth, (float)dwScaledHeight);
     if(FAILED(psEffect->LoadEffect(shader_translate_directory(pshader).c_str())) || FAILED(psEffect->Validate())) {
 	LOG_MSG("D3D:Pixel shader error:");
 
@@ -1543,7 +1544,7 @@ void CDirect3D::SetupSceneScaled(void)
     if (psActive) {
         D3DXMatrixScaling(&m_matWorld, (float)dwScaledWidth, (float)dwScaledHeight, 1.0f);
         { /* translation matrix to make dwX and dwY effective. Note that the code inherited from Daum naturally
-             centers the image on screen by it's design, so the calculation has to account for that. */
+             centers the image on screen by its design, so the calculation has to account for that. */
             /* NTS: The reason we go to these great pains for pixel shaders is that there are other forks of
                     DOSBox that have this same Direct3D code, but without this fork's alterations that use
                     pure integer coordinates. The shaders require the -0.5 to 0.5 vertex and texture coordinates

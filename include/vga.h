@@ -212,6 +212,7 @@ typedef struct {
 	bool has_split;
 	bool vret_triggered;
 	bool vga_override;
+	bool modeswitch_set;
 	bool doublescan_set;
 	bool doublescan_effect;
 	bool char9_set;
@@ -380,11 +381,11 @@ typedef struct {
 		uint8_t			evf;				// [15:15] EVF Enable Vertical Filtering
 
 		// (MM81EC Stream FIFO and RAS Controls)
-		uint8_t			fifo_alloc_ps;		// Interpretation of [4:0], where 5 bits are number of slots alloted to secondary stream.
+		uint8_t			fifo_alloc_ps;		// Interpretation of [4:0], where 5 bits are number of slots allotted to secondary stream.
 											// N = secondary stream slots	 This value is set to 24 - N
 		uint8_t			fifo_alloc_ss;		// Interpretation of [4:0], set to N (up to 24)
-		uint8_t			fifo_ss_threshhold;	// Threshhold at which FIFO refill of secondary stream is triggered (low water point). Must be <= alloc_ss
-		uint8_t			fifo_ps_threshhold;	// Threshhold at which FIFO refill of primary stream is triggered (low water point). Must be <= alloc_ps
+		uint8_t			fifo_ss_threshhold;	// Threshold at which FIFO refill of secondary stream is triggered (low water point). Must be <= alloc_ss
+		uint8_t			fifo_ps_threshhold;	// Threshold at which FIFO refill of primary stream is triggered (low water point). Must be <= alloc_ps
 		uint8_t			ras_rl;				// [15:15] RL RAS Low Time Control
 		uint8_t			ras_rp;				// [16:16] RP RAS Pre-Charge Control
 		uint8_t			edo_wsctl;			// [18:18] EDO Memory Wait State Control
@@ -606,6 +607,7 @@ typedef struct VGA_Memory_t {
     uint32_t    memsize = 0;
     uint32_t    memmask = 0;
     uint32_t    memmask_crtc = 0;       // in CRTC-visible units (depends on byte/word/dword mode)
+    uint32_t    memsize_original = 0;	// memsize prior to rounding up to a power of 2
 } VGA_Memory;
 
 typedef struct {
@@ -794,8 +796,21 @@ void SVGA_Setup_TsengET3K(void);
 void SVGA_Setup_ParadisePVGA1A(void);
 void SVGA_Setup_Driver(void);
 
+void SVGA_Setup_ATI(void);
+bool VGA_IsCaptureEnabled(void);
+void VGA_UpdateCapturePending(void);
+bool VGA_CaptureHasNextFrame(void);
+void VGA_CaptureStartNextFrame(void);
+void VGA_CaptureMarkError(void);
+bool VGA_CaptureValidateCurrentFrame(void);
+void SD3_Reset(bool enable);
+void SetClock_S3(Bitu which,Bitu target);
+
 // Amount of video memory required for a mode, implemented in int10_modes.cpp
 Bitu VideoModeMemSize(Bitu mode);
+bool VGA_DetermineMode_IsDCGA(void);
+void VGA_DetermineMode_StandardVGA(void);
+void VGA_DetermineMode_S3(void);
 
 extern uint32_t ExpandTable[256];
 extern uint32_t FillTable[16];
@@ -808,6 +823,9 @@ extern uint32_t TXT_FG_Table[16];
 extern uint32_t TXT_BG_Table[16];
 extern uint32_t Expand16Table[4][16];
 extern uint32_t Expand16BigTable[0x10000];
+
+extern int hack_lfb_yadjust;
+extern int hack_lfb_xadjust;
 
 void VGA_DAC_UpdateColorPalette();
 
@@ -829,6 +847,28 @@ extern unsigned char GFX_bpp;
 extern unsigned char *pc98_pgraph_current_display_page;
 /* current CPU page (controlled by A6h) */
 extern unsigned char *pc98_pgraph_current_cpu_page;
+
+extern int                          vga_memio_delay_ns;
+extern bool                         enable_supermegazeux_256colortext;
+extern bool                         vga_memio_lfb_delay;
+extern bool                         gdc_5mhz_mode;
+extern bool                         gdc_5mhz_mode_initial;
+extern bool                         enable_pc98_egc;
+extern bool                         enable_pc98_grcg;
+extern bool                         enable_pc98_16color;
+extern bool                         enable_pc98_256color;
+extern bool                         enable_pc98_256color_planar;
+extern bool                         enable_pc98_188usermod;
+extern bool                         GDC_vsync_interrupt;
+extern uint8_t                      GDC_display_plane;
+extern bool                         pc98_256kb_boundary;
+extern bool                         want_fm_towns;
+extern bool                         enveten;
+
+extern bool enable_pci_vga;
+
+extern unsigned int vbe_window_granularity;
+extern unsigned int vbe_window_size;
 
 /* functions to help cleanup memory map access instead of hardcoding offsets.
  * your C++ compiler should be smart enough to inline these into the body of this function. */
@@ -891,5 +931,27 @@ static inline unsigned char *pc98_vram_256bank_from_window(const unsigned int b)
 }
 
 #define VRAM98_TEXT         ( pc98_vram_text() )
+
+#ifdef VGA_INTERNAL
+#define gfx(blah) vga.gfx.blah
+#define seq(blah) vga.seq.blah
+#define crtc(blah) vga.crtc.blah
+#endif
+
+#define IS_RESET ((vga.seq.reset&0x3)!=0x3)
+#define IS_SCREEN_ON ((vga.seq.clocking_mode&0x20)==0)
+
+bool J3_IsCga4Dcga();
+void UpdateCGAFromSaveState(void);
+void INT10_PC98_CurMode_Relocate(void);
+unsigned int VGA_ComplexityCheck_ODDEVEN(void);
+void VGA_VsyncUpdateMode(VGA_Vsync vsyncmode);
+uint32_t GetReportedVideoMemorySize(void);
+extern void VGA_TweakUserVsyncOffset(float val);
+void VGA_UnsetupMisc(void);
+void VGA_UnsetupAttr(void);
+void VGA_UnsetupDAC(void);
+void VGA_UnsetupGFX(void);
+void VGA_UnsetupSEQ(void);
 
 #endif

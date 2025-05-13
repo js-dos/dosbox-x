@@ -64,6 +64,10 @@
 #define MIXER_SSIZE 4
 #define MIXER_VOLSHIFT 13
 
+#ifdef C_SDL2
+SDL_AudioDeviceID SDL2_AudioDevice = 0; /* valid IDs are 2 or higher, 1 for compat, 0 is never a valid ID */
+#endif
+
 static INLINE int16_t MIXER_CLIP(Bits SAMP) {
     if (SAMP < MAX_AUDIO) {
         if (SAMP > MIN_AUDIO)
@@ -837,11 +841,19 @@ static void MIXER_MixData(Bitu fracs/*render up to*/) {
 }
 
 static void MIXER_FillUp(void) {
+#ifdef C_SDL2
+    SDL_LockAudioDevice(SDL2_AudioDevice);
+#else
     SDL_LockAudio();
+#endif
     float index = PIC_TickIndex();
     if (index < 0) index = 0;
     MIXER_MixData((Bitu)((double)index * ((Bitu)mixer.samples_this_ms.w * mixer.samples_this_ms.fd)));
+#ifdef C_SDL2
+    SDL_UnlockAudioDevice(SDL2_AudioDevice);
+#else
     SDL_UnlockAudio();
+#endif
 }
 
 void MixerChannel::FillUp(void) {
@@ -856,7 +868,11 @@ void MIXER_MixSingle(Bitu /*val*/) {
 static void MIXER_Mix(void) {
     Bitu thr;
 
+#ifdef C_SDL2
+    SDL_LockAudioDevice(SDL2_AudioDevice);
+#else
     SDL_LockAudio();
+#endif
 
     /* render */
     assert((mixer.work_in+mixer.samples_per_ms.w) <= MIXER_BUFSIZE);
@@ -884,7 +900,11 @@ static void MIXER_Mix(void) {
     memset(&mixer.work[mixer.work_in][0],0,sizeof(int32_t)*2*mixer.samples_this_ms.w);
     mixer.samples_rendered_ms.fn = 0;
     mixer.samples_rendered_ms.w = 0;
+#ifdef C_SDL2
+    SDL_UnlockAudioDevice(SDL2_AudioDevice);
+#else
     SDL_UnlockAudio();
+#endif
     MIXER_FillUp();
 }
 
@@ -1011,7 +1031,7 @@ public:
         if (!w) vol1=vol0;
     }
 
-    void Run(void) {
+    void Run(void) override {
         if (cmd->FindExist("-?", false) || cmd->FindExist("/?", false)) {
 			WriteOut("Displays or changes the current sound mixer volumes.\n\n"
                     "MIXER [/GUI|/NOSHOW] [/LISTMIDI [handler]] [channel volume]\n\n"
@@ -1074,7 +1094,7 @@ MixerChannel* MixerObject::Install(MIXER_Handler handler,Bitu freq,const char * 
         return MIXER_AddChannel(handler,freq,name);
     } else {
         E_Exit("already added mixer channel.");
-        return 0; //Compiler happy
+        return nullptr; //Compiler happy
     }
 }
 
@@ -1188,7 +1208,7 @@ void MIXER_Init() {
     /* Initialize the internal stuff */
     mixer.prebuffer_samples=0;
     mixer.prebuffer_wait=true;
-    mixer.channels=0;
+    mixer.channels = nullptr;
     mixer.pos=0;
     mixer.done=0;
     memset(mixer.work,0,sizeof(mixer.work));
@@ -1208,13 +1228,34 @@ void MIXER_Init() {
     spec.userdata=NULL;
     spec.samples=(Uint16)mixer.blocksize;
 
+#ifdef C_SDL2
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+        LOG(LOG_MISC,LOG_DEBUG)("MIXER:Can't initialize SDL audio: %s , running in nosound mode.",SDL_GetError());
+        mixer.nosound = true;
+    }
+#endif
+
     if (mixer.nosound) {
         LOG(LOG_MISC,LOG_DEBUG)("MIXER:No Sound Mode Selected.");
         TIMER_AddTickHandler(MIXER_Mix);
+#ifdef C_SDL2
+    } else if ((SDL2_AudioDevice=SDL_OpenAudioDevice(NULL, 0, &spec, &obtained, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_SAMPLES_CHANGE)) == 0) {
+#else
     } else if (SDL_OpenAudio(&spec, &obtained) <0 ) {
+#endif
         mixer.nosound = true;
         LOG(LOG_MISC,LOG_DEBUG)("MIXER:Can't open audio: %s , running in nosound mode.",SDL_GetError());
         TIMER_AddTickHandler(MIXER_Mix);
+    } else if (obtained.format != AUDIO_S16SYS) {
+        mixer.nosound = true;
+        LOG(LOG_MISC,LOG_DEBUG)("MIXER:Failed to get the sample format I wanted.");
+        TIMER_AddTickHandler(MIXER_Mix);
+#ifdef C_SDL2
+        SDL_CloseAudioDevice(SDL2_AudioDevice);
+        SDL2_AudioDevice = 0;
+#else
+        SDL_CloseAudio();
+#endif
     } else {
         if(((Bitu)mixer.freq != (Bitu)obtained.freq) || ((Bitu)mixer.blocksize != (Bitu)obtained.samples))
             LOG(LOG_MISC,LOG_DEBUG)("MIXER:Got different values from SDL: freq %d, blocksize %d",(int)obtained.freq,(int)obtained.samples);
@@ -1223,7 +1264,11 @@ void MIXER_Init() {
         mixer.blocksize=obtained.samples;
         TIMER_AddTickHandler(MIXER_Mix);
         if (mixer.sampleaccurate) PIC_AddEvent(MIXER_MixSingle,1000.0 / mixer.freq);
+#ifdef C_SDL2
+        SDL_PauseAudioDevice(SDL2_AudioDevice, 0);
+#else
         SDL_PauseAudio(0);
+#endif
     }
     mixer_start_pic_time = PIC_FullIndex();
     mixer_sample_counter = 0;
@@ -1332,7 +1377,7 @@ public:
 	{}
 
 private:
-	virtual void getBytes(std::ostream& stream)
+	void getBytes(std::ostream& stream) override
 	{
 
 		//*************************************************
@@ -1351,7 +1396,7 @@ private:
 		POD_Save_Tandy_Sound(stream);
 	}
 
-	virtual void setBytes(std::istream& stream)
+	void setBytes(std::istream& stream) override
 	{
 
 		//*************************************************

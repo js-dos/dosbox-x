@@ -90,6 +90,10 @@ for arch in ${architectures}; do
     CXXFLAGS="${CXXFLAGS}${new}"
     export CFLAGS LDFLAGS CPPFLAGS CXXFLAGS
 
+    # prefer to compile against our own copy of SDLnet 1.x
+    echo "Compiling our internal SDLnet 1.x"
+    (cd vs/sdlnet && ./build-dosbox.sh) || exit 1
+
     # prefer to compile against our own zlib
     echo "Compiling our internal zlib"
     (cd vs/zlib && ./build-dosbox.sh) || exit 1
@@ -128,7 +132,7 @@ for arch in ${architectures}; do
 
     # if Brew has installed packages, try to use those too
     if [ -n "${!brew_cmd}" ]; then
-        echo "Brew is installed, I'm going to use it's libraries too"
+        echo "Brew is installed, I'm going to use its libraries too"
         new="-I$(${!brew_cmd} --prefix)/include "
         nld="-L$(${!brew_cmd} --prefix)/lib "
         CFLAGS="${CFLAGS}${new}"

@@ -51,6 +51,7 @@
 #include "sdlmain.h"
 #include "menudef.h"
 #include "build_timestamp.h"
+#include "version_string.h"
 
 #include <output/output_ttf.h>
 
@@ -118,7 +119,7 @@ SHELL_Cmd cmd_list[]={
 // Advanced commands specific to DOSBox-X
 //{	"ADDKEY",		1,		&DOS_Shell::CMD_ADDKEY,		"SHELL_CMD_ADDKEY_HELP"}, // ADDKEY as a program (Z:\BIN\ADDKEY.COM) instead of shell command
 {	"DX-CAPTURE",	1,		&DOS_Shell::CMD_DXCAPTURE,  "SHELL_CMD_DXCAPTURE_HELP"},
-{0,0,0,0}
+{ nullptr, 0, nullptr, nullptr }
 };
 
 const char *GetCmdName(int i) {
@@ -127,18 +128,28 @@ const char *GetCmdName(int i) {
 }
 
 extern int enablelfn, lfn_filefind_handle, file_access_tries, lastmsgcp;
-extern bool date_host_forced, usecon, outcon, rsize, autoboxdraw, dbcs_sbcs, sync_time, manualtime, inshell, noassoc, dotype, loadlang;
+extern bool date_host_forced, usecon, outcon, rsize, autoboxdraw, dbcs_sbcs, sync_time, manualtime, inshell, noassoc, dotype, loadlang, chinasea;
 extern unsigned long freec;
 extern uint8_t DOS_GetAnsiAttr(void);
 extern uint16_t countryNo, altcp_to_unicode[256];
 extern bool isDBCSCP(), isKanji1(uint8_t chr), shiftjis_lead_byte(int c), TTF_using(void), Network_IsNetworkResource(const char * filename);
 extern bool CheckBoxDrawing(uint8_t c1, uint8_t c2, uint8_t c3, uint8_t c4), GFX_GetPreventFullscreen(void), DOS_SetAnsiAttr(uint8_t attr);
 extern bool systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
-extern void Load_Language(std::string name), SwitchLanguage(int oldcp, int newcp, bool confirm), GetExpandedPath(std::string &path);
+extern void Load_Language(std::string name), GetExpandedPath(std::string &path);
 extern void MAPPER_AutoType(std::vector<std::string> &sequence, const uint32_t wait_ms, const uint32_t pace_ms, bool choice);
 extern void DOS_SetCountry(uint16_t countryNo), DOSV_FillScreen(void);
+void clearFontCache(void);
 std::string GetDOSBoxXPath(bool withexe=false);
-FILE *testLoadLangFile(const char *fname);
+Bitu DOS_ChangeCodepage(int32_t codepage, const char* codepagefile);
+bool CheckDBCSCP(int32_t codepage), SwitchLanguage(int oldcp, int newcp, bool confirm);
+void makestdcp950table(), makeseacp951table();
+#if C_OPENGL
+bool OpenGL_using(void);
+#endif
+void UpdateSDLDrawTexture();
+
+static int32_t lastsetcp = 0;
+bool CHCP_changed = false;
 
 /* support functions */
 static char empty_char = 0;
@@ -235,7 +246,7 @@ bool DOS_Shell::CheckConfig(char* cmd_in,char*line) {
 bool enable_config_as_shell_commands = false;
 
 bool DOS_Shell::execute_shell_cmd(char *name, char *arguments) {
-	SHELL_Cmd shell_cmd = {};
+	// SHELL_Cmd shell_cmd = {}; /* unused */
 	uint32_t cmd_index=0;
 	while (cmd_list[cmd_index].name) {
 		if (strcasecmp(cmd_list[cmd_index].name,name)==0) {
@@ -1418,7 +1429,7 @@ void DOS_Shell::CMD_CHDIR(char * args) {
 		if(drive == 'Z')
 			WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT"),toupper(targetdisplay));
 	} else if (!DOS_ChangeDir(sargs)) {
-		/* Changedir failed. Check if the filename is longer then 8 and/or contains spaces */
+		/* Changedir failed. Check if the filename is longer than 8 and/or contains spaces */
 	   
 		std::string temps(args),slashpart;
 		std::string::size_type separator = temps.find_first_of("\\/");
@@ -2088,21 +2099,29 @@ void DOS_Shell::CMD_DIR(char * args) {
 		if (!dirPaused(this, w_size, optP, optW)) {dos.dta(save_dta);return;}
 		uint8_t drive=dta.GetSearchDrive();
 		uint64_t free_space=1024u*1024u*100u;
-		if (Drives[drive]) {
-			uint32_t bytes_sector32;uint32_t sectors_cluster32;uint32_t total_clusters32;uint32_t free_clusters32;
-			if ((dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10)) &&
-				Drives[drive]->AllocationInfo32(&bytes_sector32,&sectors_cluster32,&total_clusters32,&free_clusters32)) { /* FAT32 aware extended API */
-				freec=0;
-				free_space=(uint64_t)bytes_sector32 * (Bitu)sectors_cluster32 * (Bitu)free_clusters32;
-			} else {
-				uint16_t bytes_sector;uint8_t sectors_cluster;uint16_t total_clusters;uint16_t free_clusters;
-				rsize=true;
-				freec=0;
-				Drives[drive]->AllocationInfo(&bytes_sector,&sectors_cluster,&total_clusters,&free_clusters);
-				free_space=(uint64_t)bytes_sector * (Bitu)sectors_cluster * (Bitu)(freec?freec:free_clusters);
-				rsize=false;
-			}
-		}
+
+        if(Drives[drive]) {
+            uint32_t bytes_sector32; uint32_t sectors_cluster32; uint32_t total_clusters32; uint32_t free_clusters32;
+            uint64_t total_clusters64; uint64_t free_clusters64;
+            // Since this is the *internal* shell, we want use maximum available query capability at first
+            if(Drives[drive]->AllocationInfo64(&bytes_sector32, &sectors_cluster32, &total_clusters64, &free_clusters64)) {
+                freec = 0;
+                free_space = (uint64_t)bytes_sector32 * (Bitu)sectors_cluster32 * (Bitu)free_clusters64;
+            }
+            else if((dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10)) &&
+                Drives[drive]->AllocationInfo32(&bytes_sector32, &sectors_cluster32, &total_clusters32, &free_clusters32)) { /* FAT32 aware extended API */
+                freec = 0;
+                free_space = (uint64_t)bytes_sector32 * (Bitu)sectors_cluster32 * (Bitu)free_clusters32;
+            }
+            else {
+                uint16_t bytes_sector; uint8_t sectors_cluster; uint16_t total_clusters; uint16_t free_clusters;
+                rsize = true;
+                freec = 0;
+                Drives[drive]->AllocationInfo(&bytes_sector, &sectors_cluster, &total_clusters, &free_clusters);
+                free_space = (uint64_t)bytes_sector * (Bitu)sectors_cluster * (Bitu)(freec ? freec : free_clusters);
+                rsize = false;
+            }
+        }
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 		if (Network_IsNetworkResource(args)) {
 			std::string str = MSG_Get("SHELL_CMD_DIR_BYTES_FREE");
@@ -2322,7 +2341,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 		dos.dta(save_dta);
 		return;
 	}
-	// Gather all sources (extension to copy more then 1 file specified at command line)
+	// Gather all sources (extension to copy more than 1 file specified at command line)
 	// Concatenating files go as follows: All parts except for the last bear the concat flag.
 	// This construction allows them to be counted (only the non concat set)
 	char q[]="\"";
@@ -2392,7 +2411,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 	}
 
 	copysource target;
-	// If more then one object exists and last target is not part of a 
+	// If more than one object exists and last target is not part of a 
 	// concat sequence then make it the target.
 	if(sources.size()>1 && !sources[sources.size()-2].concat){
 		target = sources.back();
@@ -2468,7 +2487,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 		size_t pathTargetLen = strlen(pathTarget);
 		
 		// See if we have to substitute filename or extension
-		char *ext = 0;
+		char * ext = nullptr;
 		size_t replacementOffset = 0;
 		if (pathTarget[pathTargetLen-1]!='\\') { 
 				// only if it's not a directory
@@ -2510,7 +2529,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 					*ext = 0;
 				} else if (ext[-1]) {
 					// we don't substitute anything, clear up
-					ext = 0;
+					ext = nullptr;
 				}
 			}
 		}
@@ -2596,13 +2615,26 @@ void DOS_Shell::CMD_COPY(char * args) {
 						}
 						if (!exist&&size) {
 							int drive=strlen(nameTarget)>1&&(nameTarget[1]==':'||nameTarget[2]==':')?(toupper(nameTarget[nameTarget[0]=='"'?1:0])-'A'):-1;
-							if (drive>=0&&Drives[drive]) {
-								uint16_t bytes_sector;uint8_t sectors_cluster;uint16_t total_clusters;uint16_t free_clusters;
-								rsize=true;
-								freec=0;
-								Drives[drive]->AllocationInfo(&bytes_sector,&sectors_cluster,&total_clusters,&free_clusters);
-								rsize=false;
-								if ((Bitu)bytes_sector * (Bitu)sectors_cluster * (Bitu)(freec?freec:free_clusters)<size) {
+                            if(drive >= 0 && Drives[drive]) {
+                                uint16_t bytes_sector; uint8_t sectors_cluster; uint16_t total_clusters; uint16_t free_clusters;
+                                uint32_t bytes32 = 0, sectors32 = 0, clusters32 = 0, free32 = 0;
+                                bool no_free_space = true;
+                                rsize = true;
+                                freec = 0;
+                                if(dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10)) {
+                                    Drives[drive]->AllocationInfo32(&bytes32, &sectors32, &clusters32, &free32);
+                                    no_free_space = (uint64_t)bytes32 * (uint64_t)sectors32 * (uint64_t)free32 < size ? true : false;
+                                    //LOG_MSG("drive=%u, no_free_space = %d bytes32=%u, sectors32=%u, free32 =%u, free_space=%u, size=%u",
+                                    //  drive, no_free_space ? 1 : 0, bytes32, sectors32, free32, bytes32*sectors32*free32, size);
+                                }
+                                if(bytes32 == 0 || sectors32 == 0 || dos.version.major < 7 || (dos.version.major == 7 && dos.version.minor < 10)) {
+                                    Drives[drive]->AllocationInfo(&bytes_sector, &sectors_cluster, &total_clusters, &free_clusters);
+                                    no_free_space = (Bitu)bytes_sector* (Bitu)sectors_cluster* (Bitu)(freec ? freec : free_clusters) < size ? true : false;
+                                    //LOG_MSG("no_free_space = %d bytes=%u, sectors=%u, free =%u, free_space=%u, size=%u",
+                                    // no_free_space ? 1 : 0, bytes_sector, sectors_cluster, freec, bytes_sector*sectors_cluster*free_clusters, size);
+                                }
+                                rsize = false;
+								if (no_free_space) {
 									WriteOut(MSG_Get("SHELL_CMD_COPY_NOSPACE"), uselfn?lname:name);
 									DOS_CloseFile(sourceHandle);
 									ret = DOS_FindNext();
@@ -2688,52 +2720,125 @@ void DOS_Shell::CMD_COPY(char * args) {
 	Drives[DOS_GetDefaultDrive()]->EmptyCache();
 }
 
+static void skipspc(char* &pcheck) {
+	while (*pcheck != 0 && (*pcheck == ' ' || *pcheck == '\t')) pcheck++;
+}
+
+static void readnonspcu(std::string &s,char* &pcheck) {
+	s.clear();
+	while (*pcheck != 0 && !(*pcheck == ' ' || *pcheck == '\t')) s += toupper( *(pcheck++) );
+}
+
+static void readnonspc(std::string &s,char* &pcheck) {
+	s.clear();
+	while (*pcheck != 0 && !(*pcheck == ' ' || *pcheck == '\t')) s += *(pcheck++);
+}
 
 /* NTS: WARNING, this function modifies the buffer pointed to by char *args */
 void DOS_Shell::CMD_SET(char * args) {
 	HELP("SET");
 	StripSpaces(args);
 
-	std::string line;
-	if (*args == 0) { /* "SET" by itself means to show the environment block */
-		Bitu count = GetEnvCount();
+	enum op_mode_t {
+		show_all_env,
+		set_env,
+		show_env,
+		erase_env,
+		first_env
+	};
 
-		for (Bitu a = 0;a < count;a++) {
-			if (GetEnvNum(a,line))
-				WriteOut("%s\n",line.c_str());			
+	op_mode_t op_mode = show_all_env;
+	std::string env_name,env_value;
+
+	const bool zdirpath = static_cast<Section_prop *>(control->GetSection("dos"))->Get_bool("drive z expand path");
+
+	{
+		std::string sw;
+
+		/* parse arguments at the start */
+		skipspc(args);
+		while (*args == '/') {
+			args++; /* skip / */
+			readnonspcu(sw,args);
+
+			if (sw == "P") {
+				WriteOut("Set /P is not supported. Use Choice!"); /* TODO: What is SET /P supposed to do? */
+				return;
+			}
+			else if (sw == "ERASE") { /* DOSBox-X extension: Completely erase the environment block */
+				op_mode = erase_env;
+			}
+			else if (sw == "FIRST") { /* DOSBox-X extension: Move the specified variable to the front of the environment block */
+				op_mode = first_env;
+			}
+			else {
+				WriteOut("Unknown switch /");
+				WriteOut(sw.c_str());
+				WriteOut("\n");
+				return;
+			}
+
+			skipspc(args);
 		}
-
 	}
-	else {
-		char *p;
 
-		{ /* parse arguments at the start */
-			char *pcheck = args;
-
-			while (*pcheck != 0 && (*pcheck == ' ' || *pcheck == '\t')) pcheck++;
-			if (*pcheck != 0 && strlen(pcheck) > 3 && (strncasecmp(pcheck,"/p ",3) == 0))
-				E_Exit("Set /P is not supported. Use Choice!"); /* TODO: What is SET /P supposed to do? */
-		}
-
-		/* Most SET commands take the form NAME=VALUE */
-		p = strchr(args,'=');
-		if (p == NULL) {
-			/* SET <variable> without assignment prints the variable instead */
-			if (!GetEnvStr(args,line)) WriteOut(MSG_Get("SHELL_CMD_SET_NOT_SET"),args);
-			WriteOut("%s\n",line.c_str());
-		} else {
-			/* ASCIIZ snip the args string in two, so that args is C-string name of the variable,
-			 * and "p" is C-string value of the variable */
-			*p++ = 0;
-            std::string vstr = p;
-            bool zdirpath = static_cast<Section_prop *>(control->GetSection("dos"))->Get_bool("drive z expand path");
-            if (zdirpath && !strcasecmp(args, "path")) GetExpandedPath(vstr);
-			/* No parsing is needed. The command interpreter does the variable substitution for us */
-			if (!SetEnv(args,vstr.c_str())) {
-				/* NTS: If Win95 is any example, the command interpreter expands the variables for us */
-				WriteOut(MSG_Get("SHELL_CMD_SET_OUT_OF_SPACE"));
+	if (op_mode == first_env) {
+		if (*args == 0) return;
+		readnonspc(env_name,args);
+	}
+	else if (op_mode == show_all_env) {
+		if (*args != 0) {
+			/* Most SET commands take the form NAME=VALUE */
+			char *p = strchr(args,'=');
+			if (p == NULL) {
+				/* SET <variable> without assignment prints the variable instead */
+				op_mode = show_env;
+				readnonspc(env_name,args);
+			} else {
+				/* ASCIIZ snip the args string in two, so that args is C-string name of the variable,
+				 * and "p" is C-string value of the variable */
+				op_mode = set_env;
+				*p++ = 0; env_name = args; env_value = p;
 			}
 		}
+	}
+
+	switch (op_mode) {
+		case show_all_env: {
+			const Bitu count = GetEnvCount();
+			std::string line;
+
+			for (Bitu a = 0;a < count;a++) {
+				if (GetEnvNum(a,line))
+					WriteOut("%s\n",line.c_str());
+			}
+			break; }
+		case show_env:
+			if (GetEnvStr(env_name.c_str(),env_value))
+				WriteOut("%s\n",env_value.c_str());
+			else
+				WriteOut(MSG_Get("SHELL_CMD_SET_NOT_SET"),env_name.c_str());
+			break;
+		case set_env:
+            if(zdirpath && !strcasecmp(env_name.c_str(), "path")) GetExpandedPath(env_value);
+
+			/* No parsing is needed. The command interpreter does the variable substitution for us */
+			/* NTS: If Win95 is any example, the command interpreter expands the variables for us */
+			if (!SetEnv(env_name.c_str(),env_value.c_str()))
+				WriteOut(MSG_Get("SHELL_CMD_SET_OUT_OF_SPACE"));
+
+			break;
+		case erase_env:
+			if (!EraseEnv())
+				WriteOut("Unable to erase environment block\n");
+			break;
+		case first_env:
+			if (!FirstEnv(env_name.c_str()))
+				WriteOut("Unable to move environment variable\n");
+			break;
+		default:
+			abort();
+			break;
 	}
 }
 
@@ -3249,7 +3354,7 @@ void DOS_Shell::CMD_SUBST(char * args) {
 		strcpy(mountstring,"MOUNT ");
 		StripSpaces(args);
 		std::string arg;
-		CommandLine command(0,args);
+		CommandLine command(nullptr, args);
 		if (!command.GetCount()) {
 			char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];
 			uint32_t size,hsize;uint16_t date;uint16_t time;uint8_t attr;
@@ -3313,8 +3418,8 @@ void DOS_Shell::CMD_SUBST(char * args) {
         else strcpy(dir,arg.c_str());
         if (!DOS_MakeName(dir,fulldir,&drive)) throw 3;
 	
-		localDrive* ldp=0;
-		if( ( ldp=dynamic_cast<localDrive*>(Drives[drive])) == 0 ) throw 4;
+		localDrive * const ldp = dynamic_cast<localDrive*>(Drives[drive]);
+		if (!ldp) throw 4;
 		char newname[CROSS_LEN];   
 		strcpy(newname, ldp->basedir);	   
 		strcat(newname,fulldir);
@@ -3401,9 +3506,10 @@ bool get_param(char *&args, char *&rem, char *&temp, char &wait_char, int &wait_
 void DOS_Shell::CMD_CHOICE(char * args){
 	HELP("CHOICE");
 	static char defchoice[3] = {MSG_Get("INT21_6523_YESNO_CHARS")[0],MSG_Get("INT21_6523_YESNO_CHARS")[1],0};
-	char *rem1 = NULL, *rem2 = NULL, *rem = NULL, *temp = NULL, waitchar = 0, *ptr;
+	//char *rem1 = NULL, *rem2 = NULL; /* unused */
+	char *rem = NULL, *temp = NULL, waitchar = 0, *ptr;
 	int waitsec = 0;
-	bool optC = false, optT = false;
+	//bool optC = false, optT = false; /* unused */
 	bool optN = ScanCMDBool(args,"N");
 	bool optS = ScanCMDBool(args,"S"); //Case-sensitive matching
 	// ignore /b and /m switches for compatibility
@@ -3705,7 +3811,7 @@ void DOS_Shell::CMD_VER(char *args) {
 		dos_ver_menu(false);
 	} else {
 		WriteOut(MSG_Get("SHELL_CMD_VER_VER"),VERSION,SDL_STRING,dos.version.major,dos.version.minor);
-		if (optR) WriteOut("DOSBox-X Git commit %s, built on %s\n", GIT_COMMIT_HASH, UPDATED_STR);
+		if (optR) WriteOut("DOSBox-X Git commit %s, built on %s\nPlatform: %s %d-bit", GIT_COMMIT_HASH, UPDATED_STR, OS_PLATFORM_LONG, OS_BIT_INT);
 	}
 }
 
@@ -4184,10 +4290,9 @@ void DOS_Shell::CMD_ALIAS(char* args) {
         }
     } else {
         char alias_name[256] = { 0 };
-        char* cmd = 0;
         for (unsigned int offset = 0; *args && offset < sizeof(alias_name)-1; ++offset, ++args) {
             if (*args == '=') {
-                cmd = trim(alias_name);
+                char * const cmd = trim(alias_name);
                 ++args;
                 args = trim(args);
                 size_t args_len = strlen(args);
@@ -4220,10 +4325,9 @@ void DOS_Shell::CMD_ASSOC(char* args) {
         }
     } else {
         char assoc_name[256] = { 0 };
-        char* cmd = 0;
         for (unsigned int offset = 0; *args && offset < sizeof(assoc_name)-1; ++offset, ++args) {
             if (*args == '=') {
-                cmd = trim(assoc_name);
+                char * const cmd = trim(assoc_name);
                 if (!*cmd || cmd[0] != '.') {
                     WriteOut(MSG_Get("SHELL_INVALID_PARAMETER"), cmd);
                     break;
@@ -4428,18 +4532,34 @@ void DOS_Shell::CMD_COUNTRY(char * args) {
 	return;
 }
 
-extern bool jfont_init, isDBCSCP();
+extern bool jfont_init, finish_prepare, isDBCSCP();
 extern Bitu DOS_LoadKeyboardLayout(const char * layoutname, int32_t codepage, const char * codepagefile);
 void runRescan(const char *str), MSG_Init(), JFONT_Init(), InitFontHandle(), ShutFontHandle(), initcodepagefont(), DOSBox_SetSysMenu();
 int toSetCodePage(DOS_Shell *shell, int newCP, int opt) {
-    if (isSupportedCP(newCP)) {
-		dos.loaded_codepage = newCP;
+    if((TTF_using() && isSupportedCP(newCP)) || !TTF_using()) {
+        int32_t oldcp = dos.loaded_codepage, cpbak = newCP;
+        Bitu keyb_error;
+        if(IS_PC98_ARCH || IS_JEGA_ARCH) newCP = 932;
+        else if(IS_DOSV) {
+            if(IS_JDOSV) newCP = 932;
+            else if(IS_PDOSV) newCP = 936;
+            else if(IS_KDOSV) newCP = 949;
+            else if(IS_TDOSV) newCP = 950;
+        }
+        else if (!CheckDBCSCP(newCP)){
+            keyb_error = DOS_ChangeCodepage(newCP, "auto");
+            if (keyb_error != KEYB_NOERROR) {
+                dos.loaded_codepage = oldcp; 
+                return -1;
+            }
+        }
+        if(newCP != cpbak) LOG_MSG("SHELL: Invalid codepage %d, set to %d.", cpbak, newCP);
+        dos.loaded_codepage = newCP;
         int missing = 0;
 #if defined(USE_TTF)
 		missing = TTF_using() ? setTTFCodePage() : 0;
 #endif
         if (!TTF_using()) initcodepagefont();
-        if (dos.loaded_codepage==437) DOS_LoadKeyboardLayout("us", 437, "auto");
         if (opt==-1) {
             MSG_Init();
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
@@ -4451,15 +4571,21 @@ int toSetCodePage(DOS_Shell *shell, int newCP, int opt) {
 #endif
             DOSBox_SetSysMenu();
         }
-        if (isDBCSCP()) {
+        if(isDBCSCP()) {
             ShutFontHandle();
             InitFontHandle();
             JFONT_Init();
+            SetupDBCSTable();
+            if(newCP == 950 && !chinasea) makestdcp950table();
+            if(newCP == 951 && chinasea) makeseacp951table();
         }
-        SetupDBCSTable();
-        runRescan("-A -Q");
+        if (finish_prepare) runRescan("-A -Q");
+#if C_OPENGL && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+        if(OpenGL_using() && control->opt_lang.size())
+            UpdateSDLDrawTexture();
+#endif
 #if defined(USE_TTF)
-        if ((opt==-1||opt==-2)&&TTF_using()&&(newCP==932||newCP==936||newCP==949||newCP==950||newCP==951)) {
+        if ((opt==-1||opt==-2)&&TTF_using()) {
             Section_prop * ttf_section = static_cast<Section_prop *>(control->GetSection("ttf"));
             const char *font = ttf_section->Get_string("font");
             if (!font || !*font) {
@@ -4470,6 +4596,10 @@ int toSetCodePage(DOS_Shell *shell, int newCP, int opt) {
             }
         }
 #endif
+        if(newCP != lastsetcp) {
+            LOG_MSG("Codepage set to %d", newCP);
+            lastsetcp = newCP;
+        }
         return missing;
     } else if (opt<1 && shell) {
        shell->WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), std::to_string(newCP).c_str());
@@ -4505,73 +4635,51 @@ void DOS_Shell::CMD_CHCP(char * args) {
     int32_t cp = dos.loaded_codepage;
     Bitu keyb_error;
     if(n == 1) {
-        if(newCP == 932 || newCP == 936 || newCP == 949 || newCP == 950 || newCP == 951
-#if defined(USE_TTF)
-            || (ttf.inUse && (newCP >= 1250 && newCP <= 1258))
-#endif
-            ) {
-            missing = toSetCodePage(this, newCP, -1);
-            if(missing > -1) SwitchLanguage(cp, newCP, true);
+        if (!TTF_using() || (TTF_using() && isSupportedCP(newCP))){
+            bool load_language = SwitchLanguage(cp, newCP, true);
+            CHCP_changed = true;
+            missing = toSetCodePage(this, newCP, load_language ? -1: -2);
             if(missing > 0) WriteOut(MSG_Get("SHELL_CMD_CHCP_MISSING"), missing);
-        }
-        else {
-#if defined(USE_TTF)
-            if(ttf.inUse && !isSupportedCP(newCP)) {
+            else if(missing < 0) {
                 WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), StripArg(args));
-                LOG_MSG("CHCP: Codepage %d not supported for TTF output", newCP);
+                CHCP_changed = false;
                 return;
             }
-#endif
-            keyb_error = DOS_ChangeCodepage(newCP, "auto");
-            if(keyb_error == KEYB_NOERROR) {
-                SwitchLanguage(cp, newCP, true);
-                if(layout_name != NULL) {
-                    keyb_error = DOS_ChangeKeyboardLayout(layout_name, cp);
-                }
-            }
-            else
-                WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), StripArg(args));
         }
+        else {
+            if(TTF_using() && !isSupportedCP(newCP)) {
+                WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), StripArg(args));
+                LOG_MSG("CHCP: Codepage %d not supported for TTF output", newCP);
+            }
+            else {
+                WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), StripArg(args));
+            }
+            CHCP_changed = false;
+            return;
+        }
+        CHCP_changed = false;
         WriteOut(MSG_Get("SHELL_CMD_CHCP_ACTIVE"), dos.loaded_codepage);
     }
     else if(n == 2 && strlen(buff)) {
         if(*buff == ':' && strchr(StripArg(args), ':')) {
             std::string name = buff + 1;
             if(name.empty() && iter != langcp_map.end()) name = iter->second;
-            if(newCP == 932 || newCP == 936 || newCP == 949 || newCP == 950 || newCP == 951) {
+            if(!TTF_using() || (TTF_using() && isSupportedCP(newCP))) {
+                CHCP_changed = true;
                 missing = toSetCodePage(this, newCP, -1);
-                if(missing > -1) SwitchLanguage(cp, newCP, true);
                 if(missing > 0) WriteOut(MSG_Get("SHELL_CMD_CHCP_MISSING"), missing);
-            }
-#if defined(USE_TTF)
-            else if(ttf.inUse) {
-                if(newCP >= 1250 && newCP <= 1258) {
-                    missing = toSetCodePage(this, newCP, -1);
-                    if(missing > -1) SwitchLanguage(cp, newCP, true);
-                    if(missing > 0) WriteOut(MSG_Get("SHELL_CMD_CHCP_MISSING"), missing);
-                }
-                else if(!isSupportedCP(newCP)) {
+                else if(missing < 0) {
                     WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), StripArg(args));
-                    LOG_MSG("CHCP: Codepage %d not supported for TTF output", newCP);
+                    CHCP_changed = false;
                     return;
                 }
-            }
-#endif
-            else {
-                keyb_error = DOS_ChangeCodepage(newCP, "auto");
-                if(keyb_error == KEYB_NOERROR) {
-                    if(layout_name != NULL) {
-                        keyb_error = DOS_ChangeKeyboardLayout(layout_name, cp);
-                    }
-                }
-                else
-                    WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), StripArg(args));
             }
             if(name.size() && dos.loaded_codepage == newCP) {
                 SetVal("dosbox", "language", name);
                 Load_Language(name);
             }
             WriteOut(MSG_Get("SHELL_CMD_CHCP_ACTIVE"), dos.loaded_codepage);
+            CHCP_changed = false;
             return;
         }
 #if defined(USE_TTF)
@@ -4596,7 +4704,7 @@ void DOS_Shell::CMD_CHCP(char * args) {
             FILE* file = fopen(cpfile.c_str(), "r"); /* should check the result */
             std::string exepath = GetDOSBoxXPath();
             if(!file && exepath.size()) file = fopen((exepath + CROSS_FILESPLIT + cpfile).c_str(), "r");
-            if(file && newCP > 0 && newCP != 932 && newCP != 936 && newCP != 949 && newCP != 950 && newCP != 951) {
+            if(file && newCP > 0 && !CheckDBCSCP(newCP)) {
                 altcp = newCP;
                 char line[256], * l = line;
                 while(fgets(line, sizeof(line), file)) {

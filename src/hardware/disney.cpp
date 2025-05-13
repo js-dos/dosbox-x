@@ -77,7 +77,7 @@ static void DISNEY_disable(Bitu) {
 		disney.chan->AddSilence();
 		disney.chan->Enable(false);
 	}
-	disney.leader = 0;
+	disney.leader = nullptr;
 	disney.last_used = 0;
 	disney.state = DS_IDLE;
 	disney.interface_det = 0;
@@ -385,10 +385,9 @@ private:
 	//MixerObject MixerChan;
 public:
 	DISNEY(Section* configuration):Module_base(configuration) {
-		Section_prop * section=static_cast<Section_prop *>(configuration);
-
 // This is determined by DISNEY_Init() and DISNEY_ShoudldInit() now.
 // We may be initialized by the parallel port emulation if the user has "parallel1=disney" in their dosbox.conf
+//		Section_prop * section=static_cast<Section_prop *>(configuration);
 //		if(!section->Get_bool("disney")) return;
 
 		for(int i = 0; i < 2; i++) {

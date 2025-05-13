@@ -104,6 +104,11 @@ Bits CPU_Core286_Prefetch_Run(void);
 
 Bits CPU_Core8086_Prefetch_Run(void);
 
+#if defined(C_HAVE_LINUX_KVM_X86)
+Bits CPU_Core_KVM_Run(void);
+Bits CPU_Core_KVM_Trap_Run(void);
+#endif
+
 void CPU_Enable_SkipAutoAdjust(void);
 void CPU_Disable_SkipAutoAdjust(void);
 void CPU_Reset_AutoAdjust(void);
@@ -382,20 +387,20 @@ class Descriptor
 public:
 	Descriptor() { saved.fill[0]=saved.fill[1]=0; }
 
-	void Load(PhysPt address);
-	void Save(PhysPt address);
+	void Load(LinearPt address);
+	void Save(LinearPt address);
 
-	PhysPt GetBase (void) const {
+	LinearPt GetBase (void) const {
 		if (CPU_ArchitectureType >= CPU_ARCHTYPE_386) {
-			return (PhysPt)(
-					((PhysPt)saved.seg.base_24_31 << (PhysPt)24U) |
-					((PhysPt)saved.seg.base_16_23 << (PhysPt)16U) |
-					(PhysPt)saved.seg.base_0_15);
+			return (LinearPt)(
+					((LinearPt)saved.seg.base_24_31 << (LinearPt)24U) |
+					((LinearPt)saved.seg.base_16_23 << (LinearPt)16U) |
+					(LinearPt)saved.seg.base_0_15);
 		}
 		else {
-			return (PhysPt)(
-					((PhysPt)saved.seg.base_16_23 << (PhysPt)16U) |
-					(PhysPt)saved.seg.base_0_15);
+			return (LinearPt)(
+					((LinearPt)saved.seg.base_16_23 << (LinearPt)16U) |
+					(LinearPt)saved.seg.base_0_15);
 		}
 	}
     bool GetExpandDown (void) {
@@ -460,15 +465,17 @@ public:
 
 class DescriptorTable {
 public:
-    PhysPt  GetBase         (void) const    { return table_base;    }
+    virtual ~DescriptorTable() noexcept = default;
+
+    LinearPt  GetBase         (void) const    { return table_base;    }
     Bitu    GetLimit        (void) const    { return table_limit;   }
-    void    SetBase         (PhysPt _base)  { table_base = _base;   }
+    void    SetBase         (LinearPt _base)  { table_base = _base;   }
     void    SetLimit        (Bitu _limit)   { table_limit= _limit;  }
 
     bool GetDescriptor  (Bitu selector, Descriptor& desc) {
         selector&=~7U;
         if (selector>=table_limit) return false;
-        desc.Load((PhysPt)(table_base+selector));
+        desc.Load((LinearPt)(table_base+selector));
         return true;
     }
 	
@@ -477,7 +484,7 @@ public:
 
 
 protected:
-    PhysPt table_base;
+    LinearPt table_base;
     Bitu table_limit;
 };
 
@@ -487,11 +494,11 @@ public:
 		Bitu address=selector & ~7U;
 		if (selector & 4U) {
 			if (address>=ldt_limit) return false;
-			desc.Load((PhysPt)(ldt_base+address));
+			desc.Load((LinearPt)(ldt_base+address));
 			return true;
 		} else {
 			if (address>=table_limit) return false;
-			desc.Load((PhysPt)(table_base+address));
+			desc.Load((LinearPt)(table_base+address));
 			return true;
 		}
 	}
@@ -499,11 +506,11 @@ public:
 		Bitu address=selector & ~7U;
 		if (selector & 4U) {
 			if (address>=ldt_limit) return false;
-			desc.Save((PhysPt)(ldt_base+address));
+			desc.Save((LinearPt)(ldt_base+address));
 			return true;
 		} else {
 			if (address>=table_limit) return false;
-			desc.Save((PhysPt)(table_base+address));
+			desc.Save((LinearPt)(table_base+address));
 			return true;
 		}
 	} 
@@ -527,11 +534,11 @@ public:
 		return true;
 	}
 
-	virtual void SaveState( std::ostream& stream );
-	virtual void LoadState( std::istream& stream );
+	void SaveState( std::ostream& stream ) override;
+	void LoadState( std::istream& stream ) override;
 
 private:
-	PhysPt ldt_base;
+	LinearPt ldt_base;
 	Bitu ldt_limit;
 	Bitu ldt_value;
 };

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2023 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -20,7 +20,7 @@
 */
 #include "../../SDL_internal.h"
 
-#if SDL_VIDEO_RENDER_METAL && !SDL_RENDER_DISABLED
+#if SDL_VIDEO_RENDER_METAL
 
 #include "SDL_hints.h"
 #include "SDL_syswm.h"
@@ -1513,8 +1513,6 @@ static void METAL_DestroyRenderer(SDL_Renderer * renderer)
         /* SDL_Metal_DestroyView(data.mtlview); */
         CFBridgingRelease(data.mtlview);
     }
-
-    SDL_free(renderer);
 }}
 
 static void *METAL_GetMetalLayer(SDL_Renderer * renderer)
@@ -1580,9 +1578,8 @@ static SDL_MetalView GetWindowView(SDL_Window *window)
     return nil;
 }
 
-static SDL_Renderer *METAL_CreateRenderer(SDL_Window * window, Uint32 flags)
+static int METAL_CreateRenderer(SDL_Renderer *renderer, SDL_Window * window, Uint32 flags)
 { @autoreleasepool {
-    SDL_Renderer *renderer = NULL;
     METAL_RenderData *data = NULL;
     id<MTLDevice> mtldevice = nil;
     SDL_MetalView view = NULL;
@@ -1641,26 +1638,32 @@ static SDL_Renderer *METAL_CreateRenderer(SDL_Window * window, Uint32 flags)
 
     SDL_VERSION(&syswm.version);
     if (!SDL_GetWindowWMInfo(window, &syswm)) {
-        return NULL;
+        return -1;
     }
 
     if (IsMetalAvailable(&syswm) == -1) {
-        return NULL;
+        return -1;
     }
 
-    renderer = (SDL_Renderer *) SDL_calloc(1, sizeof(*renderer));
-    if (!renderer) {
-        SDL_OutOfMemory();
-        return NULL;
-    }
+#ifdef __MACOSX__
+    if (SDL_GetHintBoolean(SDL_HINT_RENDER_METAL_PREFER_LOW_POWER_DEVICE, SDL_TRUE)) {
+        NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
 
-    // !!! FIXME: MTLCopyAllDevices() can find other GPUs on macOS...
-    mtldevice = MTLCreateSystemDefaultDevice();
+        for (id<MTLDevice> device in devices) {
+            if (device.isLowPower) {
+                mtldevice = device;
+                break;
+            }
+        }
+    }
+#endif
 
     if (mtldevice == nil) {
-        SDL_free(renderer);
-        SDL_SetError("Failed to obtain Metal device");
-        return NULL;
+        mtldevice = MTLCreateSystemDefaultDevice();
+    }
+
+    if (mtldevice == nil) {
+        return SDL_SetError("Failed to obtain Metal device");
     }
 
     view = GetWindowView(window);
@@ -1669,8 +1672,7 @@ static SDL_Renderer *METAL_CreateRenderer(SDL_Window * window, Uint32 flags)
     }
 
     if (view == NULL) {
-        SDL_free(renderer);
-        return NULL;
+        return -1;
     }
 
     // !!! FIXME: error checking on all of this.
@@ -1682,8 +1684,7 @@ static SDL_Renderer *METAL_CreateRenderer(SDL_Window * window, Uint32 flags)
          */
         /* SDL_Metal_DestroyView(view); */
         CFBridgingRelease(view);
-        SDL_free(renderer);
-        return NULL;
+        return -1;
     }
 
     renderer->driverdata = (void*)CFBridgingRetain(data);
@@ -1861,7 +1862,7 @@ static SDL_Renderer *METAL_CreateRenderer(SDL_Window * window, Uint32 flags)
     renderer->info.max_texture_width = maxtexsize;
     renderer->info.max_texture_height = maxtexsize;
 
-    return renderer;
+    return 0;
 }}
 
 SDL_RenderDriver METAL_RenderDriver = {
@@ -1882,6 +1883,6 @@ SDL_RenderDriver METAL_RenderDriver = {
     }
 };
 
-#endif /* SDL_VIDEO_RENDER_METAL && !SDL_RENDER_DISABLED */
+#endif /* SDL_VIDEO_RENDER_METAL */
 
 /* vi: set ts=4 sw=4 expandtab: */

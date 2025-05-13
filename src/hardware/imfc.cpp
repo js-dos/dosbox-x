@@ -6,7 +6,7 @@
  *  Copyright (C) 2017-2020  Loris Chiocca
  *    - Authored the IBM Music Feature card (IMFC) emulator, as follows:
  *    - Reverse-engineered the IMF's Z80 ROM and tested against hardware.
- *    - Used IDA Pro (licensed) to help structure and anonotate the assembly.
+ *    - Used IDA Pro (licensed) to help structure and annotate the assembly.
  *    - Ported the assembly to C++ (without IDA Pro's assembly-to-C module).
  *    - Integrated the results into a working DOSBox 0.74.3 patch.
  *    - Used the GPL v2+ Virtual FB-01 project for FB-01 emulation (below).
@@ -17,7 +17,7 @@
  *
  *  Copyright (C) 1997-1999  Jarek Burczynski <s0246@priv4.onet.pl>
  *    - Authored the YM-2151 emulator in MAME, which is used in the Virtual
- *      FB-01 project and dervices sources here.
+ *      FB-01 project and devices sources here.
  *
  *  ---
  *
@@ -205,7 +205,7 @@ enum MidiDataPacketState : uint8_t {
 };
 
 struct BufferFlags {
-	// bit-7:true=no data / false=has data / bit6:read errors encounted /
+	// bit-7:true=no data / false=has data / bit6:read errors encountered /
 	// bit5: overflow error / bit4: offline error
 	volatile uint8_t _unused1 : 4;
 	volatile uint8_t _hasOfflineError : 1;
@@ -351,7 +351,7 @@ public:
 	{
 		BufferDataType data = m_buffer[lastReadByteIndex];
 		if (m_debug) {
-			IMF_LOG("%s - poping data 0x%02X from queue @ %i",
+			IMF_LOG("%s - popping data 0x%02X from queue @ %i",
 			        m_name.c_str(),
 			        data,
 			        lastReadByteIndex);
@@ -604,7 +604,7 @@ struct MidiFlowPath {
 	// reports from the music card will reflect its programmed state.
 	uint8_t System_To_MidiOut;
 	// This is the path from MIDI IN to the sound processor. This path is set
-	// so that the music card can be controlled by an external MIDI devince.
+	// so that the music card can be controlled by an external MIDI device.
 	uint8_t MidiIn_To_SP;
 	// This is the route from the system to the sound processor. This path
 	// is set so that the music card can be controlled by the processor. Note:
@@ -1438,6 +1438,7 @@ static_assert(sizeof(ChannelMaskInfo) == 2, "ChannelMaskInfo needs to be 2 in si
 template <typename DataType>
 class DataChangedConsumer {
 public:
+	virtual ~DataChangedConsumer() noexcept = default;
 	virtual void valueChanged(DataType oldValue, DataType newValue) = 0;
 };
 
@@ -1456,6 +1457,7 @@ protected:
 
 public:
 	DataProvider()              = default;
+	virtual ~DataProvider() noexcept = default;
 	virtual DataType getValue() = 0;
 	void notifyOnChange(DataChangedConsumer<DataType>* dataConsumer)
 	{
@@ -1510,6 +1512,7 @@ private:
 
 public:
 	InputPin() = default;
+	virtual ~InputPin() noexcept = default;
 	explicit InputPin(std::string name) : m_name(std::move(name)) {}
 	std::string getName()
 	{
@@ -2463,7 +2466,7 @@ public:
 
 	uint8_t readPortPIU0()
 	{
-		// reading PIU0 is not dependant on the mode of group0
+		// reading PIU0 is not dependent on the mode of group0
 		// if group0 was specified as OUTPUT then it returns the last
 		// value written
 		const uint8_t val = readPort0();
@@ -2490,7 +2493,7 @@ public:
 	}
 	uint8_t readPortPIU1()
 	{
-		// reading PIU1 is not dependant on the mode of group1
+		// reading PIU1 is not dependent on the mode of group1
 		// if group1 was specified as OUTPUT then it returns the last
 		// value written
 		const uint8_t val = readPort1();
@@ -3035,7 +3038,7 @@ private:
 
 	uint32_t      csm_req = 0;                /* CSM  KEY ON / KEY OFF sequence request */
 
-	uint32_t      irq_enable = 0;             /* IRQ enable for timer B (bit 3) and timer A (bit 2); bit 7 - CSM mode (keyon to all slots, everytime timer A overflows) */
+	uint32_t      irq_enable = 0;             /* IRQ enable for timer B (bit 3) and timer A (bit 2); bit 7 - CSM mode (keyon to all slots, every time timer A overflows) */
 	uint32_t      status = 0;                 /* chip status (BUSY, IRQ Flags) */
 	uint8_t       connect[8] = {};             /* channels connections */
 	// clang-format on
@@ -3328,7 +3331,7 @@ const uint16_t ym2151_device::phaseinc_rom[768] = {
 
         Here are just 256 samples out of much longer data.
 
-        It does NOT repeat every 256 samples on real chip and I wasnt able to
+        It does NOT repeat every 256 samples on real chip and I wasn't able to
    find the point where it repeats (even in strings as long as 131072 samples).
 
         I only put it here because its better than nothing and perhaps
@@ -4555,7 +4558,7 @@ void ym2151_device::advance()
 	 * is that the sound played is the same as after normal KEY ON.
 	 */
 
-	if (csm_req != 0U) /* CSM KEYON/KEYOFF seqeunce request */
+	if (csm_req != 0U) /* CSM KEYON/KEYOFF sequence request */
 	{
 		if (csm_req == 2) /* KEY ON */
 		{
@@ -7130,7 +7133,7 @@ private:
 		// m_bufferFromMidiInState.setDataAdded();
 		if (m_bufferFromMidiInState.getIndexForNextWriteByte() ==
 		    m_bufferFromMidiInState.getLastReadByteIndex()) {
-			// oops... we just wrote into the data that hans't
+			// oops... we just wrote into the data that hasn't
 			// already been read :(
 			resetMidiInBuffersAndPorts();
 			m_bufferFromMidiInState.setOverflowErrorFlag();
@@ -9404,8 +9407,8 @@ private:
 	// ROM Address: 0x1BAD
 	// The pitchbender is a type of wheel controller built into a device, such as a synthesizer, used to modify pitch. The pitchbnder range sets
 	// the width of pitch fluctuation generated by the pitchbend wheel. The value range is from 0 through 12. When the pitchbender range is set to 0, no pitch fluctuation
-	// occurs. Each time the pitchbender parameter is incremeted by one, the variable width expands both a half-step higher and lower. Weh nthe pitchbender parameter is
-	// set to 12, the pitchbend is altered plus or minus one cotave.
+	// occurs. Each time the pitchbender parameter is incremented by one, the variable width expands both a half-step higher and lower. When the pitchbender parameter is
+	// set to 12, the pitchbend is altered plus or minus one octave.
 	// clang-format on
 
 	void setInstrumentParameter_PitchbenderRange(InstrumentParameters* instr,
@@ -12416,7 +12419,7 @@ private:
 			while (m_midiChannelToAssignedInstruments[curMidiChannel][t] !=
 			       0xFF) {
 				t++;
-			}; // go to first 0xFF occurance
+			}; // go to first 0xFF occurrence
 			m_midiChannelToAssignedInstruments[curMidiChannel][t] = i;
 		}
 		log_debug("initMidiChannelToAssignedInstruments:");
@@ -12836,7 +12839,7 @@ public:
 		m_timer.timerEvent(val);
 	}
 
-	~MusicFeatureCard() override
+	~MusicFeatureCard()
 	{
 		keep_running = false;
 		SDL_WaitThread(m_mainThread, nullptr);

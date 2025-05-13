@@ -121,10 +121,13 @@ static alt_rgb *rgbColors = (alt_rgb*)render.pal.rgb;
 static bool blinkstate = false;
 bool colorChanged = false, justChanged = false, staycolors = false, firstsize = true, ttfswitch = false, switch_output_from_ttf = false;
 bool init_once = false, init_twice = false;
+extern bool finish_prepare;
+bool is_ttfswitched_on=false;
 
 int menuwidth_atleast(int width), FileDirExistCP(const char *name), FileDirExistUTF8(std::string &localname, const char *name);
 void AdjustIMEFontSize(void),refreshExtChar(void), initcodepagefont(void), change_output(int output), drawmenu(Bitu val), KEYBOARD_Clear(void), RENDER_Reset(void), DOSBox_SetSysMenu(void), GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight), SetWindowTransparency(int trans), resetFontSize(void), RENDER_CallBack( GFX_CallBackFunctions_t function );
 bool isDBCSCP(void), InitCodePage(void), CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/), systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
+bool CheckDBCSCP(int32_t codepage);
 std::string GetDOSBoxXPath(bool withexe=false);
 
 #if defined(C_SDL2)
@@ -231,7 +234,8 @@ Bitu OUTPUT_TTF_SetSize() {
     mainMenu.setRedraw();
 #endif
 
-	AdjustIMEFontSize();
+    AdjustIMEFontSize();
+    ApplyPreventCap();
 
     return GFX_CAN_32 | GFX_SCALING;
 }
@@ -244,7 +248,7 @@ void setVGADAC() {
             IO_WriteB(VGAREG_ACTL_ADDRESS, i+32);
             imap[i]=IO_ReadB(VGAREG_ACTL_READ_DATA);
             IO_WriteB(VGAREG_DAC_WRITE_ADDRESS, imap[i]);
-            IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].red>>2);
+            IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].red>>2);   // Convert 8-bit to 6-bit for VGA DAC
             IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].green>>2);
             IO_WriteB(VGAREG_DAC_DATA, altBGR0[i].blue>>2);
         }
@@ -501,14 +505,14 @@ int setTTFMap(bool changecp) {
         uname[0]=0;
         uname[1]=0;
         if (cp == 932 && (halfwidthkana || IS_JEGA_ARCH)) forceswk=true;
-        if (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951) dos.loaded_codepage = 437;
+        if (CheckDBCSCP(cp)) dos.loaded_codepage = 437;
         if (CodePageGuestToHostUTF16(uname,text)) {
             wcTest[i] = uname[1]==0?uname[0]:i;
             if (cp == 932 && lowboxdrawmap.find(i)!=lowboxdrawmap.end() && TTF_GlyphIsProvided(ttf.SDL_font, wcTest[i]))
                 cpMap[i] = wcTest[i];
         }
         forceswk=false;
-        if (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951) dos.loaded_codepage = cp;
+        if (CheckDBCSCP(cp)) dos.loaded_codepage = cp;
     }
     uint16_t unimap;
     int notMapped = 0;
@@ -559,13 +563,13 @@ int setTTFCodePage() {
 
 void GFX_SelectFontByPoints(int ptsize) {
 	bool initCP = true;
-	if (ttf.SDL_font != 0) {
+	if (ttf.SDL_font) {
 		TTF_CloseFont(ttf.SDL_font);
 		initCP = false;
 	}
-	if (ttf.SDL_fontb != 0) TTF_CloseFont(ttf.SDL_fontb);
-	if (ttf.SDL_fonti != 0) TTF_CloseFont(ttf.SDL_fonti);
-	if (ttf.SDL_fontbi != 0) TTF_CloseFont(ttf.SDL_fontbi);
+	if (ttf.SDL_fontb) TTF_CloseFont(ttf.SDL_fontb);
+	if (ttf.SDL_fonti) TTF_CloseFont(ttf.SDL_fonti);
+	if (ttf.SDL_fontbi) TTF_CloseFont(ttf.SDL_fontbi);
 	SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFont, (int)ttfSize);
 	ttf.SDL_font = TTF_OpenFontRW(rwfont, 1, ptsize);
     if (ttfSizeb>0) {
@@ -857,7 +861,7 @@ resize1:
     GFX_SelectFontByPoints(curSize);
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
     if (!ttf.fullScrn && menu_gui && menu.toggle && menuwidth_atleast(ttf.cols*ttf.width+ttf.offX*2+GetSystemMetrics(SM_CXBORDER)*2)>0) {
-        if (ttf.cols*ttf.width > maxWidth || ttf.lins*ttf.height > maxHeight) E_Exit("Cannot accommodate a window for %dx%d", ttf.lins, ttf.cols);
+        if (ttf.cols*ttf.width > maxWidth || ttf.lins*ttf.height > maxHeight) E_Exit("Cannot accommodate a window for %dx%d", ttf.cols, ttf.lins);
         curSize++;
         goto resize1;
     }
@@ -876,7 +880,7 @@ resize2:
             GFX_SelectFontByPoints(curSize);
             goto resize2;
         }
-        E_Exit("Cannot accommodate a window for %dx%d", ttf.lins, ttf.cols);
+        E_Exit("Cannot accommodate a window for %dx%d", ttf.cols, ttf.lins);
     }
     if (ttf.SDL_font && ttf.width) {
         int widthb, widthm, widthx, width0, width1, width9;
@@ -989,8 +993,8 @@ void processWP(uint8_t *pcolorBG, uint8_t *pcolorFG) {
         }
     }
     if (showbold && (colorFG == wpFG+8 || (wpType == 1 && (wpVersion < 1 || wpVersion > 5 ) && colorFG == 3 && (colorBG&15) == (wpBG > -1 ? wpBG : 1)))) {
-        if (ttf.SDL_fontbi != 0 || !(style&TTF_STYLE_ITALIC) || wpType == 4) style |= TTF_STYLE_BOLD;
-        if ((ttf.SDL_fontbi != 0 && (style&TTF_STYLE_ITALIC)) || (ttf.SDL_fontb != 0 && !(style&TTF_STYLE_ITALIC)) || wpType == 4) colorFG = wpFG;
+        if (ttf.SDL_fontbi || !(style&TTF_STYLE_ITALIC) || wpType == 4) style |= TTF_STYLE_BOLD;
+        if ((ttf.SDL_fontbi && (style&TTF_STYLE_ITALIC)) || (ttf.SDL_fontb && !(style&TTF_STYLE_ITALIC)) || wpType == 4) colorFG = wpFG;
     }
     if (style)
         TTF_SetFontStyle(ttf.SDL_font, style);
@@ -1090,12 +1094,30 @@ void GFX_EndTextLines(bool force) {
                 }
                 bool colornul = staycolors || (IS_VGA_ARCH && (altBGR1[colorBG&15].red > 4 || altBGR1[colorBG&15].green > 4 || altBGR1[colorBG&15].blue > 4 || altBGR1[colorFG&15].red > 4 || altBGR1[colorFG&15].green > 4 || altBGR1[colorFG&15].blue > 4) && rgbColors[colorBG].red < 5 && rgbColors[colorBG].green < 5 && rgbColors[colorBG].blue < 5 && rgbColors[colorFG].red < 5 && rgbColors[colorFG].green <5 && rgbColors[colorFG].blue < 5);
 				ttf_textRect.x = ttf.offX+(rtl?(ttf.cols-x-1):x)*ttf.width;
-				ttf_bgColor.r = !y&&!hasfocus&&noframe?altBGR0[colorBG&15].red:(colornul||(colorChanged&&!IS_VGA_ARCH)?altBGR1[colorBG&15].red:rgbColors[colorBG].red);
-				ttf_bgColor.g = !y&&!hasfocus&&noframe?altBGR0[colorBG&15].green:(colornul||(colorChanged&&!IS_VGA_ARCH)?altBGR1[colorBG&15].green:rgbColors[colorBG].green);
-				ttf_bgColor.b = !y&&!hasfocus&&noframe?altBGR0[colorBG&15].blue:(colornul||(colorChanged&&!IS_VGA_ARCH)?altBGR1[colorBG&15].blue:rgbColors[colorBG].blue);
-				ttf_fgColor.r = !y&&!hasfocus&&noframe?altBGR0[colorFG&15].red:(colornul||(colorChanged&&!IS_VGA_ARCH)?altBGR1[colorFG&15].red:rgbColors[colorFG].red);
-				ttf_fgColor.g = !y&&!hasfocus&&noframe?altBGR0[colorFG&15].green:(colornul||(colorChanged&&!IS_VGA_ARCH)?altBGR1[colorFG&15].green:rgbColors[colorFG].green);
-				ttf_fgColor.b = !y&&!hasfocus&&noframe?altBGR0[colorFG&15].blue:(colornul||(colorChanged&&!IS_VGA_ARCH)?altBGR1[colorFG&15].blue:rgbColors[colorFG].blue);
+                if(colornul||(colorChanged&&!IS_VGA_ARCH)){
+                    ttf_bgColor.r = altBGR1[colorBG&15].red;
+                    ttf_bgColor.g = altBGR1[colorBG&15].green;
+                    ttf_bgColor.b = altBGR1[colorBG&15].blue;
+                    ttf_fgColor.r = altBGR1[colorFG&15].red;
+                    ttf_fgColor.g = altBGR1[colorFG&15].green;
+                    ttf_fgColor.b = altBGR1[colorFG&15].blue;
+                }
+                else {
+                    ttf_bgColor.r = rgbColors[colorBG].red;
+                    ttf_bgColor.g = rgbColors[colorBG].green;
+                    ttf_bgColor.b = rgbColors[colorBG].blue;
+                    ttf_fgColor.r = rgbColors[colorFG].red;
+                    ttf_fgColor.g = rgbColors[colorFG].green;
+                    ttf_fgColor.b = rgbColors[colorFG].blue;
+                }
+                if(noframe&&!hasfocus&&!y) { // Dim top line if focus is lost in Fullscreen mode
+                    ttf_bgColor.r = (((uint16_t)ttf_bgColor.r * 2 +128) / 4) & 0xFF;
+                    ttf_bgColor.g = (((uint16_t)ttf_bgColor.g * 2 +128) / 4) & 0xFF;
+                    ttf_bgColor.b = (((uint16_t)ttf_bgColor.b * 2 +128) / 4) & 0xFF;
+                    ttf_fgColor.r = (((uint16_t)ttf_fgColor.r * 2 +128) / 4) & 0xFF;
+                    ttf_fgColor.g = (((uint16_t)ttf_fgColor.g * 2 +128) / 4) & 0xFF;
+                    ttf_fgColor.b = (((uint16_t)ttf_fgColor.b * 2 +128) / 4) & 0xFF;
+                }
 
                 if (newAC[x].unicode) {
                     dw = newAC[x].doublewide;
@@ -1187,12 +1209,22 @@ void GFX_EndTextLines(bool force) {
 						colorFG=colorBG;
 				}
 				bool dw = newAttrChar[ttf.cursor].unicode && newAttrChar[ttf.cursor].doublewide;
-				ttf_bgColor.r = colorChanged&&!IS_VGA_ARCH?altBGR1[colorBG&15].red:rgbColors[colorBG].red;
-				ttf_bgColor.g = colorChanged&&!IS_VGA_ARCH?altBGR1[colorBG&15].green:rgbColors[colorBG].green;
-				ttf_bgColor.b = colorChanged&&!IS_VGA_ARCH?altBGR1[colorBG&15].blue:rgbColors[colorBG].blue;
-				ttf_fgColor.r = colorChanged&&!IS_VGA_ARCH?altBGR1[colorFG&15].red:rgbColors[colorFG].red;
-				ttf_fgColor.g = colorChanged&&!IS_VGA_ARCH?altBGR1[colorFG&15].green:rgbColors[colorFG].green;
-				ttf_fgColor.b = colorChanged&&!IS_VGA_ARCH?altBGR1[colorFG&15].blue:rgbColors[colorFG].blue;
+                if(colorChanged&&!IS_VGA_ARCH){
+                    ttf_bgColor.r = altBGR1[colorBG&15].red;
+                    ttf_bgColor.g = altBGR1[colorBG&15].green;
+                    ttf_bgColor.b = altBGR1[colorBG&15].blue;
+                    ttf_fgColor.r = altBGR1[colorFG&15].red;
+                    ttf_fgColor.g = altBGR1[colorFG&15].green;
+                    ttf_fgColor.b = altBGR1[colorFG&15].blue;
+                }
+                else {
+                    ttf_bgColor.r = rgbColors[colorBG].red;
+                    ttf_bgColor.g = rgbColors[colorBG].green;
+                    ttf_bgColor.b = rgbColors[colorBG].blue;
+                    ttf_fgColor.r = rgbColors[colorFG].red;
+                    ttf_fgColor.g = rgbColors[colorFG].green;
+                    ttf_fgColor.b = rgbColors[colorFG].blue;
+                }
 				unimap[0] = newAttrChar[ttf.cursor].unicode?newAttrChar[ttf.cursor].chr:cpMap[newAttrChar[ttf.cursor].chr&255];
                 if (dw) {
                     unimap[1] = newAttrChar[ttf.cursor].chr;
@@ -1313,7 +1345,7 @@ void TTF_DecreaseSize(bool pressed) {
 void DBCSSBCS_mapper_shortcut(bool pressed) {
     if (!pressed) return;
     if (!isDBCSCP()) {
-        systemmessagebox("Warning", "This function is only available for the Chinese/Japanese/Korean code pages.", "ok","warning", 1);
+        systemmessagebox("Warning", MSG_Get("TTF_DBCS_ONLY"), "ok","warning", 1);
         return;
     }
     dbcs_sbcs=!dbcs_sbcs;
@@ -1325,7 +1357,7 @@ void DBCSSBCS_mapper_shortcut(bool pressed) {
 void AutoBoxDraw_mapper_shortcut(bool pressed) {
     if (!pressed) return;
     if (!isDBCSCP()) {
-        systemmessagebox("Warning", "This function is only available for the Chinese/Japanese/Korean code pages.", "ok","warning", 1);
+        systemmessagebox("Warning", MSG_Get("TTF_DBCS_ONLY"), "ok","warning", 1);
         return;
     }
     autoboxdraw=!autoboxdraw;
@@ -1399,7 +1431,7 @@ void ttf_switch_on(bool ss=true) {
         bool OpenGL_using(void), gl = OpenGL_using();
 	(void)gl; // unused var warning
 #if defined(WIN32) && !defined(C_SDL2)
-        change_output(0); // call OUTPUT_SURFACE_Select() to initialize output before enabling TTF output on Windows builds
+        //change_output(0); // call OUTPUT_SURFACE_Select() to initialize output before enabling TTF output on Windows builds
 #endif
         change_output(10); // call OUTPUT_TTF_Select()
         SetVal("sdl", "output", "ttf");
@@ -1429,6 +1461,7 @@ void ttf_switch_on(bool ss=true) {
 #endif
         if (!IS_PC98_ARCH && vga.draw.address_add != ttf.cols * 2) checkcol = ss?2:1;
     }
+    is_ttfswitched_on = true;
 }
 
 void ttf_switch_off(bool ss=true) {
@@ -1481,5 +1514,6 @@ void ttf_switch_off(bool ss=true) {
 #endif
         if (Mouse_IsLocked()) GFX_CaptureMouse(true);
     }
+    is_ttfswitched_on = false;
 }
 #endif

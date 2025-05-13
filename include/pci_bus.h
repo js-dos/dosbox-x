@@ -100,5 +100,8 @@ void PCI_AddSST_Device(Bitu type);
 void PCI_RemoveSST_Device(void);
 
 RealPt PCI_GetPModeInterface(void);
+bool has_pcibus_enable(void);
+
+extern bool pcibus_enable;
 
 #endif

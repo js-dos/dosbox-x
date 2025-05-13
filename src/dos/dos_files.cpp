@@ -352,7 +352,7 @@ bool DOS_GetSFNPath(char const * const path,char * SFNPath,bool LFN) {
 			break;
 		}
     }
-    if (p != 0) {
+    if (p) {
 		sprintf(pdir,"\"%s%s\"",SFNPath,p);
 		lfn_filefind_handle=LFN_FILEFIND_INTERNAL;
 		if (!strrchr(p,'*')&&!strrchr(p,'?')&&DOS_FindFirst(pdir,0xffff & ~DOS_ATTR_VOLUME,false)) {
@@ -731,6 +731,11 @@ bool DOS_SeekFile(uint16_t entry,uint32_t * pos,uint32_t type,bool fcb) {
 		DOS_SetError(DOSERR_INVALID_HANDLE);
 		return false;
 	}
+
+	if (log_fileio) {
+		LOG(LOG_FILES, LOG_DEBUG)("Seeking to %d bytes from position type (%d) in %s ", *pos, type, Files[handle]->name);
+	}
+
 	return Files[handle]->Seek(pos,type);
 }
 
@@ -775,7 +780,7 @@ bool DOS_CloseFile(uint16_t entry, bool fcb, uint8_t * refcnt) {
 	Bits refs=Files[handle]->RemoveRef();
 	if (refs<=0) {
 		delete Files[handle];
-		Files[handle]=0;
+		Files[handle]=nullptr;
 	}
 	if (refcnt!=NULL) *refcnt=static_cast<uint8_t>(refs+1);
 	return true;
@@ -1264,7 +1269,7 @@ bool DOS_GetFreeDiskSpace32(uint8_t drive,uint32_t * bytes,uint32_t * sectors,ui
 }
 
 bool DOS_DuplicateEntry(uint16_t entry,uint16_t * newentry) {
-	// Dont duplicate console handles
+	// Don't duplicate console handles
 /*	if (entry<=STDPRN) {
 		*newentry = entry;
 		return true;
@@ -2069,12 +2074,12 @@ void DOS_SetupFiles (void) {
 	Files = new DOS_File * [DOS_FILES];
 	uint32_t i;
 	for (i=0;i<DOS_FILES;i++) {
-		Files[i]=0;
+		Files[i]=nullptr;
 	}
 	/* Setup the Virtual Disk System */
 	for (i=0;i<DOS_DRIVES;i++) {
 		if (Drives[i]) DriveManager::UnmountDrive(i);
-		Drives[i]=0;
+		Drives[i]=nullptr;
 	}
     for (int i=0; i<MAX_DISK_IMAGES; i++) {
         if (imageDiskList[i]) {
@@ -2203,7 +2208,7 @@ void POD_Save_DOS_Files( std::ostream& stream )
 			uint8_t drive_valid;
 
 			drive_valid = 0;
-			if( Drives[lcv] == 0 ) drive_valid = 0xff;
+			if(!Drives[lcv]) drive_valid = 0xff;
 
 			//**********************************************
 			//**********************************************
@@ -2291,7 +2296,7 @@ void POD_Save_DOS_Files( std::ostream& stream )
 			//**********************************************
 			//**********************************************
 
-			file_namelen = (uint8_t)strlen( Files[lcv]->name );
+			file_namelen = (uint8_t)( strlen( Files[lcv]->name ) + 1 );
 			file_name = (char *) alloca( file_namelen );
 			strcpy( file_name, Files[lcv]->name );
 
@@ -2312,7 +2317,7 @@ void POD_Save_DOS_Files( std::ostream& stream )
             int lcv=i<DOS_DRIVES?i:i-DOS_DRIVES;
 			uint8_t drive_valid;
 			drive_valid = 0;
-			if( Drives[lcv] == 0 ) drive_valid = 0xff;
+			if(!Drives[lcv]) drive_valid = 0xff;
 			WRITE_POD( &drive_valid, drive_valid );
 			if( drive_valid == 0xff ) continue;
             strcpy(dinfo, Drives[lcv]->GetInfo());
@@ -2364,9 +2369,9 @@ void unmount(int lcv) {
     const isoDrive* cdrom = dynamic_cast<isoDrive*>(Drives[lcv]);
     if (DriveManager::UnmountDrive(lcv) == 0) {
         if (cdrom) IDE_CDROM_Detach(lcv);
-        Drives[lcv]=0;
+        Drives[lcv]=nullptr;
         DOS_EnableDriveMenu('A'+lcv);
-        mem_writeb(Real2Phys(dos.tables.mediaid)+(unsigned int)'A'+lcv*dos.tables.dpb_size,0);
+        mem_writeb(Real2Phys(dos.tables.mediaid)+lcv*dos.tables.dpb_size,0);
     }
 }
 
@@ -2380,7 +2385,7 @@ void POD_Load_DOS_Files( std::istream& stream )
 	if (!dos_kernel_disabled) {
         if (ZDRIVE_CUR != ZDRIVE_NUM) {
             Drives[ZDRIVE_NUM] = Drives[ZDRIVE_CUR];
-            Drives[ZDRIVE_CUR] = 0;
+            Drives[ZDRIVE_CUR] = nullptr;
         }
 		// 1. Do drives first (directories -> files)
 		// 2. Then files next
@@ -2538,7 +2543,7 @@ void POD_Load_DOS_Files( std::istream& stream )
 				if (Files[lcv]->RemoveRef()<=0) {
 					delete Files[lcv];
 				}
-				Files[lcv]=0;
+				Files[lcv]=nullptr;
 			}
 
 			// ignore NULL file
@@ -2566,7 +2571,7 @@ void POD_Load_DOS_Files( std::istream& stream )
 			} else {
 				//Alien carnage ->pop data for invalid file from stream
 				if (dummy == NULL) {
-					dummy = new localFile();
+					dummy = new LocalFile();
 				}
 				dummy->LoadState(stream, true);
 			};

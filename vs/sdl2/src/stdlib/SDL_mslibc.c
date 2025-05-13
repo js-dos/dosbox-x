@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2023 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -120,6 +120,8 @@ localexit:
     /* *INDENT-ON* */
 }
 
+// Causes conflict with LIBCMT on VS2022
+#if _MSC_VER <= 1930
 void _ftol2_sse()
 {
     _ftol();
@@ -129,6 +131,7 @@ void _ftol2()
 {
     _ftol();
 }
+#endif
 
 /* 64-bit math operators for 32-bit systems */
 void __declspec(naked) _allmul()

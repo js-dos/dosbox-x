@@ -19,7 +19,7 @@
 #include "adlib.h"
 #include "dosbox.h"
 
-//Use 8 handlers based on a small logatirmic wavetabe and an exponential table for volume
+//Use 8 handlers based on a small logarithmic wavetable and an exponential table for volume
 #define WAVE_HANDLER	10
 //Use a logarithmic wavetable with an exponential table for volume
 #define WAVE_TABLELOG	11
@@ -93,7 +93,7 @@ public:
 #endif
 	uint32_t waveIndex;			//WAVE_BITS shifted counter of the frequency index
 	uint32_t waveAdd;				//The base frequency without vibrato
-	uint32_t waveCurrent;			//waveAdd + vibratao
+	uint32_t waveCurrent;			//waveAdd + vibrato
 
 	uint32_t chanData;			//Frequency/octave and derived data coming from whatever channel controls this
 	uint32_t freqMul;				//Scale channel frequency with this, TODO maybe remove?
@@ -106,7 +106,7 @@ public:
 	uint32_t attackAdd;			//Timers for the different states of the envelope
 	uint32_t decayAdd;
 	uint32_t releaseAdd;
-	uint32_t rateIndex;			//Current position of the evenlope
+	uint32_t rateIndex;			//Current position of the envelope
 
 	uint8_t rateZero;				//Bits for the different states of the envelope having no changes
 	uint8_t keyOn;				//Bitmask of different values that can generate keyon
@@ -250,12 +250,12 @@ struct Chip {
 
 struct Handler : public Adlib::Handler {
 	DBOPL::Chip chip;
-	virtual uint32_t WriteAddr( uint32_t port, uint8_t val );
-	virtual void WriteReg( uint32_t addr, uint8_t val );
-	virtual void Generate( MixerChannel* chan, Bitu samples );
-	virtual void Init( Bitu rate );
-	virtual void SaveState( std::ostream& stream );
-	virtual void LoadState( std::istream& stream );
+	uint32_t WriteAddr( uint32_t port, uint8_t val ) override;
+	void WriteReg( uint32_t addr, uint8_t val ) override;
+	void Generate( MixerChannel* chan, Bitu samples ) override;
+	void Init( Bitu rate ) override;
+	void SaveState( std::ostream& stream ) override;
+	void LoadState( std::istream& stream ) override;
 
 	Handler(bool opl3Mode) : chip(opl3Mode) {
 	}

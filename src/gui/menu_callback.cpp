@@ -97,6 +97,7 @@ size_t GetGameState_Run(void);
 void DBCSSBCS_mapper_shortcut(bool pressed);
 void AutoBoxDraw_mapper_shortcut(bool pressed);
 extern std::string langname, GetDOSBoxXPath(bool withexe=false);
+std::string formatString(const char* format, ...);
 
 void* GetSetSDLValue(int isget, std::string& target, void* setval) {
     if (target == "wait_on_error") {
@@ -467,7 +468,7 @@ bool drive_saveimg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
         return false;
     if (drive < 0 || drive>=DOS_DRIVES) return false;
     if (!Drives[drive] || dynamic_cast<fatDrive*>(Drives[drive])) {
-        systemmessagebox("Error", "Drive does not exist or is mounted from disk image.", "ok","error", 1);
+        systemmessagebox(MSG_Get("ERROR"), MSG_Get("MENU_DRIVE_NOTEXIST"), "ok","error", 1);
         return false;
     }
 
@@ -486,7 +487,7 @@ bool drive_saveimg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
 
     for (int i=0; i<MAX_DISK_IMAGES; i++)
         if (imageDiskList[i] && imageDiskList[i]->ffdd && imageDiskList[i]->drvnum == drive) {
-            if (!saveDiskImage(imageDiskList[i], lTheSaveFileName)) systemmessagebox("Error", "Failed to save disk image.", "ok","error", 1);
+            if (!saveDiskImage(imageDiskList[i], lTheSaveFileName)) systemmessagebox(MSG_Get("ERROR"), MSG_Get("MENU_SAVE_IMAGE_FAILED"), "ok","error", 1);
             chdir(Temp_CurrentDir);
             return true;
         }
@@ -494,7 +495,7 @@ bool drive_saveimg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     Section_prop *sec = static_cast<Section_prop *>(control->GetSection("dosbox"));
     uint32_t freeMB = sec->Get_int("convert fat free space"), timeout = sec->Get_int("convert fat timeout");
     imageDisk *imagedrv = new imageDisk(Drives[drive], drive, freeMB, timeout);
-    if (!saveDiskImage(imagedrv, lTheSaveFileName)) systemmessagebox("Error", "Failed to save disk image.", "ok","error", 1);
+    if (!saveDiskImage(imagedrv, lTheSaveFileName)) systemmessagebox(MSG_Get("ERROR"), MSG_Get("MENU_SAVE_IMAGE_FAILED"), "ok","error", 1);
     if (imagedrv) delete imagedrv;
 
     if(chdir(Temp_CurrentDir) == -1) {
@@ -845,7 +846,6 @@ bool dos_hdd_rate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
 
-    Section_prop * section = static_cast<Section_prop *>(control->GetSection("dos"));
     if (disk_data_rate == 0) {
         if (pcibus_enable)
             disk_data_rate = 8333333; /* Probably an average IDE data rate for mid 1990s PCI IDE controllers in PIO mode */
@@ -863,7 +863,6 @@ bool dos_floppy_rate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * co
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
 
-    Section_prop * section = static_cast<Section_prop *>(control->GetSection("dos"));
     if(floppy_data_rate == 0)
         floppy_data_rate = 22400; // 175 kbps
     else
@@ -959,23 +958,23 @@ bool cpu_speed_emulate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * 
     else if (!strcmp(mname, "cpu486-133"))
         cyclemu = 47810;
     else if (!strcmp(mname, "cpu586-60"))
-        cyclemu = 31545;
+        cyclemu = 32090;
     else if (!strcmp(mname, "cpu586-66"))
         cyclemu = 35620;
     else if (!strcmp(mname, "cpu586-75"))
-        cyclemu = 43500;
+        cyclemu = 40072;
     else if (!strcmp(mname, "cpu586-90"))
-        cyclemu = 52000;
+        cyclemu = 48087;
     else if (!strcmp(mname, "cpu586-100"))
-        cyclemu = 60000;
+        cyclemu = 53430;
     else if (!strcmp(mname, "cpu586-120"))
-        cyclemu = 74000;
+        cyclemu = 64180;
     else if (!strcmp(mname, "cpu586-133"))
-        cyclemu = 80000;
+        cyclemu = 71240;
     else if (!strcmp(mname, "cpu586-166"))
-        cyclemu = 97240;
-    else if (!strcmp(mname, "cpuak6-166"))
-        cyclemu = 110000;
+        cyclemu = 95548;
+    else if (!strcmp(mname, "cpu586-200"))
+        cyclemu = 114657;
     else if (!strcmp(mname, "cpuak6-200"))
         cyclemu = 130000;
     else if (!strcmp(mname, "cpuak6-300"))
@@ -1250,7 +1249,7 @@ bool vid_pc98_enable_188user_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::i
 
         mainMenu.get_item("pc98_enable_188user").check(enable_pc98_188usermod).refresh_item(mainMenu);
     }
-    
+
     return true;
 }
 
@@ -1273,7 +1272,7 @@ bool vid_pc98_enable_egc_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item 
 
             if(!enable_pc98_grcg) { //Also enable GRCG if GRCG is disabled when enabling EGC
                 enable_pc98_grcg = !enable_pc98_grcg;
-                mem_writeb(0x54C,(enable_pc98_grcg ? 0x02 : 0x00) | (enable_pc98_16color ? 0x04 : 0x00));   
+                mem_writeb(0x54C,(enable_pc98_grcg ? 0x02 : 0x00) | (enable_pc98_16color ? 0x04 : 0x00));
                 pc98_section->HandleInputline("pc-98 enable grcg=1");
             }
         }
@@ -1283,7 +1282,7 @@ bool vid_pc98_enable_egc_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item 
         mainMenu.get_item("pc98_enable_egc").check(enable_pc98_egc).refresh_item(mainMenu);
         mainMenu.get_item("pc98_enable_grcg").check(enable_pc98_grcg).refresh_item(mainMenu);
     }
-    
+
     return true;
 }
 
@@ -1307,7 +1306,7 @@ bool vid_pc98_enable_grcg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item
         if ((!enable_pc98_grcg) && enable_pc98_egc) { // Also disable EGC if switching off GRCG
             void gdc_egc_enable_update_vars(void);
             enable_pc98_egc = !enable_pc98_egc;
-            gdc_egc_enable_update_vars();   
+            gdc_egc_enable_update_vars();
             pc98_section->HandleInputline("pc-98 enable egc=0");
         }
 
@@ -1321,7 +1320,7 @@ bool vid_pc98_enable_grcg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item
 bool vid_pc98_enable_analog_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-    //NOTE: I thought that even later PC-9801s and some PC-9821s could use EGC features in digital 8-colors mode? 
+    //NOTE: I thought that even later PC-9801s and some PC-9821s could use EGC features in digital 8-colors mode?
     extern bool enable_pc98_16color;
     void gdc_16color_enable_update_vars(void);
 
@@ -1344,7 +1343,7 @@ bool vid_pc98_enable_analog_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::it
 bool vid_pc98_enable_analog256_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-    //NOTE: I thought that even later PC-9801s and some PC-9821s could use EGC features in digital 8-colors mode? 
+    //NOTE: I thought that even later PC-9801s and some PC-9821s could use EGC features in digital 8-colors mode?
     extern bool enable_pc98_256color;
     void gdc_16color_enable_update_vars(void);
 
@@ -1655,7 +1654,7 @@ bool ttf_halfwidth_katakana_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * 
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     if (!isDBCSCP()||dos.loaded_codepage!=932) {
-        systemmessagebox("Warning", "This function is only available for the Japanese code page (932).", "ok","warning", 1);
+        systemmessagebox("Warning", MSG_Get("MENU_JP_CPONLY"), "ok","warning", 1);
         return true;
     }
     halfwidthkana=!halfwidthkana;
@@ -1670,7 +1669,7 @@ bool ttf_extend_charset_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     if (!isDBCSCP()||(dos.loaded_codepage!=936&&dos.loaded_codepage!=950&&dos.loaded_codepage!=951)) {
-        systemmessagebox("Warning", "This function is only available for the Chinese code pages (936 or 950).", "ok","warning", 1);
+        systemmessagebox("Warning", MSG_Get("MENU_CN_CPONLY"), "ok","warning", 1);
         return true;
     }
     if (dos.loaded_codepage==936) {
@@ -1965,9 +1964,9 @@ bool glide_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuit
     if (addovl) VFILE_RegisterBuiltinFileBlob(bfb_GLIDE2X_OVL, "/SYSTEM/");
     else {
         VFILE_Remove("GLIDE2X.OVL","SYSTEM");
-        if (!glideon) systemmessagebox("Warning", "Glide passthrough cannot be enabled. Check the Glide wrapper installation.", "ok","warning", 1);
+        if (!glideon) systemmessagebox("Warning", MSG_Get("MENU_GLIDE_ERROR"), "ok","warning", 1);
     }
-#else 
+#else
     if (addovl) abort();
     VFILE_Remove("GLIDE2X.OVL","SYSTEM");
     if (!glideon) systemmessagebox("Warning", "Glide passthrough cannot be enabled. Check the Glide wrapper installation.", "ok","warning", 1);
@@ -2003,6 +2002,34 @@ void aspect_ratio_menu() {
     mainMenu.get_item("video_ratio_16_10").check(aspect_ratio_x==16&&aspect_ratio_y==10).enable(true).refresh_item(mainMenu);
     mainMenu.get_item("video_ratio_18_10").check(aspect_ratio_x==18&&aspect_ratio_y==10).enable(true).refresh_item(mainMenu);
     mainMenu.get_item("video_ratio_original").check(aspect_ratio_x==-1&&aspect_ratio_y==-1).enable(true).refresh_item(mainMenu);
+}
+
+void ApplyPreventCapMenu(void) {
+#if defined(WIN32) || defined(MACOSX)
+    mainMenu.get_item("prevcap_none").check(preventcap == PREVCAP_NONE).enable(true).refresh_item(mainMenu);
+    mainMenu.get_item("prevcap_blank").check(preventcap == PREVCAP_BLANK).enable(true).refresh_item(mainMenu);
+    mainMenu.get_item("prevcap_invisible").check(preventcap == PREVCAP_INVISIBLE).enable(true).refresh_item(mainMenu);
+#endif
+}
+
+bool preventcapture_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+#if defined(WIN32) || defined(MACOSX)
+    (void)menu;//UNUSED
+    const char *mname = menuitem->get_name().c_str();
+    if (!strcmp(mname, "prevcap_none")) {
+        SetVal("video", "prevent capture", "none");
+        preventcap = PREVCAP_NONE;
+    } else if (!strcmp(mname, "prevcap_blank")) {
+        SetVal("video", "prevent capture", "blank");
+        preventcap = PREVCAP_BLANK;
+    } else if (!strcmp(mname, "prevcap_invisible")) {
+        SetVal("video", "prevent capture", "invisible");
+        preventcap = PREVCAP_INVISIBLE;
+    }
+    ApplyPreventCapMenu();
+    ApplyPreventCap();
+#endif
+    return true;
 }
 
 bool aspect_ratio_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
@@ -2072,6 +2099,15 @@ bool vsync_set_syncrate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item *
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     GUI_Shortcut(17);
+    return true;
+}
+
+bool center_window_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+#if defined(C_SDL2)
+    SDL_SetWindowPosition(sdl.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+#endif
     return true;
 }
 
@@ -2154,7 +2190,7 @@ bool intensity_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const me
     const char *mname = menuitem->get_name().c_str();
     uint16_t oldax=reg_ax, oldbx=reg_bx;
     if (IS_PC98_ARCH||machine==MCH_CGA||(CurMode->mode>7&&CurMode->mode!=0x0019&&CurMode->mode!=0x0043&&CurMode->mode!=0x0054&&CurMode->mode!=0x0055&&CurMode->mode!=0x0064)) {
-        systemmessagebox("Warning", "High intensity is not supported for the current video mode.", "ok","warning", 1);
+        systemmessagebox("Warning", MSG_Get("MENU_HIGH_INTENSITY_ERROR"), "ok","warning", 1);
         return true;
     }
     if (!strcmp(mname, "text_background"))
@@ -2294,6 +2330,13 @@ bool doublescan_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const m
     return true;
 }
 
+bool modeswitch_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+    MENU_SetBool("render", "modeswitch");
+    return true;
+}
+
 bool scaler_set_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
 
@@ -2420,7 +2463,8 @@ bool save_logas_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const m
     if (lTheSaveFileName==NULL) return false;
 #if C_DEBUG
     bool savetologfile(const char *name);
-    if (!savetologfile(lTheSaveFileName)) systemmessagebox("Warning", ("Cannot save to the file: "+std::string(lTheSaveFileName)).c_str(), "ok","warning", 1);
+    std::string str = formatString(MSG_Get("MENU_SAVE_FILE_ERROR"), lTheSaveFileName);
+    if (!savetologfile(lTheSaveFileName)) systemmessagebox("Warning", str.c_str(), "ok", "warning", 1);
 #endif
     if(chdir(Temp_CurrentDir) == -1) {
         LOG(LOG_GUI, LOG_ERROR)("save_logas_menu_callback failed to change directories.");
@@ -2528,6 +2572,7 @@ bool autolock_mouse_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * co
     (void)menuitem;//UNUSED
     sdl.mouse.autoenable = !sdl.mouse.autoenable;
     mainMenu.get_item("auto_lock_mouse").check(sdl.mouse.autoenable).refresh_item(mainMenu);
+    Mouse_AutoLock(sdl.mouse.autoenable);
     return true;
 }
 
@@ -2625,8 +2670,8 @@ bool doublebuf_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const m
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     std::string doubleBufString = std::string("desktop.doublebuf");
-    SetVal("sdl", "fulldouble", (GetSetSDLValue(1, doubleBufString, 0)) ? "false" : "true"); res_init();
-    mainMenu.get_item("doublebuf").check(!!GetSetSDLValue(1, doubleBufString, 0)).refresh_item(mainMenu);
+    SetVal("sdl", "fulldouble", (GetSetSDLValue(1, doubleBufString, nullptr)) ? "false" : "true"); res_init();
+    mainMenu.get_item("doublebuf").check(!!GetSetSDLValue(1, doubleBufString, nullptr)).refresh_item(mainMenu);
     return true;
 }
 
@@ -2860,9 +2905,9 @@ bool int2fhook_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const 
     if (int2fdbg_hook_callback == 0) {
         void Int2fhook();
         Int2fhook();
-        systemmessagebox("Success", "The INT 2Fh hook has been successfully set.", "ok","info", 1);
+        systemmessagebox("Success", MSG_Get("MENU_INT2F_SUCCESS"), "ok","info", 1);
     } else
-        systemmessagebox("Warning", "The INT 2Fh hook was already set up.", "ok","warning", 1);
+        systemmessagebox("Warning", MSG_Get("MENU_INT2F_ALREADY_SET"), "ok","warning", 1);
 #endif
 
     return true;
@@ -3123,15 +3168,15 @@ void AllocCallback1() {
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu486-66").set_text("486DX2 66MHz (~23880 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu486-100").set_text("486DX4 100MHz (~33445 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu486-133").set_text("486DX5 133MHz (~47810 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-60").set_text("Pentium 60MHz (~31545 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-60").set_text("Pentium 60MHz (~32090 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-66").set_text("Pentium 66MHz (~35620 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-75").set_text("Pentium 75MHz (~43500 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-90").set_text("Pentium 90MHz (~52000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-100").set_text("Pentium 100MHz (~60000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-120").set_text("Pentium 120MHz (~74000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-133").set_text("Pentium 133MHz (~80000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-166").set_text("Pentium 166MHz MMX (~97240 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
-            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpuak6-166").set_text("AMD K6 166MHz (~110000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-75").set_text("Pentium 75MHz (~40072 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-90").set_text("Pentium 90MHz (~48087 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-100").set_text("Pentium 100MHz (~53430 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-120").set_text("Pentium 120MHz (~64180 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-133").set_text("Pentium 133MHz (~71240 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-166").set_text("Pentium 166MHz MMX (~95548 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
+            mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpu586-200").set_text("Pentium 200MHz MMX (~114657 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpuak6-200").set_text("AMD K6 200MHz (~130000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpuak6-300").set_text("AMD K6-2 300MHz (~193000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
             mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cpuath-600").set_text("AMD Athlon 600MHz (~306000 cycles)").set_callback_function(cpu_speed_emulate_menu_callback);
@@ -3143,7 +3188,7 @@ void AllocCallback1() {
             {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoFrameskipMenu");
                 item.set_text("Frameskip");
-        
+
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"frameskip_0").set_text("Off").
                     set_callback_function(video_frameskip_common_menu_callback);
 
@@ -3178,6 +3223,19 @@ void AllocCallback1() {
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"video_ratio_set").set_text("Set ratio").
                     set_callback_function(aspect_ratio_edit_menu_callback);
             }
+#if defined(WIN32) || defined(MACOSX)
+            {
+                DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoPreventCaptureMenu");
+                item.set_text("Screen capture control");
+
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"prevcap_none").set_text("Allow").
+                    set_callback_function(preventcapture_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"prevcap_blank").set_text("Show as blank").
+                    set_callback_function(preventcapture_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"prevcap_invisible").set_text("Make invisible").
+                    set_callback_function(preventcapture_menu_callback);
+            }
+#endif
             {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoScalerMenu");
                 item.set_text("Scaler");
@@ -3188,6 +3246,11 @@ void AllocCallback1() {
                     mainMenu.alloc_item(DOSBoxMenu::item_type_id,name).set_text(scaler_menu_opts[i][1]).
                         set_callback_function(scaler_set_menu_callback);
                 }
+
+#if defined(C_SDL2)
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"center_window").set_text("Center window").
+                    set_callback_function(center_window_menu_callback);
+#endif
 
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"set_titletext").set_text("Set title bar text...").
                     set_callback_function(set_titletext_menu_callback);
@@ -3202,7 +3265,7 @@ void AllocCallback1() {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoOutputMenu");
                 item.set_text("Output");
 
-                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_surface").set_text("Surface").
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_surface").set_text("Software (Surface)").
                     set_callback_function(output_menu_callback);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_direct3d").set_text("Direct3D").
                     set_callback_function(output_menu_callback);
@@ -3222,6 +3285,10 @@ void AllocCallback1() {
 #endif
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublescan").set_text("Doublescan").
                     set_callback_function(doublescan_menu_callback);
+#if C_SDL2
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"modeswitch").set_text("Modeswitch").
+                    set_callback_function(modeswitch_menu_callback);
+#endif
             }
             {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoVsyncMenu");
@@ -3734,7 +3801,7 @@ void AllocCallback2() {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wheel_ctrlpageupdown").set_text("Convert to Ctrl+PgUp/PgDn keys").set_callback_function(wheel_move_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wheel_ctrlwz").set_text("Convert to Ctrl+W/Z keys").set_callback_function(wheel_move_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wheel_guest").set_text("Enable for guest systems also").set_callback_function(wheel_guest_menu_callback);
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double buffering (fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, doubleBufString, 0));
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double buffering (fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, doubleBufString, nullptr));
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"highdpienable").set_text("High DPI enable").set_callback_function(highdpienable_menu_callback).check(dpi_aware_enable);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sync_host_datetime").set_text("Synchronize host date/time").set_callback_function(sync_host_datetime_menu_callback).check(sync_time);

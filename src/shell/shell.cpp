@@ -53,16 +53,18 @@
 #include <dirent.h>
 #endif
 #include "build_timestamp.h"
+#include "version_string.h"
 
 extern bool shell_keyboard_flush;
 extern bool dos_shell_running_program, mountwarning, winautorun;
 extern bool startcmd, startwait, startquiet, internal_program;
 extern bool addovl, addipx, addne2k, enableime, showdbcs;
-extern bool halfwidthkana, force_conversion, gbk;
+extern bool halfwidthkana, force_conversion, gbk, uselangcp, chinasea;
 extern const char* RunningProgram;
 extern int enablelfn, msgcodepage, lastmsgcp;
 extern uint16_t countryNo;
 extern unsigned int dosbox_shell_env_size;
+extern bool is_ttfswitched_on;
 bool outcon = true, usecon = true, pipetmpdev = true;
 bool shellrun = false, prepared = false, testerr = false;
 
@@ -72,6 +74,8 @@ Bitu call_int23 = 0;
 
 std::string GetDOSBoxXPath(bool withexe=false);
 const char* DOS_GetLoadedLayout(void);
+Bitu DOS_ChangeKeyboardLayout(const char* layoutname, int32_t codepage), DOS_SwitchKeyboardLayout(const char* new_layout, int32_t& tried_cp);
+Bitu DOS_LoadKeyboardLayout(const char* layoutname, int32_t codepage, const char* codepagefile);
 int Reflect_Menu(void);
 void SetIMPosition(void);
 void SetKEYBCP();
@@ -80,15 +84,23 @@ void initcodepagefont(void);
 void runMount(const char *str);
 void ResolvePath(std::string& in);
 void DOS_SetCountry(uint16_t countryNo);
-void SwitchLanguage(int oldcp, int newcp, bool confirm);
+bool SwitchLanguage(int oldcp, int newcp, bool confirm);
 void CALLBACK_DeAllocate(Bitu in), DOSBox_ConsolePauseWait();
 void GFX_SetTitle(int32_t cycles, int frameskip, Bits timing, bool paused);
-bool isDBCSCP(), InitCodePage(), isKanji1(uint8_t chr), shiftjis_lead_byte(int c), sdl_wait_on_error();
+bool isDBCSCP(), InitCodePage(), isKanji1(uint8_t chr), shiftjis_lead_byte(int c), sdl_wait_on_error(), CheckDBCSCP(int32_t codepage), TTF_using(void);
+void makestdcp950table(), makeseacp951table();
+
+#if defined(USE_TTF)
+void ttf_switch_on(bool ss = true), ttf_switch_off(bool ss = true);
+void ttf_setlines(int cols, int lins);
+void ttf_reset();
+#endif
+extern VideoModeBlock* CurMode;
 
 Bitu call_shellstop = 0;
 /* Larger scope so shell_del autoexec can use it to
  * remove things from the environment */
-DOS_Shell * first_shell = 0; 
+DOS_Shell * first_shell = nullptr;
 
 static Bitu shellstop_handler(void) {
 	return CBRET_STOP;
@@ -238,7 +250,7 @@ void AutoexecObject::Uninstall() {
 			char* buf2 = new char[n + 1];
 			safe_strncpy(buf2, buf.c_str(), n + 1);
 			bool stringset = false;
-			// If it's a environment variable remove it from there as well
+			// If it's an environment variable remove it from there as well
 			if ((strncasecmp(buf2,"set ",4) == 0) && (strlen(buf2) > 4)){
 				char* after_set = buf2 + 4;//move to variable that is being set
 				char* test2 = strpbrk(after_set,"=");
@@ -278,7 +290,7 @@ DOS_Shell::DOS_Shell():Program(){
 	echo=true;
 	exit=false;
 	perm = false;
-	bf=0;
+	bf = nullptr;
 	call=false;
 	exec=false;
 	lfnfor = uselfn;
@@ -385,7 +397,7 @@ public:
     std::string str = "";
     unsigned long long curpos = 0;
 	device_TMP(char *name) { SetName(name); };
-	virtual bool Read(uint8_t * data,uint16_t * size) {
+	bool Read(uint8_t * data,uint16_t * size) override {
         int i;
         for (i=0; i<*size; i++) {
             if (curpos+i>=str.size()) break;
@@ -394,11 +406,11 @@ public:
 		*size = i;
 		return true;
 	}
-	virtual bool Write(const uint8_t * data,uint16_t * size) {
+	bool Write(const uint8_t * data,uint16_t * size) override {
         for (int i=0; i<*size; i++) str += std::string(1, data[i]);
 		return true;
 	}
-	virtual bool Seek(uint32_t * pos,uint32_t type) {
+	bool Seek(uint32_t * pos,uint32_t type) override {
 		switch (type) {
             case 0:
                 curpos = *pos;
@@ -414,13 +426,12 @@ public:
                 return false;
 		}
 		if (curpos > str.size()) curpos = str.size();
-		else if (curpos < 0) curpos = 0;
 		return true;
 	}
-	virtual bool Close() { return true; }
-	virtual uint16_t GetInformation(void) { return (strcmp(RunningProgram, "WCLIP") ? DeviceInfoFlags::Device : 0) | DeviceInfoFlags::EofOnInput; }
-	virtual bool ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) { (void)bufptr; (void)size; (void)retcode; return false; }
-	virtual bool WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) { (void)bufptr; (void)size; (void)retcode; return false; }
+	bool Close() override { return true; }
+	uint16_t GetInformation(void) override { return (strcmp(RunningProgram, "WCLIP") ? DeviceInfoFlags::Device : 0) | DeviceInfoFlags::EofOnInput; }
+	bool ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) override { (void)bufptr; (void)size; (void)retcode; return false; }
+	bool WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) override { (void)bufptr; (void)size; (void)retcode; return false; }
 };
 
 void DOS_Shell::ParseLine(char * line) {
@@ -430,10 +441,10 @@ void DOS_Shell::ParseLine(char * line) {
 	line = trim(line);
 
 	/* Do redirection and pipe checks */
-	
-	char * in  = 0;
-	char * out = 0;
-	char * toc = 0;
+
+	char * in  = nullptr;
+	char * out = nullptr;
+	char * toc = nullptr;
 
 	uint16_t dummy,dummy2;
 	uint32_t bigdummy = 0;
@@ -454,7 +465,7 @@ void DOS_Shell::ParseLine(char * line) {
 			DOS_OpenFile(in,OPEN_READ,&dummy);	//Open new stdin
 		} else {
 			WriteOut(!*in?"File open error\n":(dos.errorcode==DOSERR_ACCESS_DENIED?MSG_Get("SHELL_CMD_FILE_ACCESS_DENIED"):"File open error - %s\n"), in);
-			in = 0;
+			in = nullptr;
 			return;
 		}
 	}
@@ -689,7 +700,7 @@ const char *ParseMsg(const char *msg) {
 #if defined(USE_TTF)
         && halfwidthkana
 #endif
-        && InitCodePage() && dos.loaded_codepage==932) uselowbox = true;
+        && dos.loaded_codepage==932) uselowbox = true;
         force_conversion = false;
         dos.loaded_codepage=cp;
         if (uselowbox || IS_JEGA_ARCH || IS_JDOSV) {
@@ -758,7 +769,7 @@ void GetExpandedPath(std::string &path) {
 void showWelcome(Program *shell) {
     /* Start a normal shell and check for a first command init */
     ansiinstalled = is_ANSI_installed(shell);
-    std::string verstr = "v"+std::string(VERSION)+", "+GetPlatform(false);
+    std::string verstr = "v"+std::string(VERSION)+", "+OS_PLATFORM_LONG+" "+SDL_STRING+" " + OS_BIT + "-bit";
     if (machine == MCH_PC98) {
         shell->WriteOut(ParseMsg("\x86\x52\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
@@ -766,7 +777,7 @@ void showWelcome(Program *shell) {
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44"
             "\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x44\x86\x56\n"));
-        shell->WriteOut(ParseMsg((std::string("\x86\x46 \033[32m")+(MSG_Get("SHELL_STARTUP_TITLE")+std::string("             ")).substr(0,30)+std::string("  \033[33m%*s\033[37m \x86\x46\n")).c_str()),34,verstr.c_str());
+        shell->WriteOut(ParseMsg((std::string("\x86\x46 \033[32m")+(MSG_Get("SHELL_STARTUP_TITLE")+std::string("      ")).substr(0,22)+std::string("  \033[33m%*s\033[37m \x86\x46\n")).c_str()),42,verstr.c_str());
         shell->WriteOut(ParseMsg("\x86\x46                                                                    \x86\x46\n"));
         shell->WriteOut(ParseMsg((std::string("\x86\x46 ")+MSG_Get("SHELL_STARTUP_HEAD1_PC98")+std::string(" \x86\x46\n")).c_str()));
         shell->WriteOut(ParseMsg("\x86\x46                                                                    \x86\x46\n"));
@@ -820,14 +831,26 @@ void showWelcome(Program *shell) {
     }
 }
 
+bool finish_prepare = false;
 void DOS_Shell::Prepare(void) {
     if (this == first_shell) {
+#if defined(USE_TTF)
+        if(CurMode->type == M_TEXT || (IS_PC98_ARCH && is_ttfswitched_on)) ttf_switch_on(true); // Initialization completed, M_TEXT modes can switch to TTF mode from now on.
+        if(ttf.inUse) {
+            int cols = static_cast<Section_prop*>(control->GetSection("ttf"))->Get_int("cols");
+            int lins = static_cast<Section_prop*>(control->GetSection("ttf"))->Get_int("lins");
+            if(cols || lins) ttf_setlines(cols, lins);
+        }
+#endif
+        const char* layoutname = DOS_GetLoadedLayout();
+        if(layoutname == NULL) {
+            int32_t cp = dos.loaded_codepage;
+            Bitu keyb_error = DOS_LoadKeyboardLayout("us", 437, "auto");
+            toSetCodePage(NULL, cp, -1);
+        }
         Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
-        if (section->Get_bool("startbanner")&&!control->opt_fastlaunch)
-            showWelcome(this);
-        else if ((CurMode->type==M_TEXT || IS_PC98_ARCH) && ANSI_SYS_installed())
-            WriteOut("\033[2J");
-		if (!countryNo) {
+        bool startbanner = section->Get_bool("startbanner");
+        if (!countryNo) {
 #if defined(WIN32)
 			char buffer[128];
 #endif
@@ -856,52 +879,36 @@ void DOS_Shell::Prepare(void) {
 		bool zdirpath = section->Get_bool("drive z expand path");
 		std::string layout = section->Get_string("keyboardlayout");
 		strcpy(config_data, "");
-		section = static_cast<Section_prop *>(control->GetSection("config"));
+        section = static_cast<Section_prop *>(control->GetSection("config"));
 		if ((section!=NULL&&!control->opt_noconfig)||control->opt_langcp) {
 			char *countrystr = (char *)section->Get_string("country"), *r=strchr(countrystr, ',');
 			int country = 0;
-			if ((r==NULL || !*(r+1)) && !control->opt_langcp)
+            int32_t newCP = dos.loaded_codepage;
+            if((control->opt_langcp && msgcodepage > 0) || CheckDBCSCP(msgcodepage) || msgcodepage == dos.loaded_codepage) newCP = msgcodepage;
+            if ((r==NULL || !*(r+1)) && !control->opt_langcp)
 				country = atoi(trim(countrystr));
-			else {
+			else if(!msgcodepage){
 				if (r!=NULL) *r=0;
 				country = atoi(trim(countrystr));
-				int32_t newCP = r==NULL||IS_PC98_ARCH||IS_JEGA_ARCH||IS_DOSV?dos.loaded_codepage:atoi(trim(r+1));
-                if (control->opt_langcp && msgcodepage>0 && isSupportedCP(msgcodepage) && msgcodepage != newCP)
-                    newCP = msgcodepage;
+				newCP = r==NULL||IS_PC98_ARCH||IS_JEGA_ARCH||IS_DOSV?dos.loaded_codepage:atoi(trim(r+1));
 				if (r!=NULL) *r=',';
-                if (!IS_PC98_ARCH&&!IS_JEGA_ARCH) {
-#if defined(USE_TTF)
-                    if (ttf.inUse) {
-                        if (newCP) {
-                            int missing = toSetCodePage(this, newCP, control->opt_fastlaunch?1:0);
-                            WriteOut(MSG_Get("SHELL_CMD_CHCP_ACTIVE"), dos.loaded_codepage);
-                            if (missing > 0) WriteOut(MSG_Get("SHELL_CMD_CHCP_MISSING"), missing);
-                        }
-                        else if (r!=NULL) WriteOut(MSG_Get("SHELL_CMD_CHCP_INVALID"), trim(r+1));
-                    } else
-#endif
-                    if (!newCP && IS_DOSV) {
-                        if (IS_JDOSV) newCP=932;
-                        else if (IS_PDOSV) newCP=936;
-                        else if (IS_KDOSV) newCP=949;
-                        else if (IS_TDOSV) newCP=950;
-                    }
-                    const char* name = DOS_GetLoadedLayout();
-                    if (newCP==932||newCP==936||newCP==949||newCP==950||newCP==951) {
-                        dos.loaded_codepage=newCP;
-                        SetupDBCSTable();
-                        runRescan("-A -Q");
-                        DOSBox_SetSysMenu();
-                    } else if (control->opt_langcp && !name && (layout.empty() || layout=="auto"))
-                        SetKEYBCP();
-                }
-                if (lastmsgcp && lastmsgcp != dos.loaded_codepage) SwitchLanguage(lastmsgcp, dos.loaded_codepage, true);
             }
-			if (country>0&&!control->opt_noconfig) {
+            if (newCP != dos.loaded_codepage && (!TTF_using() || (TTF_using() && isSupportedCP(newCP)))) {
+                int missing = toSetCodePage(this, newCP, -1);
+            }
+            if (country>0&&!control->opt_noconfig) {
 				countryNo = country;
 				DOS_SetCountry(countryNo);
 			}
-			const char * extra = section->data.c_str();
+            if(!chinasea)makestdcp950table();
+            if(chinasea) makeseacp951table();
+            InitCodePage();
+            if(startbanner && !control->opt_fastlaunch)
+                //showWelcome(this);
+                DoCommand((char *)std::string("z:\\system\\intro welcome").c_str());
+            else if((CurMode->type == M_TEXT || IS_PC98_ARCH) && ANSI_SYS_installed())
+                WriteOut("\033[2J");
+            const char * extra = section->data.c_str();
 			if (extra&&!control->opt_securemode&&!control->SecureMode()&&!control->opt_noconfig) {
 				std::string vstr;
 				std::istringstream in(extra);
@@ -964,6 +971,8 @@ void DOS_Shell::Prepare(void) {
 			strcat(config_data, section->Get_string("rem"));
 			strcat(config_data, "\r\n");
 		}
+        if(dos.loaded_codepage == 932) toSetCodePage(this, 932, -1); // Workaround for corrupted box-drawing characters
+        runRescan("-A -Q");
         internal_program = true;
 		VFILE_Register("AUTOEXEC.BAT",(uint8_t *)autoexec_data,(uint32_t)strlen(autoexec_data));
 		VFILE_Register("CONFIG.SYS",(uint8_t *)config_data,(uint32_t)strlen(config_data));
@@ -993,10 +1002,11 @@ void DOS_Shell::Prepare(void) {
         internal_program = true;
 		VFILE_Register("4DOS.INI",(uint8_t *)i4dos_data,(uint32_t)strlen(i4dos_data), "/4DOS/");
         internal_program = false;
-        unsigned int cp=dos.loaded_codepage;
-        if (!dos.loaded_codepage) InitCodePage();
-        initcodepagefont();
-        dos.loaded_codepage=cp;
+        //unsigned int cp=dos.loaded_codepage;
+        //if (!dos.loaded_codepage) InitCodePage();
+        //initcodepagefont();
+        //dos.loaded_codepage=cp;
+        finish_prepare = true;
     }
 #if (defined(WIN32) && !defined(HX_DOS) || defined(LINUX) && C_X11 || defined(MACOSX)) && (defined(C_SDL2) || defined(SDL_DOSBOX_X_SPECIAL))
     if (enableime) SetIMPosition();
@@ -1101,38 +1111,38 @@ public:
         int cp=dos.loaded_codepage;
         InitCodePage();
         force_conversion = false;
-        int ind=0;
 
         /* The user may have given .BAT files to run on the command line */
         if (!control->auto_bat_additional.empty()) {
             std::string cmd = "@echo off\n";
 
-            for (unsigned int i=0;i<control->auto_bat_additional.size();i++) {
+            decltype(control->auto_bat_additional)::size_type ind = 0;
+            for (auto & str : control->auto_bat_additional) {
                 if (!control->opt_prerun) cmd += "\n";
-                if (!strncmp(control->auto_bat_additional[i].c_str(), "@mount c: ", 10)) {
-                    cmd += control->auto_bat_additional[i]+"\n";
+                if (!strncmp(str.c_str(), "@mount c: ", 10)) {
+                    cmd += str+"\n";
                     cmd += "@config -get lastmount>nul\n";
                     cmd += "@if not '%CONFIG%'=='' %CONFIG%";
                 } else {
                     std::string batname;
-                    //LOG_MSG("auto_bat_additional %s\n", control->auto_bat_additional[i].c_str());
+                    //LOG_MSG("auto_bat_additional %s\n", str.c_str());
 
-                    std::replace(control->auto_bat_additional[i].begin(),control->auto_bat_additional[i].end(),'/','\\');
+                    std::replace(str.begin(),str.end(),'/','\\');
                     size_t pos = std::string::npos;
                     bool lead = false;
-                    for (unsigned int j=0; j<control->auto_bat_additional[i].size(); j++) {
+                    for (unsigned int j=0; j<str.size(); j++) {
                         if (lead) lead = false;
-                        else if ((IS_PC98_ARCH && shiftjis_lead_byte(control->auto_bat_additional[i][j])) || (isDBCSCP() && isKanji1(control->auto_bat_additional[i][j]))) lead = true;
-                        else if (control->auto_bat_additional[i][j]=='\\') pos = j;
+                        else if ((IS_PC98_ARCH && shiftjis_lead_byte(str[j])) || (isDBCSCP() && isKanji1(str[j]))) lead = true;
+                        else if (str[j]=='\\') pos = j;
                     }
                     if(pos == std::string::npos) {  //Only a filename, mount current directory
-                        batname = control->auto_bat_additional[i];
+                        batname = str;
                         cmd += "@mount c: . -nl -q\n";
                     } else { //Parse the path of .BAT file
-                        std::string batpath = control->auto_bat_additional[i].substr(0,pos+1);
+                        std::string batpath = str.substr(0,pos+1);
                         if (batpath==".\\") batpath=".";
                         else if (batpath=="..\\") batpath="..";
-                        batname = control->auto_bat_additional[i].substr(pos+1);
+                        batname = str.substr(pos+1);
                         cmd += "@mount c: \"" + batpath + "\" -nl -q\n";
                     }
                     std::string opt = control->opt_o.size() > ind && control->opt_o[ind].size() ? " "+control->opt_o[ind] : "";
@@ -1158,7 +1168,6 @@ public:
                 }
                 if (control->opt_prerun) cmd += "\n";
             }
-
             autoexec_auto_bat.Install(cmd);
         }
         dos.loaded_codepage = cp;
@@ -1172,7 +1181,7 @@ public:
 
 		if (control->opt_prerun) RunAdditional();
 
-		/* add stuff from the configfile unless -noautexec or -securemode is specified. */
+		/* add stuff from the configfile unless -noautoexec or -securemode is specified. */
 		const char * extra = section->data.c_str();
 		if (extra && !secure && !control->opt_noautoexec) {
 			/* detect if "echo off" is the first line */
@@ -1248,7 +1257,7 @@ public:
 				if (access(buffer,F_OK)) continue;
 				autoexec[12].Install(std::string("MOUNT C \"") + buffer + "\"");
 				autoexec[13].Install("C:");
-				/* Save the non-modified filename (so boot and imgmount can use it (long filenames, case sensivitive)) */
+				/* Save the non-modified filename (so boot and imgmount can use it (long filenames, case sensitive)) */
 				strcpy(orig,name);
 				upcase(name);
 				if(strstr(name,".BAT") != 0) {
@@ -1283,8 +1292,15 @@ public:
 #else
 		if (secure) autoexec[i++].Install("z:\\system\\config.com -securemode");
 #endif
-
-		if (addexit) autoexec[i++].Install("exit");
+#if 0
+//#if defined(WIN32) && defined(USE_TTF) /* Workaround for TTF screen initialization */
+        if(static_cast<Section_prop*>(control->GetSection("sdl"))->Get_string("output")=="ttf") {
+            autoexec[i++].Install("@config -set output=surface");
+            autoexec[i++].Install("@config -set output=ttf");
+        }
+//#endif /* (WIN32) && (USE_TTF) */
+#endif // 0
+        if (addexit) autoexec[i++].Install("exit");
 
 		assert(i <= 17); /* FIXME: autoexec[] should not be fixed size */
 
@@ -1305,7 +1321,7 @@ static void AUTOEXEC_ShutDown(Section * sec) {
 	}
     if (first_shell != NULL) {
 		delete first_shell;
-		first_shell = 0;//Make clear that it shouldn't be used anymore
+		first_shell = nullptr;//Make clear that it shouldn't be used anymore
     }
     if (call_shellstop != 0) {
         CALLBACK_DeAllocate(call_shellstop);
@@ -1783,12 +1799,25 @@ void SHELL_Init() {
 	uint16_t env_seg;//=DOS_FIRST_SHELL+19; //DOS_GetMemory(1+(4096/16))+1;
 	uint16_t stack_seg;//=DOS_GetMemory(2048/16,"COMMAND.COM stack");
     uint16_t tmp,total_sz;
+    bool tiny_memory_mode = false;
+
+    // below a certain memory size, alter memory arrangement and allocation to minimize memory
+    if (MEM_ConventionalPages() < 0x8) tiny_memory_mode = true;
 
     // decide shell env size
-    if (dosbox_shell_env_size == 0)
-        dosbox_shell_env_size = (0x158u - (0x118u + 19u)) << 4u; /* equivalent to mainline DOSBox */
-    else
+    if (dosbox_shell_env_size == 0) {
+        if (MEM_ConventionalPages() >= 0x10/*64KB or more*/)
+            dosbox_shell_env_size = (0x158u - (0x118u + 19u)) << 4u; /* equivalent to DOSBox SVN */
+        else if (MEM_ConventionalPages() >= 0x8/*32KB or more*/)
+            dosbox_shell_env_size = 384;
+        else if (MEM_ConventionalPages() >= 0x4/*16KB or more*/)
+            dosbox_shell_env_size = 256;
+        else
+            dosbox_shell_env_size = 144;
+    }
+    else {
         dosbox_shell_env_size = (dosbox_shell_env_size+15u)&(~15u); /* round up to paragraph */
+    }
 
     LOG_MSG("COMMAND.COM env size:             %u bytes",dosbox_shell_env_size);
 
@@ -1811,9 +1840,20 @@ void SHELL_Init() {
     LOG_MSG("COMMAND.COM environment block:    0x%04x sz=0x%04x",env_seg,tmp);
 
     // COMMAND.COM main binary (including PSP and stack)
-    tmp = 0x1A + (2048/16);
+    if (tiny_memory_mode)
+        tmp = 0x13 + (1536/16);
+    else
+        tmp = 0x1A + (2048/16);
     total_sz = tmp;
-	if (!DOS_AllocateMemory(&psp_seg,&tmp)) E_Exit("COMMAND.COM failed to allocate main body + PSP segment");
+
+    // Use normal MCB allocation unless memsize is 4KB
+    if (MEM_ConventionalPages() > 1) {
+        if (!DOS_AllocateMemory(&psp_seg,&tmp)) E_Exit("COMMAND.COM failed to allocate main body + PSP segment");
+    }
+    else {
+        psp_seg = DOS_GetMemory(tmp,"COMMAND.COM main body and PSP");
+    }
+
     LOG_MSG("COMMAND.COM main body (PSP):      0x%04x sz=0x%04x",psp_seg,tmp);
 
     DOS_SetMemAllocStrategy(savedMemAllocStrategy);
@@ -1835,12 +1875,21 @@ void SHELL_Init() {
     }
 
     // set the stack at 0x1A
-    stack_seg = psp_seg + 0x1A;
+    if (tiny_memory_mode)
+        stack_seg = psp_seg + 0x13;
+    else
+        stack_seg = psp_seg + 0x1A;
     LOG_MSG("COMMAND.COM stack:                0x%04x",stack_seg);
 
     // set the stack pointer
 	SegSet16(ss,stack_seg);
-	reg_sp=2046;
+
+    if (tiny_memory_mode)
+        reg_sp=1534;
+    else
+        reg_sp=2046;
+
+    LOG(LOG_MISC,LOG_DEBUG)("Shell init SS:SP %04x:%04x",(unsigned int)stack_seg,(unsigned int)reg_sp);
 
 	/* Set up int 24 and psp (Telarium games) */
 	real_writeb(psp_seg+16+1,0,0xea);		/* far jmp */
@@ -1988,7 +2037,7 @@ void SHELL_Run() {
 	try {
 		first_shell->Run();
 		delete first_shell;
-		first_shell = 0;//Make clear that it shouldn't be used anymore
+		first_shell = nullptr;//Make clear that it shouldn't be used anymore
 		prepared = false;
 		dos_shell_running_program = false;
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
@@ -1997,7 +2046,7 @@ void SHELL_Run() {
 	}
 	catch (...) {
 		delete first_shell;
-		first_shell = 0;//Make clear that it shouldn't be used anymore
+		first_shell = nullptr;//Make clear that it shouldn't be used anymore
 		prepared = false;
 		dos_shell_running_program = false;
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU

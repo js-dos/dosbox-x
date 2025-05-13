@@ -90,10 +90,11 @@ bool isDBCSCP();
 uint32_t BIOS_get_PC98_INT_STUB(void);
 uint16_t GetDefaultCP(void);
 void ResolvePath(std::string& in);
-void SwitchLanguage(int oldcp, int newcp, bool confirm);
+bool SwitchLanguage(int oldcp, int newcp, bool confirm);
 void makestdcp950table(), makeseacp951table();
 std::string GetDOSBoxXPath(bool withexe=false);
 extern std::string prefix_local, prefix_overlay;
+bool a20_off_if_loading_low=true;
 
 int ascii_toupper(int c) {
     if (c >= 'a' && c <= 'z')
@@ -140,6 +141,7 @@ bool enable_dbcs_tables = true;
 bool enable_share_exe = true;
 bool enable_filenamechar = true;
 bool shell_keyboard_flush = true;
+bool freed_mcb_allocate_on_resize = true;
 bool enable_network_redirector = true;
 bool force_conversion = false;
 bool hidenonrep = true;
@@ -147,6 +149,7 @@ bool rsize = false;
 bool reqwin = false;
 bool packerr = false;
 bool incall = false;
+bool startnopause = false;
 int file_access_tries = 0;
 int dos_initial_hma_free = 34*1024;
 int dos_sda_size = 0x560;
@@ -219,15 +222,14 @@ uint32_t DOS_HMA_GET_FREE_SPACE() {
 void DOS_HMA_CLAIMED(uint16_t bytes) {
 	uint32_t limit = DOS_HMA_LIMIT();
 
-	if (limit == 0) E_Exit("HMA allocatiom bug: Claim function called when HMA allocation is not enabled");
-	if (dos_hma_allocator == 0) E_Exit("HMA allocatiom bug: Claim function called without having determined start");
+	if (limit == 0) E_Exit("HMA allocation bug: Claim function called when HMA allocation is not enabled");
+	if (dos_hma_allocator == 0) E_Exit("HMA allocation bug: Claim function called without having determined start");
 	dos_hma_allocator += bytes;
 	if (dos_hma_allocator > limit) E_Exit("HMA allocation bug: Exceeded limit");
 }
 
 uint16_t DOS_INFOBLOCK_SEG=0x80;	// sysvars (list of lists)
 uint16_t DOS_CONDRV_SEG=0xa0;
-uint16_t DOS_CONSTRING_SEG=0xa8;
 uint16_t DOS_SDA_SEG=0xb2;		// dos swappable area
 uint16_t DOS_SDA_SEG_SIZE=0x560;  // WordPerfect 5.1 consideration (emendelson)
 uint16_t DOS_SDA_OFS=0;
@@ -309,12 +311,12 @@ static uint16_t ibmjp_handle;
 static uint16_t avsdrv_handle;
 
 static bool hat_flag[] = {
-//            a     b     c     d     e      f      g      h
-	false, true, true, true, true, true, false,   false, false,
-//       i      j     k     l      m     n     o      p     q
-	 false, false, true, true, false, true, true, false, true,
-//      r      s      t      u     v     w     x     y     z
-	 true, false, false, false, true, true, true, true, true
+//             a      b      c      d      e      f      g      h
+	false, true,  true,  true,  true,  true,  false, false, false,
+//      i      j      k      l      m      n      o      p      q
+	false, false, true,  true,  false, true,  true,  false, true,
+//      r      s      t      u      v      w      x      y      z
+	true,  false, false, false, true,  true,  true,  true,  true
 };
 
 bool CheckHat(uint8_t code)
@@ -518,7 +520,7 @@ void DOS_AddDays(uint8_t days) {
 //       Drive A: can be as slow as a 3.5" 1.44MB floppy disk
 //
 // This fixes MS-DOS games that crash or malfunction if the disk I/O is too fast.
-// This also fixes "380 volt" and prevents the "city animation" from loading too fast for it's music timing (and getting stuck)
+// This also fixes "380 volt" and prevents the "city animation" from loading too fast for its music timing (and getting stuck)
 int disk_data_rate = 2100000;    // 2.1MBytes/sec mid 1990s IDE PIO hard drive without SMARTDRV
 int floppy_data_rate;
 
@@ -609,21 +611,21 @@ bool dos_program_running = false;
 bool DOS_BreakINT23InProgress = false;
 
 void DOS_InitClock() {
-    if (IS_PC98_ARCH) {
-        /* TODO */
-    }
-    else {
-        /* initialize date from BIOS */
-        reg_ah = 4;
-        reg_cx = reg_dx = 0;
-        CALLBACK_RunRealInt(0x1a);
-        dos.date.year=BCD2BIN(reg_cl);
-        dos.date.month=BCD2BIN(reg_dh);
-        dos.date.day=BCD2BIN(reg_dl);
-        if (reg_ch >= 0x19 && reg_ch <= 0x20) dos.date.year += BCD2BIN(reg_ch) * 100;
-        else dos.date.year += 1900;
-        if (dos.date.year < 1980) dos.date.year += 100;
-    }
+	if (IS_PC98_ARCH) {
+		/* TODO */
+	}
+	else {
+		/* initialize date from BIOS */
+		reg_ah = 4;
+		reg_cx = reg_dx = 0;
+		CALLBACK_RunRealInt(0x1a);
+		dos.date.year=BCD2BIN(reg_cl);
+		dos.date.month=BCD2BIN(reg_dh);
+		dos.date.day=BCD2BIN(reg_dl);
+		if (reg_ch >= 0x19 && reg_ch <= 0x20) dos.date.year += BCD2BIN(reg_ch) * 100;
+		else dos.date.year += 1900;
+		if (dos.date.year < 1980) dos.date.year += 100;
+	}
 }
 
 void DOS_PrintCBreak() {
@@ -635,9 +637,10 @@ void DOS_PrintCBreak() {
 
 bool DOS_BreakTest(bool print=true) {
 	if (DOS_BreakFlag) {
+		/* NTS: DOS calls are allowed within INT 23h! */
 		bool terminate = true;
 		bool terminint23 = false;
-		Bitu segv,offv;
+		Bitu save_sp = reg_sp;
 
 		/* print ^C on the console */
 		if (print) DOS_PrintCBreak();
@@ -645,65 +648,57 @@ bool DOS_BreakTest(bool print=true) {
 		DOS_BreakFlag = false;
 		DOS_BreakConioFlag = false;
 
-		offv = mem_readw((0x23*4)+0);
-		segv = mem_readw((0x23*4)+2);
-		if (segv != 0) {
-			/* NTS: DOS calls are allowed within INT 23h! */
-			Bitu save_sp = reg_sp;
+		/* set carry flag */
+		reg_flags |= 1;
 
-			/* set carry flag */
-			reg_flags |= 1;
-
-			/* invoke INT 23h */
-			/* NTS: Some DOS programs provide their own INT 23h which then calls INT 21h AH=0x4C
-			 *      inside the handler! Set a flag so that if that happens, the termination
-			 *      handler will throw us an exception to force our way back here after
-			 *      termination completes!
-			 *
-			 *      This fixes: PC Mix compiler PCL.EXE
-			 *
-			 *      2023/09/28: Some basic debugging with MS-DOS 6.22 shows the INT 23h handler
-			 *                  installed by COMMAND.COM does the same thing (INT 21h AH=0x4C)
-			 *                  which is normally still there unless the DOS application itself
-			 *                  replaces the vector.
-			 *
-			 *      FIXME: This is an ugly hack! */
-			try {
-				DOS_BreakINT23InProgress = true;
-				CALLBACK_RunRealInt(0x23);
+		/* invoke INT 23h */
+		/* NTS: Some DOS programs provide their own INT 23h which then calls INT 21h AH=0x4C
+		 *      inside the handler! Set a flag so that if that happens, the termination
+		 *      handler will throw us an exception to force our way back here after
+		 *      termination completes!
+		 *
+		 *      This fixes: PC Mix compiler PCL.EXE
+		 *
+		 *      2023/09/28: Some basic debugging with MS-DOS 6.22 shows the INT 23h handler
+		 *                  installed by COMMAND.COM does the same thing (INT 21h AH=0x4C)
+		 *                  which is normally still there unless the DOS application itself
+		 *                  replaces the vector.
+		 *
+		 *      FIXME: This is an ugly hack! */
+		try {
+			DOS_BreakINT23InProgress = true;
+			CALLBACK_RunRealInt(0x23);
+			DOS_BreakINT23InProgress = false;
+		}
+		catch (int x) {
+			/* 2025/01/20: The throw code used to be int(0) but if that were allowed to bubble up
+			 *             to the main function it would be mistaken as an entirely different
+			 *             signal, so instead use int(9000), a number high enough not to conflict
+			 *             but just low enough to prevent Vegeta from saying his well-known
+			 *             meme-worthy phrase. */
+			if (x == 9000) {
 				DOS_BreakINT23InProgress = false;
+				terminint23 = true;
 			}
-			catch (int x) {
-				if (x == 0) {
-					DOS_BreakINT23InProgress = false;
-					terminint23 = true;
-				}
-				else {
-					LOG_MSG("Unexpected code in INT 23h termination exception\n");
-					abort();
-				}
-			}
-
-			/* if the INT 23h handler did not already terminate itself... */
-			if (!terminint23) {
-				/* if it returned with IRET, or with RETF and CF=0, don't terminate */
-				if (reg_sp == save_sp || (reg_flags & 1) == 0) {
-					terminate = false;
-					LOG_MSG("Note: DOS handler does not wish to terminate\n");
-				}
-				else {
-					/* program does not wish to continue. it used RETF. pop the remaining flags off */
-					LOG_MSG("Note: DOS handler does wish to terminate\n");
-				}
-
-				if (reg_sp != save_sp) reg_sp += 2;
+			else {
+				LOG_MSG("Unexpected code in INT 23h termination exception\n");
+				throw;
 			}
 		}
-		else {
-			/* Old comment: "HACK: DOSBox's shell currently does not assign INT 23h"
-			 * 2023/09/28: The DOSBox command shell now installs a handler, therefore
-			 *             a null vector is now something to warn about. */
-			LOG_MSG("WARNING: INT 23h CTRL+C vector is NULL\n");
+
+		/* if the INT 23h handler did not already terminate itself... */
+		if (!terminint23) {
+			/* if it returned with IRET, or with RETF and CF=0, don't terminate */
+			if (reg_sp == save_sp || (reg_flags & 1) == 0) {
+				terminate = false;
+				LOG_MSG("Note: DOS handler does not wish to terminate\n");
+			}
+			else {
+				/* program does not wish to continue. it used RETF. pop the remaining flags off */
+				LOG_MSG("Note: DOS handler does wish to terminate\n");
+			}
+
+			if (reg_sp != save_sp) reg_sp += 2;
 		}
 
 		if (terminate) {
@@ -724,7 +719,7 @@ bool DOS_BreakTest(bool print=true) {
 
 void DOS_BreakAction() {
 	DOS_BreakFlag = true;
-    DOS_BreakConioFlag = false;
+	DOS_BreakConioFlag = false;
 }
 
 /* unmask IRQ 0 automatically on disk I/O functions.
@@ -844,6 +839,7 @@ void HostAppRun() {
     char comline[256], *p=comline;
     char winDirCur[512], winDirNew[512], winName[256], dir[CROSS_LEN+15];
     char *fullname=appname;
+    std::string winPath;
     uint8_t drive;
     if (!DOS_MakeName(fullname, winDirNew, &drive)) return;
     bool net = false;
@@ -893,6 +889,16 @@ void HostAppRun() {
             strcpy(winDirNew, useoverlay?odp->getOverlaydir():Drives[drive]->GetBaseDir());
             strcat(winDirNew, Drives[drive]->curdir);
         }
+        if(!(isalpha(winDirNew[0]) && winDirNew[1] == ':') && winDirNew[0] != '\\') {
+            //LOG_MSG("not a absolute path");
+            winPath = winDirCur + std::string("\\") + std::string(winDirNew);
+            strcpy(winDirNew, winPath.c_str());
+        }
+        if(!(isalpha(winName[0]) && winName[1] == ':') && winName[0] != '\\') {
+            //LOG_MSG("not a absolute path");
+            winPath = winDirCur + std::string("\\") + std::string(winName);
+            strcpy(winName, winPath.c_str());
+        }
         if (SetCurrentDirectory(winDirNew)||net) {
             SHELLEXECUTEINFO lpExecInfo;
             strcpy(comline, appargs);
@@ -905,6 +911,7 @@ void HostAppRun() {
             DWORD temp = (DWORD)SHGetFileInfo(winName,0,NULL,0,SHGFI_EXETYPE);
             if (temp==0) temp = (DWORD)SHGetFileInfo((std::string(winDirNew)+"\\"+std::string(fullname)).c_str(),0,NULL,0,SHGFI_EXETYPE);
             if (HIWORD(temp)==0 && LOWORD(temp)==0x4550) { // Console applications
+                Section_prop* section = static_cast<Section_prop*>(control->GetSection("dos"));
                 lpExecInfo.cbSize  = sizeof(SHELLEXECUTEINFO);
                 lpExecInfo.fMask=SEE_MASK_DOENVSUBST|SEE_MASK_NOCLOSEPROCESS;
                 lpExecInfo.hwnd = NULL;
@@ -912,11 +919,14 @@ void HostAppRun() {
                 lpExecInfo.lpDirectory = NULL;
                 lpExecInfo.nShow = SW_SHOW;
                 lpExecInfo.hInstApp = (HINSTANCE) SE_ERR_DDEFAIL;
-                strcpy(dir, "/C \"");
+                strcpy(dir, "/C \"\"");
                 strcat(dir, winName);
-                strcat(dir, " ");
+                strcat(dir, "\" ");
                 strcat(dir, comline);
-                strcat(dir, " & echo( & echo The command execution is completed. & pause\"");
+                strcat(dir, " & echo( & echo The command execution is completed.");
+                startnopause = section->Get_bool("startnopause");
+                if(startnopause) strcat(dir, " \"");
+                else strcat(dir, " & pause\"");
                 lpExecInfo.lpFile = "CMD.EXE";
                 lpExecInfo.lpParameters = dir;
                 ShellExecuteEx(&lpExecInfo);
@@ -961,6 +971,7 @@ void HostAppRun() {
                 hret = errno;
             DOS_SetError((uint16_t)hret);
             hret=0;
+            runRescan(" -A -Q");
             return;
         } else if (startquiet) {
             char msg[]="This program cannot be run in DOS mode.\r\n";
@@ -983,14 +994,14 @@ void HostAppRun() {
 /* called by shell to flush keyboard buffer right before executing the program to avoid
  * having the Enter key in the buffer to confuse programs that act immediately on keyboard input. */
 void DOS_FlushSTDIN(void) {
-	LOG_MSG("Flush STDIN");
-	uint8_t handle=RealHandle(STDIN);
-	if (handle!=0xFF && Files[handle] && Files[handle]->IsName("CON")) {
-		uint8_t c;uint16_t n;
-		while (DOS_GetSTDINStatus()) {
-			n=1; DOS_ReadFile(STDIN,&c,&n);
-		}
-	}
+    LOG(LOG_DOSMISC, LOG_DEBUG)("Flush STDIN");
+    uint8_t handle=RealHandle(STDIN);
+    if (handle!=0xFF && Files[handle] && Files[handle]->IsName("CON")) {
+	    uint8_t c;uint16_t n;
+	    while (DOS_GetSTDINStatus()) {
+		    n=1; DOS_ReadFile(STDIN,&c,&n);
+	    }
+    }
 }
 
 static Bitu DOS_21Handler(void) {
@@ -1030,7 +1041,7 @@ static Bitu DOS_21Handler(void) {
         real_writew(SegValue(ss), reg_sp - 2, SegValue(es));
     }
 
-    if (reg_ah == 0x06) {
+    if (reg_ah == 0x06 || reg_ah == 0x07) {
         /* does not check CTRL+BREAK. Some DOS programs do not expect to be interrupted with INT 23h if they read */
         /* keyboard input through this and may cause system instability if terminated. This fixes PC-98 text editor
          * VZ.EXE which will leave it's INT 6h handler in memory if interrupted this way, for example. */
@@ -1080,7 +1091,7 @@ static Bitu DOS_21Handler(void) {
 			else
                 DOS_Terminate(real_readw(SegValue(ss),reg_sp+2),false,0);
 
-            if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
+            if (DOS_BreakINT23InProgress) throw int(9000); /* HACK: Ick */
             dos_program_running = false;
             *appname=0;
             *appargs=0;
@@ -1088,14 +1099,15 @@ static Bitu DOS_21Handler(void) {
         case 0x01:      /* Read character from STDIN, with echo */
             {   
                 uint8_t c;uint16_t n=1;
-                dos.echo=true;
+                if(dos.version.major == 1) dos.echo=true;
                 DOS_ReadFile(STDIN,&c,&n);
                 if (c == 3) {
                     DOS_BreakAction();
                     if (!DOS_BreakTest()) return CBRET_NONE;
                 }
                 reg_al=c;
-                dos.echo=false;
+                if(dos.version.major > 1) DOS_WriteFile(STDOUT, &c, &n); /* RBIL: Character may be redirected under DOS 2 + */
+                if(dos.version.major == 1) dos.echo=false;
             }
             break;
         case 0x02:      /* Write character to STDOUT */
@@ -1284,7 +1296,13 @@ static Bitu DOS_21Handler(void) {
                     }
                     if (read == free && c != 13) {      // Keyboard buffer full
                         uint8_t bell = 7;
+                        uint8_t page = real_readb(BIOSMEM_SEG, BIOSMEM_CURRENT_PAGE);
+                        uint8_t col = CURSOR_POS_COL(page);
+                        uint8_t row = CURSOR_POS_ROW(page);
+                        BIOS_NCOLS;
                         DOS_WriteFile(STDOUT, &bell, &n);
+                        if(CURSOR_POS_COL(page) > col)
+                            INT10_SetCursorPos(row, col, page); // stay where we were
                         continue;
                     }
                     DOS_WriteFile(STDOUT,&c,&n);
@@ -1697,11 +1715,11 @@ static Bitu DOS_21Handler(void) {
             // Important: This service does not set the carry flag!
             //
             // Fix for PC-98 game "Yu No". One of the TSRs used by the game, PLAY6.EXE,
-            // frees it's own PSP segment before using this TSR system call to remain
+            // frees its own PSP segment before using this TSR system call to remain
             // resident in memory. On real PC-98 MS-DOS, INT 21h AH=31h appears to
             // change the freed segment back into an allocated segment before resizing
             // as directed by the number of paragraphs in DX. In order for PLAY6.EXE to
-            // do it's job properly without crashing the game we have to do the same.
+            // do its job properly without crashing the game we have to do the same.
             //
             // [Issue #3452]
             //
@@ -1712,14 +1730,14 @@ static Bitu DOS_21Handler(void) {
                 DOS_MCB psp_mcb(dos.psp()-1);
                 if (psp_mcb.GetPSPSeg() == 0/*free block?*/) {
                     /* say so in the log, and then change it into an allocated block */
-                    LOG(LOG_DOSMISC,LOG_DEBUG)("Calling program asking to terminate and stay resident has apparently freed it's own PSP segment");
+                    LOG(LOG_DOSMISC,LOG_DEBUG)("Calling program asking to terminate and stay resident has apparently freed its own PSP segment");
                     psp_mcb.SetPSPSeg(dos.psp());
                 }
             }
 
             DOS_ResizeMemory(dos.psp(),&reg_dx);
             DOS_Terminate(dos.psp(),true,reg_al);
-            if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
+            if (DOS_BreakINT23InProgress) throw int(9000); /* HACK: Ick */
             dos_program_running = false;
             *appname=0;
             *appargs=0;
@@ -2007,7 +2025,7 @@ static Bitu DOS_21Handler(void) {
                  *
                  * This is needed for "Dark Purpose" to read it's DAT file
                  * correctly, which calls INT 21h AH=3Fh with DX=0004h and CX=FFFFh
-                 * and will mis-render it's fonts, images, and color palettes
+                 * and will mis-render its fonts, images, and color palettes
                  * if we do not do this.
                  *
                  * Ref: http://files.scene.org/get/mirrors/hornet/demos/1995/d/darkp.zip */
@@ -2326,7 +2344,7 @@ static Bitu DOS_21Handler(void) {
                 dos.return_code = result_errorcode;
                 result_errorcode = 0;
             }
-            if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
+            if (DOS_BreakINT23InProgress) throw int(9000); /* HACK: Ick */
 #if defined (WIN32) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
             if (winautorun&&reqwin&&*appname&&!control->SecureMode())
                 HostAppRun();
@@ -2515,7 +2533,24 @@ static Bitu DOS_21Handler(void) {
             break;
             }
         case 0x5d:                  /* Network Functions */
-            if(reg_al == 0x06) {
+            if(reg_al == 0x00) {
+                LOG(LOG_DOSMISC,LOG_NORMAL)("DOS:5D:00:Remote Server Call");
+                /* Remote Server Call
+                 * From FeeDOS inthndlr.c line 1276:
+                 * DS:DX point to remote register content to be used with this handler
+                 * ax, bx, cx, dx, si, di, ds, es */
+                unsigned short int temp_ds = mem_readw(SegPhys(ds)+reg_dx+12);
+                unsigned short int temp_dx = mem_readw(SegPhys(ds)+reg_dx+6);
+                reg_ax = mem_readw(SegPhys(ds)+reg_dx);
+                reg_bx = mem_readw(SegPhys(ds)+reg_dx+2);
+                reg_cx = mem_readw(SegPhys(ds)+reg_dx+4);
+                reg_si = mem_readw(SegPhys(ds)+reg_dx+8);
+                reg_di = mem_readw(SegPhys(ds)+reg_dx+10);
+                SegSet16(es,mem_readw(SegPhys(ds)+reg_dx+14));
+                SegSet16(ds,temp_ds);
+                reg_dx = temp_dx;
+                DOS_21Handler();
+            } else if(reg_al == 0x06) {
                 /* FIXME: I'm still not certain, @emendelson, why this matters so much
                  *        to WordPerfect 5.1 and 6.2 and why it causes problems otherwise.
                  *        DOSBox and DOSBox-X only use the first 0x1A bytes anyway. */
@@ -2727,7 +2762,7 @@ static Bitu DOS_21Handler(void) {
                         CALLBACK_SCF(false);
                         break;
                     case 0x21: /* Capitalize String (cx=length) */
-                    case 0x22: /* Capatilize ASCIZ string */
+                    case 0x22: /* Capitalize ASCIZ string */
                         data = SegPhys(ds) + reg_dx;
                         if(reg_al == 0x21) len = reg_cx; 
                         else len = mem_strlen(data); /* Is limited to 1024 */
@@ -3051,9 +3086,16 @@ static Bitu DOS_21Handler(void) {
 			} else if (reg_al==3) {
 				/* Get extended free disk space */
 				MEM_StrCopy(SegPhys(ds)+reg_dx,name1,reg_cx);
-				if (name1[1]==':'&&name1[2]=='\\')
-					reg_dl=name1[0]-'A'+1;
-				else {
+                if(name1[1] == ':' && name1[2] == '\\') {
+                    name1[0] = toupper(name1[0]);
+                    if((name1[0] < 'A') || (name1[0] > 'Z')) {
+                        reg_ax = 0x15; // Invalid drive letter
+                        CALLBACK_SCF(true);
+                        break;
+                    }
+                    reg_dl = name1[0] - 'A' + 1; // Drive A = 1, B = 2, ...
+                }
+                else {
 					reg_ax=0xffff;
 					CALLBACK_SCF(true);
 					break;
@@ -3169,7 +3211,7 @@ static Bitu DOS_27Handler(void) {
 	uint16_t psp = dos.psp(); //mem_readw(SegPhys(ss)+reg_sp+2);
 	if (DOS_ResizeMemory(psp,&para)) {
 		DOS_Terminate(psp,true,0);
-		if (DOS_BreakINT23InProgress) throw int(0); /* HACK: Ick */
+		if (DOS_BreakINT23InProgress) throw int(9000); /* HACK: Ick */
 	}
 	return CBRET_NONE;
 }
@@ -3441,6 +3483,7 @@ static Bitu DOS_26Handler(void) {
 	return DOS_26Handler_Actual(false);
 }
 
+bool private_segment_write_protect = false;
 bool enable_collating_uppercase = true;
 bool keep_private_area_on_boot = false;
 bool private_always_from_umb = false;
@@ -3574,16 +3617,16 @@ static Bitu DOS_29Handler(void)
 	uint8_t col,row,page;
 	uint16_t ncols,nrows;
 	uint8_t tempdata;
-    if (log_dev_con) {
-        if (log_dev_con_str.size() >= 255 || reg_al == '\n' || reg_al == 27) {
-            logging_con = true;
-            LOG_MSG(log_dev_con==2?"%s":"DOS CON: %s",log_dev_con_str.c_str());
-            logging_con = false;
-            log_dev_con_str.clear();
-        }
-        if (reg_al != '\n' && reg_al != '\r')
-            log_dev_con_str += (char)reg_al;
-    }
+	if (log_dev_con) {
+		if (log_dev_con_str.size() >= 255 || reg_al == '\n' || reg_al == 27) {
+			logging_con = true;
+			LOG_MSG(log_dev_con==2?"%s":"DOS CON: %s",log_dev_con_str.c_str());
+			logging_con = false;
+			log_dev_con_str.clear();
+		}
+		if (reg_al != '\n' && reg_al != '\r')
+			log_dev_con_str += (char)reg_al;
+	}
 	if(!int29h_data.ansi.esc) {
 		if(reg_al == '\033') {
 			/*clear the datastructure */
@@ -3636,6 +3679,26 @@ static Bitu DOS_29Handler(void)
 					col--;
 				}
 			} else {
+				if(isDBCSCP() && isKanji1(reg_al) && col == ncols - 1) {
+					col = 0;
+					if(row < nrows) {
+						row++;
+					} else {
+						uint8_t tmp_al = reg_al;
+						reg_bh = 0x07;
+						reg_ax = 0x0601;
+						reg_cx = 0x0000;
+						reg_dl = (uint8_t)(ncols - 1);
+						reg_dh = (uint8_t)nrows;
+						CALLBACK_RunRealInt(0x10);
+						reg_al = tmp_al;
+					}
+					reg_ah = 0x02;
+					reg_bh = page;
+					reg_dl = col;
+					reg_dh = row;
+					CALLBACK_RunRealInt(0x10);
+				}
 				reg_ah = 0x09;
 				reg_bh = page;
 				reg_bl = int29h_data.ansi.attr;
@@ -3676,7 +3739,7 @@ static Bitu DOS_29Handler(void)
 		case 'D':/* scrolling DOWN*/
 		case 'M':/* scrolling UP*/
 		default:
-			LOG(LOG_IOCTL,LOG_NORMAL)("ANSI: unknown char %c after a esc", reg_al); /*prob () */
+			LOG(LOG_IOCTL,LOG_NORMAL)("ANSI: unknown char %c after an esc", reg_al); /*prob () */
 			ClearAnsi29h();
 			break;
 		}
@@ -3959,54 +4022,80 @@ private:
 	RealPt int30,int31;
 
 public:
-    void DOS_Write_HMA_CPM_jmp(void) {
-        // HMA mirror of CP/M entry point.
-        // this is needed for "F01D:FEF0" to be a valid jmp whether or not A20 is enabled
-        if (dos_in_hma &&
-            cpm_compat_mode != CPM_COMPAT_OFF &&
-            cpm_compat_mode != CPM_COMPAT_DIRECT) {
-            LOG(LOG_DOSMISC,LOG_DEBUG)("Writing HMA mirror of CP/M entry point");
+	void DOS_Write_HMA_CPM_jmp(void) {
+		// HMA mirror of CP/M entry point.
+		// this is needed for "F01D:FEF0" to be a valid jmp whether or not A20 is enabled
+		if (dos_in_hma &&
+			cpm_compat_mode != CPM_COMPAT_OFF &&
+			cpm_compat_mode != CPM_COMPAT_DIRECT) {
+			LOG(LOG_DOSMISC,LOG_DEBUG)("Writing HMA mirror of CP/M entry point");
 
-            Bitu was_a20 = XMS_GetEnabledA20();
+			Bitu was_a20 = XMS_GetEnabledA20();
 
-            XMS_EnableA20(true);
+			XMS_EnableA20(true);
 
-            mem_writeb(0x1000C0,(uint8_t)0xea);		// jmpf
-            mem_unalignedwrited(0x1000C0+1,callback[8].Get_RealPointer());
+			mem_writeb(0x1000C0,(uint8_t)0xea);		// jmpf
+			mem_unalignedwrited(0x1000C0+1,callback[8].Get_RealPointer());
 
-            if (!was_a20) XMS_EnableA20(false);
-        }
-    }
+			if (!was_a20) XMS_EnableA20(false);
+		}
+	}
 
-    uint32_t DOS_Get_CPM_entry_direct(void) {
-        return callback[8].Get_RealPointer();
-    }
+	uint32_t DOS_Get_CPM_entry_direct(void) {
+		return callback[8].Get_RealPointer();
+	}
 
 	DOS(Section* configuration):Module_base(configuration){
-        const Section_prop* section = static_cast<Section_prop*>(configuration);
+		const Section_prop* section = static_cast<Section_prop*>(configuration);
 
-        ::disk_data_rate = section->Get_int("hard drive data rate limit");
-        ::floppy_data_rate = section->Get_int("floppy drive data rate limit");
-        if (::disk_data_rate < 0) {
-            if (pcibus_enable)
-                ::disk_data_rate = 8333333; /* Probably an average IDE data rate for mid 1990s PCI IDE controllers in PIO mode */
-            else
-                ::disk_data_rate = 3500000; /* Probably an average IDE data rate for early 1990s ISA IDE controllers in PIO mode */
-        }
-        if(::floppy_data_rate < 0) {
-            ::floppy_data_rate = 22400; // 175 kbps
-        }
-        std::string prefix = section->Get_string("special operation file prefix");
-        if (prefix.size()) prefix_local = prefix + prefix_local.substr(3), prefix_overlay = prefix + prefix_overlay.substr(3);
+		dos.version.major = 5;
+		dos.version.minor = 0;
+		const char *ver = section->Get_string("ver");
+		if (*ver) {
+			if (set_ver((char *)ver)) {
+				/* warn about unusual version numbers */
+				if (dos.version.major >= 10 && dos.version.major <= 30) {
+					LOG_MSG("WARNING, DOS version %u.%u: the major version is set to a "
+						"range that may cause some DOS programs to think they are "
+						"running from within an OS/2 DOS box.",
+						dos.version.major, dos.version.minor);
+				}
+				else if (dos.version.major == 0 || dos.version.major > 8 || dos.version.minor > 90)
+					LOG_MSG("WARNING: DOS version %u.%u is unusual, may confuse DOS programs",
+						dos.version.major, dos.version.minor);
+			}
+		}
+
+		::disk_data_rate = section->Get_int("hard drive data rate limit");
+		::floppy_data_rate = section->Get_int("floppy drive data rate limit");
+		if (::disk_data_rate < 0) {
+			if (pcibus_enable)
+				::disk_data_rate = 8333333; /* Probably an average IDE data rate for mid 1990s PCI IDE controllers in PIO mode */
+			else
+				::disk_data_rate = 3500000; /* Probably an average IDE data rate for early 1990s ISA IDE controllers in PIO mode */
+		}
+		if(::floppy_data_rate < 0) {
+			::floppy_data_rate = 22400; // 175 kbps
+		}
+		std::string prefix = section->Get_string("special operation file prefix");
+		if (prefix.size()) prefix_local = prefix + prefix_local.substr(3), prefix_overlay = prefix + prefix_overlay.substr(3);
 
 		maxfcb=100;
 		DOS_FILES=200;
 		Section_prop *config_section = static_cast<Section_prop *>(control->GetSection("config"));
 		if (config_section != NULL && !control->opt_noconfig && !control->opt_securemode && !control->SecureMode()) {
 			DOS_FILES = (unsigned int)config_section->Get_int("files");
+			if (DOS_FILES==0) {
+				const unsigned int sz = std::min((unsigned int)MEM_ConventionalPages(),0xA0u);
+				DOS_FILES=5u + ((200u - 5u) * sz) / 0xA0u;
+			}
 			if (DOS_FILES<8) DOS_FILES=8;
 			else if (DOS_FILES>255) DOS_FILES=255;
 			maxfcb = (int)config_section->Get_int("fcbs");
+			if (maxfcb==0) {
+				const unsigned int sz = std::min((unsigned int)MEM_ConventionalPages(),0xA0u);
+				maxfcb=5u + ((100u - 5u) * sz) / 0xA0u;
+			}
 			if (maxfcb<1) maxfcb=1;
 			else if (maxfcb>255) maxfcb=255;
 			char *dosopt = (char *)config_section->Get_string("dos"), *r=strchr(dosopt, ',');
@@ -4037,20 +4126,22 @@ public:
 				SetNumLock();
 #endif
 		}
-        char *r;
+		LOG(LOG_MISC,LOG_DEBUG)("files=%u fcbs=%u",(unsigned int)DOS_FILES,(unsigned int)maxfcb);
+		char *r;
 #if defined(WIN32)
-        unsigned int cp = GetACP();
-        const char *cstr = (control->opt_noconfig || !config_section) ? "" : (char *)config_section->Get_string("country");
-        r = (char *)strchr(cstr, ',');
-        if ((r==NULL || !*(r+1) || atoi(trim(r+1)) == cp || (atoi(trim(r+1)) == 951 && cp == 950)) && GetDefaultCP() == 437) {
-            if (cp == 950 && !chinasea) makestdcp950table();
-            if (cp == 951 && chinasea) makeseacp951table();
-            tryconvertcp = (r==NULL || !*(r+1)) ? 1 : 2;
-        }
+		unsigned int cp = GetACP();
+		const char *cstr = (control->opt_noconfig || !config_section) ? "" : (char *)config_section->Get_string("country");
+		r = (char *)strchr(cstr, ',');
+		if ((r==NULL || !*(r+1) || atoi(trim(r+1)) == cp || (atoi(trim(r+1)) == 951 && cp == 950)) && GetDefaultCP() == 437) {
+			if (cp == 950 && !chinasea) makestdcp950table();
+			if (cp == 951 && chinasea) makeseacp951table();
+			tryconvertcp = (r==NULL || !*(r+1)) ? 1 : 2;
+		}
 #endif
 
-        dos_sda_size = section->Get_int("dos sda size");
-        shell_keyboard_flush = section->Get_bool("command shell flush keyboard buffer");
+		dos_sda_size = section->Get_int("dos sda size");
+		freed_mcb_allocate_on_resize = section->Get_bool("resized free memory block becomes allocated");
+		shell_keyboard_flush = section->Get_bool("command shell flush keyboard buffer");
 		enable_network_redirector = section->Get_bool("network redirector");
 		enable_dbcs_tables = section->Get_bool("dbcs");
 		enable_share_exe = section->Get_bool("share");
@@ -4058,9 +4149,11 @@ public:
 		enable_filenamechar = section->Get_bool("filenamechar");
 		file_access_tries = section->Get_int("file access tries");
 		dos_initial_hma_free = section->Get_int("hma free space");
-        minimum_mcb_free = section->Get_hex("minimum mcb free");
+		minimum_mcb_free = section->Get_hex("minimum mcb free");
 		minimum_mcb_segment = section->Get_hex("minimum mcb segment");
 		private_segment_in_umb = section->Get_bool("private area in umb");
+		private_segment_write_protect = section->Get_bool("private area write protect");
+		a20_off_if_loading_low = section->Get_bool("turn off a20 gate on load if loadfix needed");
 		enable_collating_uppercase = section->Get_bool("collating and uppercase");
 		private_always_from_umb = section->Get_bool("kernel allocation in umb");
 		minimum_dos_initial_private_segment = section->Get_hex("minimum dos initial private segment");
@@ -4070,24 +4163,25 @@ public:
 		ENV_KEEPFREE = (unsigned int)section->Get_int("additional environment block size on exec");
 		enable_dummy_device_mcb = section->Get_bool("enable dummy device mcb");
 		int15_wait_force_unmask_irq = section->Get_bool("int15 wait force unmask irq");
-        disk_io_unmask_irq0 = section->Get_bool("unmask timer on disk io");
-        mountwarning = section->Get_bool("mountwarning");
-        if (winrun) {
-            Section* tsec = control->GetSection("dos");
-            tsec->HandleInputline("startcmd=true");
-            tsec->HandleInputline("dos clipboard device enable=true");
-        }
-        startcmd = section->Get_bool("startcmd");
-        startincon = section->Get_string("startincon");
-        const char *dos_clipboard_device_enable = section->Get_string("dos clipboard device enable");
+		disk_io_unmask_irq0 = section->Get_bool("unmask timer on disk io");
+		mountwarning = section->Get_bool("mountwarning");
+		if (winrun) {
+			Section* tsec = control->GetSection("dos");
+			tsec->HandleInputline("startcmd=true");
+			tsec->HandleInputline("dos clipboard device enable=true");
+		}
+		startcmd = section->Get_bool("startcmd");
+		startincon = section->Get_string("startincon");
+		startnopause = section->Get_bool("startnopause");
+		const char *dos_clipboard_device_enable = section->Get_string("dos clipboard device enable");
 		dos_clipboard_device_access = !strcasecmp(dos_clipboard_device_enable, "disabled")?0:(!strcasecmp(dos_clipboard_device_enable, "read")?2:(!strcasecmp(dos_clipboard_device_enable, "write")?3:(!strcasecmp(dos_clipboard_device_enable, "full")||!strcasecmp(dos_clipboard_device_enable, "true")?4:1)));
 		dos_clipboard_device_name = section->Get_string("dos clipboard device name");
-        clipboard_dosapi = section->Get_bool("dos clipboard api");
-        if (control->SecureMode()) clipboard_dosapi = false;
-        pipetmpdev = section->Get_bool("pipe temporary device");
-        force_conversion=true;
-        mainMenu.get_item("clipboard_dosapi").check(clipboard_dosapi).enable(true).refresh_item(mainMenu);
-        force_conversion=false;
+		clipboard_dosapi = section->Get_bool("dos clipboard api");
+		if (control->SecureMode()) clipboard_dosapi = false;
+		pipetmpdev = section->Get_bool("pipe temporary device");
+		force_conversion=true;
+		mainMenu.get_item("clipboard_dosapi").check(clipboard_dosapi).enable(true).refresh_item(mainMenu);
+		force_conversion=false;
 		if (dos_clipboard_device_access) {
 			bool valid=true;
 			char ch[]="*? .|<>/\\\"";
@@ -4101,99 +4195,107 @@ public:
 			}
 			dos_clipboard_device_name=valid?upcase((char *)dos_clipboard_device_name):(char *)dos_clipboard_device_default;
 			LOG(LOG_DOSMISC,LOG_NORMAL)("DOS clipboard device (%s access) is enabled with the name %s\n", dos_clipboard_device_access==1?"dummy":(dos_clipboard_device_access==2?"read":(dos_clipboard_device_access==3?"write":"full")), dos_clipboard_device_name);
-            std::string text=mainMenu.get_item("clipboard_device").get_text();
-            std::size_t found = text.find(":");
-            if (found!=std::string::npos) text = text.substr(0, found);
-            force_conversion=true;
-            mainMenu.get_item("clipboard_device").set_text(text+": "+std::string(dos_clipboard_device_name)).check(dos_clipboard_device_access==4&&!control->SecureMode()).enable(true).refresh_item(mainMenu);
-            force_conversion=false;
+			std::string text=mainMenu.get_item("clipboard_device").get_text();
+			std::size_t found = text.find(":");
+			if (found!=std::string::npos) text = text.substr(0, found);
+			force_conversion=true;
+			mainMenu.get_item("clipboard_device").set_text(text+": "+std::string(dos_clipboard_device_name)).check(dos_clipboard_device_access==4&&!control->SecureMode()).enable(true).refresh_item(mainMenu);
+			force_conversion=false;
 		} else {
-            force_conversion=true;
-            mainMenu.get_item("clipboard_device").enable(false).refresh_item(mainMenu);
-            force_conversion=false;
-        }
-        std::string autofixwarning=section->Get_string("autofixwarning");
-        autofixwarn=autofixwarning=="false"||autofixwarning=="0"||autofixwarning=="none"?0:(autofixwarning=="a20fix"?1:(autofixwarning=="loadfix"?2:3));
-        char *cpstr = (char *)section->Get_string("customcodepage");
-        r=(char *)strchr(cpstr, ',');
-        customcp = 0;
-        for (int i=0; i<256; i++) customcp_to_unicode[i] = 0;
-        if (r!=NULL) {
-            *r=0;
-            int cp = atoi(trim(cpstr));
-            *r=',';
-            std::string cpfile = trim(r+1);
-            ResolvePath(cpfile);
-            FILE* file = fopen(cpfile.c_str(), "r"); /* should check the result */
-            std::string exepath = GetDOSBoxXPath();
-            if (!file && exepath.size()) file = fopen((exepath+CROSS_FILESPLIT+cpfile).c_str(), "r");
-            if (file && cp > 0 && cp != 932 && cp != 936 && cp != 949 && cp != 950 && cp != 951) {
-                customcp = cp;
-                char line[256], *l=line;
-                while (fgets(line, sizeof(line), file)) {
-                    l=trim(l);
-                    if (!strlen(l)) continue;
-                    r = strchr(l, '#');
-                    if (r) *r = 0;
-                    l=trim(l);
-                    if (!strlen(l)||strncasecmp(l, "0x", 2)) continue;
-                    r = strchr(l, ' ');
-                    if (!r) r = strchr(l, '\t');
-                    if (!r) continue;
-                    *r = 0;
-                    int ind = (int)strtol(l+2, NULL, 16);
-                    r = trim(r+1);
-                    if (ind>0xFF||strncasecmp(r, "0x", 2)) continue;
-                    int map = (int)strtol(r+2, NULL, 16);
-                    customcp_to_unicode[ind] = map;
-                }
-            }
-            if (file) fclose(file);
-        }
-        if (dos_initial_hma_free > 0x10000)
-            dos_initial_hma_free = 0x10000;
+			force_conversion=true;
+			mainMenu.get_item("clipboard_device").enable(false).refresh_item(mainMenu);
+			force_conversion=false;
+		}
+		std::string autofixwarning=section->Get_string("autofixwarning");
+		autofixwarn=autofixwarning=="false"||autofixwarning=="0"||autofixwarning=="none"?0:(autofixwarning=="a20fix"?1:(autofixwarning=="loadfix"?2:3));
+		char *cpstr = (char *)section->Get_string("customcodepage");
+		r=(char *)strchr(cpstr, ',');
+		customcp = 0;
+		for (int i=0; i<256; i++) customcp_to_unicode[i] = 0;
+		if (r!=NULL) {
+			*r=0;
+			int cp = atoi(trim(cpstr));
+			*r=',';
+			std::string cpfile = trim(r+1);
+			ResolvePath(cpfile);
+			FILE* file = fopen(cpfile.c_str(), "r"); /* should check the result */
+			std::string exepath = GetDOSBoxXPath();
+			if (!file && exepath.size()) file = fopen((exepath+CROSS_FILESPLIT+cpfile).c_str(), "r");
+			if (file && cp > 0 && cp != 932 && cp != 936 && cp != 949 && cp != 950 && cp != 951) {
+				customcp = cp;
+				char line[256], *l=line;
+				while (fgets(line, sizeof(line), file)) {
+					l=trim(l);
+					if (!strlen(l)) continue;
+					r = strchr(l, '#');
+					if (r) *r = 0;
+					l=trim(l);
+					if (!strlen(l)||strncasecmp(l, "0x", 2)) continue;
+					r = strchr(l, ' ');
+					if (!r) r = strchr(l, '\t');
+					if (!r) continue;
+					*r = 0;
+					int ind = (int)strtol(l+2, NULL, 16);
+					r = trim(r+1);
+					if (ind>0xFF||strncasecmp(r, "0x", 2)) continue;
+					int map = (int)strtol(r+2, NULL, 16);
+					customcp_to_unicode[ind] = map;
+				}
+			}
+			if (file) fclose(file);
+		}
+		if (dos_initial_hma_free > 0x10000)
+			dos_initial_hma_free = 0x10000;
 
-        std::string cpmcompat = section->Get_string("cpm compatibility mode");
+		std::string cpmcompat = section->Get_string("cpm compatibility mode");
 
-        if (cpmcompat == "")
-            cpmcompat = "auto";
+		if (cpmcompat == "")
+			cpmcompat = "auto";
 
-        if (cpmcompat == "msdos2")
-            cpm_compat_mode = CPM_COMPAT_MSDOS2;
-        else if (cpmcompat == "msdos5")
-            cpm_compat_mode = CPM_COMPAT_MSDOS5;
-        else if (cpmcompat == "direct")
-            cpm_compat_mode = CPM_COMPAT_DIRECT;
-        else if (cpmcompat == "auto")
-            cpm_compat_mode = CPM_COMPAT_MSDOS5; /* MS-DOS 5.x is default */
-        else
-            cpm_compat_mode = CPM_COMPAT_OFF;
+		if (cpmcompat == "msdos2")
+			cpm_compat_mode = CPM_COMPAT_MSDOS2;
+		else if (cpmcompat == "msdos5")
+			cpm_compat_mode = CPM_COMPAT_MSDOS5;
+		else if (cpmcompat == "direct")
+			cpm_compat_mode = CPM_COMPAT_DIRECT;
+		else if (cpmcompat == "auto")
+			cpm_compat_mode = CPM_COMPAT_MSDOS5; /* MS-DOS 5.x is default */
+		else
+			cpm_compat_mode = CPM_COMPAT_OFF;
 
-        /* FIXME: Boot up an MS-DOS system and look at what INT 21h on Microsoft's MS-DOS returns
-         *        for SDA size and location, then use that here.
-         *
-         *        Why does this value matter so much to WordPerfect 5.1? */
-        if (dos_sda_size == 0)
-            DOS_SDA_SEG_SIZE = 0x560;
-        else if (dos_sda_size < 0x1A)
-            DOS_SDA_SEG_SIZE = 0x1A;
-        else if (dos_sda_size > 32768)
-            DOS_SDA_SEG_SIZE = 32768;
-        else
-            DOS_SDA_SEG_SIZE = (dos_sda_size + 0xF) & (~0xF); /* round up to paragraph */
+		/* If memsize < 16KB then the only way DOS can work properly is to allocate in the UMB private area */
+		if (MEM_ConventionalPages() < 4) {
+			if (!private_always_from_umb) {
+				private_always_from_umb = true;
+				LOG(LOG_MISC,LOG_DEBUG)("Memory size < 16KB, allocating all DOS kernel structures in the private upper memory area");
+			}
+		}
 
-        /* msdos 2.x and msdos 5.x modes, if HMA is involved, require us to take the first 256 bytes of HMA
-         * in order for "F01D:FEF0" to work properly whether or not A20 is enabled. Our direct mode doesn't
-         * jump through that address, and therefore doesn't need it. */
-        if (dos_in_hma &&
-            cpm_compat_mode != CPM_COMPAT_OFF &&
-            cpm_compat_mode != CPM_COMPAT_DIRECT) {
-            LOG(LOG_DOSMISC,LOG_DEBUG)("DOS: CP/M compatibility method with DOS in HMA requires mirror of entry point in HMA.");
-            if (dos_initial_hma_free > 0xFF00) {
-                dos_initial_hma_free = 0xFF00;
-                LOG(LOG_DOSMISC,LOG_DEBUG)("DOS: CP/M compatibility method requires reduction of HMA free space to accommodate.");
-            }
-        }
+		/* FIXME: Boot up an MS-DOS system and look at what INT 21h on Microsoft's MS-DOS returns
+		 *        for SDA size and location, then use that here.
+		 *
+		 *        Why does this value matter so much to WordPerfect 5.1? */
+		if (dos_sda_size == 0)
+			DOS_SDA_SEG_SIZE = 0x560;
+		else if (dos_sda_size < 0x1A)
+			DOS_SDA_SEG_SIZE = 0x1A;
+		else if (dos_sda_size > 32768)
+			DOS_SDA_SEG_SIZE = 32768;
+		else
+			DOS_SDA_SEG_SIZE = (dos_sda_size + 0xF) & (~0xF); /* round up to paragraph */
+
+		/* msdos 2.x and msdos 5.x modes, if HMA is involved, require us to take the first 256 bytes of HMA
+		 * in order for "F01D:FEF0" to work properly whether or not A20 is enabled. Our direct mode doesn't
+		 * jump through that address, and therefore doesn't need it. */
+		if (dos_in_hma &&
+				cpm_compat_mode != CPM_COMPAT_OFF &&
+				cpm_compat_mode != CPM_COMPAT_DIRECT) {
+			LOG(LOG_DOSMISC,LOG_DEBUG)("DOS: CP/M compatibility method with DOS in HMA requires mirror of entry point in HMA.");
+			if (dos_initial_hma_free > 0xFF00) {
+				dos_initial_hma_free = 0xFF00;
+				LOG(LOG_DOSMISC,LOG_DEBUG)("DOS: CP/M compatibility method requires reduction of HMA free space to accommodate.");
+			}
+		}
 
 		if ((int)MAXENV < 0) MAXENV = 65535;
 		if ((int)ENV_KEEPFREE < 0) ENV_KEEPFREE = 1024;
@@ -4209,92 +4311,90 @@ public:
 
 		if (minimum_mcb_segment > 0x8000) minimum_mcb_segment = 0x8000; /* FIXME: Clip against available memory */
 
-        /* we make use of the DOS_GetMemory() function for the dynamic allocation */
-        if (private_always_from_umb) {
-            DOS_GetMemory_Choose(); /* the pool starts in UMB */
-            if (minimum_mcb_segment == 0)
-                DOS_MEM_START = IS_PC98_ARCH ? 0x80 : 0x70; /* funny behavior in some games suggests the MS-DOS kernel loads a bit higher on PC-98 */
-            else
-                DOS_MEM_START = minimum_mcb_segment;
+		/* we make use of the DOS_GetMemory() function for the dynamic allocation */
+		if (private_always_from_umb) {
+			DOS_GetMemory_Choose(); /* the pool starts in UMB */
+			if (minimum_mcb_segment == 0)
+				DOS_MEM_START = IS_PC98_ARCH ? 0x80 : (MEM_ConventionalPages() >= 0x10/*64KB or more*/ ? 0x70 : 0x60); /* funny behavior in some games suggests the MS-DOS kernel loads a bit higher on PC-98 */
+			else
+				DOS_MEM_START = minimum_mcb_segment;
 
-            if (DOS_MEM_START < 0x40)
-                LOG_MSG("DANGER, DANGER! DOS_MEM_START has been set to within the interrupt vector table! Proceed at your own risk!");
-            else if (DOS_MEM_START < 0x50)
-                LOG_MSG("WARNING: DOS_MEM_START has been assigned to the BIOS data area! Proceed at your own risk!");
-            else if (DOS_MEM_START < 0x51)
-                LOG_MSG("WARNING: DOS_MEM_START has been assigned to segment 0x50, which some programs may use as the Print Screen flag");
-            else if (DOS_MEM_START < 0x80 && IS_PC98_ARCH)
-                LOG_MSG("CAUTION: DOS_MEM_START is less than 0x80 which may cause problems with some DOS games or applications relying on PC-98 BIOS state");
-            else if (DOS_MEM_START < 0x70)
-                LOG_MSG("CAUTION: DOS_MEM_START is less than 0x70 which may cause problems with some DOS games or applications");
-        }
-        else {
-            if (minimum_dos_initial_private_segment == 0)
-                DOS_PRIVATE_SEGMENT = IS_PC98_ARCH ? 0x80 : 0x70; /* funny behavior in some games suggests the MS-DOS kernel loads a bit higher on PC-98 */
-            else
-                DOS_PRIVATE_SEGMENT = minimum_dos_initial_private_segment;
+			if (DOS_MEM_START < 0x40)
+				LOG_MSG("DANGER, DANGER! DOS_MEM_START has been set to within the interrupt vector table! Proceed at your own risk!");
+			else if (DOS_MEM_START < 0x50)
+				LOG_MSG("WARNING: DOS_MEM_START has been assigned to the BIOS data area! Proceed at your own risk!");
+			else if (DOS_MEM_START < 0x51)
+				LOG_MSG("WARNING: DOS_MEM_START has been assigned to segment 0x50, which some programs may use as the Print Screen flag");
+			else if (DOS_MEM_START < 0x80 && IS_PC98_ARCH)
+				LOG_MSG("CAUTION: DOS_MEM_START is less than 0x80 which may cause problems with some DOS games or applications relying on PC-98 BIOS state");
+			else if (DOS_MEM_START < 0x70)
+				LOG_MSG("CAUTION: DOS_MEM_START is less than 0x70 which may cause problems with some DOS games or applications");
+		}
+		else {
+			if (minimum_dos_initial_private_segment == 0)
+				DOS_PRIVATE_SEGMENT = IS_PC98_ARCH ? 0x80 : (MEM_ConventionalPages() >= 0x10/*64KB or more*/ ? 0x70 : 0x60); /* funny behavior in some games suggests the MS-DOS kernel loads a bit higher on PC-98 */
+			else
+				DOS_PRIVATE_SEGMENT = minimum_dos_initial_private_segment;
 
-            if (DOS_PRIVATE_SEGMENT < 0x50)
-                LOG_MSG("DANGER, DANGER! DOS_PRIVATE_SEGMENT has been set too low!");
-            if (DOS_PRIVATE_SEGMENT < 0x80 && IS_PC98_ARCH)
-                LOG_MSG("DANGER, DANGER! DOS_PRIVATE_SEGMENT has been set too low for PC-98 emulation!");
+			if (DOS_PRIVATE_SEGMENT < 0x50)
+				LOG_MSG("DANGER, DANGER! DOS_PRIVATE_SEGMENT has been set too low!");
+			if (DOS_PRIVATE_SEGMENT < 0x80 && IS_PC98_ARCH)
+				LOG_MSG("DANGER, DANGER! DOS_PRIVATE_SEGMENT has been set too low for PC-98 emulation!");
 
-            if (MEM_TotalPages() > 0x9C)
-                DOS_PRIVATE_SEGMENT_END = 0x9C00;
-            else
-                DOS_PRIVATE_SEGMENT_END = (uint16_t)((MEM_TotalPages() << (12 - 4)) - 1); /* NTS: Remember DOSBox's implementation reuses the last paragraph for UMB linkage */
-        }
+			if (MEM_ConventionalPages() > 0x9C)
+				DOS_PRIVATE_SEGMENT_END = 0x9C00;
+			else
+				DOS_PRIVATE_SEGMENT_END = (uint16_t)((MEM_ConventionalPages() << (12 - 4)) - 1); /* NTS: Remember DOSBox's implementation reuses the last paragraph for UMB linkage */
+		}
 
-        LOG(LOG_DOSMISC,LOG_DEBUG)("DOS kernel structures will be allocated from pool 0x%04x-0x%04x",
-                DOS_PRIVATE_SEGMENT,DOS_PRIVATE_SEGMENT_END-1);
+		LOG(LOG_DOSMISC,LOG_DEBUG)("DOS kernel structures will be allocated from pool 0x%04x-0x%04x",
+				DOS_PRIVATE_SEGMENT,DOS_PRIVATE_SEGMENT_END-1);
 
-        DOS_IHSEG = DOS_GetMemory(1,"DOS_IHSEG");
+		DOS_IHSEG = DOS_GetMemory(1,"DOS_IHSEG");
 
-        /* DOS_INFOBLOCK_SEG contains the entire List of Lists, though the INT 21h call returns seg:offset with offset nonzero */
-	/* NTS: DOS_GetMemory() allocation sizes are in PARAGRAPHS (16-byte units) not bytes */
-	/* NTS: DOS_INFOBLOCK_SEG must be 0x20 paragraphs, CONDRV_SEG 0x08 paragraphs, and CONSTRING_SEG 0x0A paragraphs.
-	 *      The total combined size of INFOBLOCK+CONDRV+CONSTRING must be 0x32 paragraphs.
-	 *      SDA_SEG must be located at INFOBLOCK_SEG+0x32, so that the current PSP segment parameter is exactly at
-	 *      memory location INFOBLOCK_SEG:0x330. The reason for this has to do with Microsoft "Genuine MS-DOS detection"
-	 *      code in QuickBasic 7.1 and other programs designed to thwart DR-DOS at the time.
-	 *
-	 *      This is probably why DOSBox SVN hardcoded segments in the first place.
-	 *
-	 *      See also:
-	 *
-	 *      [https://www.os2museum.com/wp/how-to-void-your-valuable-warranty/]
-         *      [https://www.os2museum.com/files/drdos_detect.txt]
-         *      [https://www.os2museum.com/wp/about-that-warranty/]
-         *      [https://github.com/joncampbell123/dosbox-x/issues/3626]
-	 */
-        DOS_INFOBLOCK_SEG = DOS_GetMemory(0x20,"DOS_INFOBLOCK_SEG");	// was 0x80
-        DOS_CONDRV_SEG = DOS_GetMemory(0x08,"DOS_CONDRV_SEG");		// was 0xA0
-        DOS_CONSTRING_SEG = DOS_GetMemory(0x0A,"DOS_CONSTRING_SEG");	// was 0xA8
-        DOS_SDA_SEG = DOS_GetMemory(DOS_SDA_SEG_SIZE>>4,"DOS_SDA_SEG");		// was 0xB2  (0xB2 + 0x56 = 0x108)
-        DOS_SDA_OFS = 0;
-        DOS_CDS_SEG = DOS_GetMemory(0x10,"DOS_CDA_SEG");		// was 0x108
+		/* DOS_INFOBLOCK_SEG contains the entire List of Lists, though the INT 21h call returns seg:offset with offset nonzero */
+		/* NTS: DOS_GetMemory() allocation sizes are in PARAGRAPHS (16-byte units) not bytes */
+		/* NTS: DOS_INFOBLOCK_SEG must be 0x32 paragraphs. SDA_SEG must be located at INFOBLOCK_SEG+0x32, so that the current PSP
+		 *      segment parameter is exactly at memory location INFOBLOCK_SEG:0x330. The reason for this has to do with Microsoft
+		 *      "Genuine MS-DOS detection" code in QuickBasic 7.1 and other programs designed to thwart DR-DOS at the time.
+		 *
+		 *      This is probably why DOSBox SVN hardcoded segments in the first place.
+		 *
+		 *      See also:
+		 *
+		 *      [https://www.os2museum.com/wp/how-to-void-your-valuable-warranty/]
+		 *      [https://www.os2museum.com/files/drdos_detect.txt]
+		 *      [https://www.os2museum.com/wp/about-that-warranty/]
+		 *      [https://github.com/joncampbell123/dosbox-x/issues/3626]
+		 */
+		DOS_INFOBLOCK_SEG = DOS_GetMemory(0x32,"DOS_INFOBLOCK_SEG");		// was 0x80  0x32 = 0x20(INFOBLOCK) + 0x08(old CONDRV_SEG) + 0x0A(CONSTRING_SEG)
+		DOS_SDA_SEG = DOS_GetMemory(DOS_SDA_SEG_SIZE>>4,"DOS_SDA_SEG");		// was 0xB2  (0xB2 + 0x56 = 0x108)
+		DOS_SDA_OFS = 0;
+
+		/* 2024/06/02: Keep the CON driver away from the clusterfuck of the INFOBLOCK and SFT mess */
+		DOS_CONDRV_SEG = DOS_GetMemory(0x04,"DOS_CONDRV_SEG");		// was 0xA0
+		DOS_CDS_SEG = DOS_GetMemory(0x10,"DOS_CDA_SEG");		// was 0x108
 
 		LOG(LOG_DOSMISC,LOG_DEBUG)("DOS kernel alloc:");
 		LOG(LOG_DOSMISC,LOG_DEBUG)("   IHSEG:        seg 0x%04x",DOS_IHSEG);
 		LOG(LOG_DOSMISC,LOG_DEBUG)("   infoblock:    seg 0x%04x",DOS_INFOBLOCK_SEG);
 		LOG(LOG_DOSMISC,LOG_DEBUG)("   condrv:       seg 0x%04x",DOS_CONDRV_SEG);
-		LOG(LOG_DOSMISC,LOG_DEBUG)("   constring:    seg 0x%04x",DOS_CONSTRING_SEG);
 		LOG(LOG_DOSMISC,LOG_DEBUG)("   SDA:          seg 0x%04x:0x%04x %u bytes",DOS_SDA_SEG,DOS_SDA_OFS,DOS_SDA_SEG_SIZE);
 		LOG(LOG_DOSMISC,LOG_DEBUG)("   CDS:          seg 0x%04x",DOS_CDS_SEG);
 		LOG(LOG_DOSMISC,LOG_DEBUG)("[private segment @ this point 0x%04x-0x%04x mem=0x%04lx]",
-			DOS_PRIVATE_SEGMENT,DOS_PRIVATE_SEGMENT_END,
-			(unsigned long)(MEM_TotalPages() << (12 - 4)));
+				DOS_PRIVATE_SEGMENT,DOS_PRIVATE_SEGMENT_END,
+				(unsigned long)(MEM_ConventionalPages() << (12 - 4)));
 
 		callback[0].Install(DOS_20Handler,CB_IRET,"DOS Int 20");
 		callback[0].Set_RealVec(0x20);
 
 		callback[1].Install(DOS_21Handler,CB_INT21,"DOS Int 21");
 		callback[1].Set_RealVec(0x21);
-	//Pseudo code for int 21
-	// sti
-	// callback 
-	// iret
-	// retf  <- int 21 4c jumps here to mimic a retf Cyber
+		//Pseudo code for int 21
+		// sti
+		// callback 
+		// iret
+		// retf  <- int 21 4c jumps here to mimic a retf Cyber
 
 		callback[2].Install(DOS_25Handler,CB_RETF_STI,"DOS Int 25");
 		callback[2].Set_RealVec(0x25);
@@ -4342,11 +4442,11 @@ public:
 		}
 		callback[6].Set_RealVec(0x29);
 
-        if (!IS_PC98_ARCH) {
-            /* DOS installs a handler for INT 1Bh */
-            callback[7].Install(BIOS_1BHandler,CB_IRET,"BIOS 1Bh MS-DOS handler");
-            callback[7].Set_RealVec(0x1B);
-        }
+		if (!IS_PC98_ARCH) {
+			/* DOS installs a handler for INT 1Bh */
+			callback[7].Install(BIOS_1BHandler,CB_IRET,"BIOS 1Bh MS-DOS handler");
+			callback[7].Set_RealVec(0x1B);
+		}
 
 		callback[8].Install(DOS_CPMHandler,CB_CPM,"DOS/CPM Int 30-31");
 		int30=RealGetVec(0x30);
@@ -4357,37 +4457,37 @@ public:
 		//	pushf
 		//	... the rest is like int 21
 
-        if (IS_PC98_ARCH) {
-            /* Any interrupt vector pointing to the INT stub in the BIOS must be rewritten to point to a JMP to the stub
-             * residing in the DOS segment (60h) because some PC-98 resident drivers use segment 60h as a check for
-             * installed vs uninstalled (MUSIC.COM, Peret em Heru) */
-            uint16_t sg = DOS_GetMemory(1/*paragraph*/,"INT stub trampoline");
-            PhysPt sgp = (PhysPt)sg << (PhysPt)4u;
+		if (IS_PC98_ARCH) {
+			/* Any interrupt vector pointing to the INT stub in the BIOS must be rewritten to point to a JMP to the stub
+			 * residing in the DOS segment (60h) because some PC-98 resident drivers use segment 60h as a check for
+			 * installed vs uninstalled (MUSIC.COM, Peret em Heru) */
+			uint16_t sg = DOS_GetMemory(1/*paragraph*/,"INT stub trampoline");
+			PhysPt sgp = (PhysPt)sg << (PhysPt)4u;
 
-            /* Re-base the pointer so the segment is 0x60 */
-            uint32_t veco = sgp - 0x600;
-            if (veco >= 0xFFF0u) E_Exit("INT stub trampoline out of bounds");
-            uint32_t vecp = RealMake(0x60,(uint16_t)veco);
+			/* Re-base the pointer so the segment is 0x60 */
+			uint32_t veco = sgp - 0x600;
+			if (veco >= 0xFFF0u) E_Exit("INT stub trampoline out of bounds");
+			uint32_t vecp = RealMake(0x60,(uint16_t)veco);
 
-            mem_writeb(sgp+0,0xEA);
-            mem_writed(sgp+1,BIOS_get_PC98_INT_STUB());
+			mem_writeb(sgp+0,0xEA);
+			mem_writed(sgp+1,BIOS_get_PC98_INT_STUB());
 
-            for (unsigned int i=0;i < 0x100;i++) {
-                uint32_t vec = RealGetVec(i);
+			for (unsigned int i=0;i < 0x100;i++) {
+				uint32_t vec = RealGetVec(i);
 
-                if (vec == BIOS_get_PC98_INT_STUB())
-                    mem_writed(i*4,vecp);
-            }
-        }
+				if (vec == BIOS_get_PC98_INT_STUB())
+					mem_writed(i*4,vecp);
+			}
+		}
 
-        /* NTS: HMA support requires XMS. EMS support may switch on A20 if VCPI emulation requires the odd megabyte */
-        if ((!dos_in_hma || !section->Get_bool("xms")) && (MEM_A20_Enabled() || strcmp(section->Get_string("ems"),"false") != 0) &&
-            cpm_compat_mode != CPM_COMPAT_OFF && cpm_compat_mode != CPM_COMPAT_DIRECT) {
-            /* hold on, only if more than 1MB of RAM and memory access permits it */
-            if (MEM_TotalPages() > 0x100 && MEM_PageMask() > 0xff/*more than 20-bit decoding*/) {
-                LOG(LOG_DOSMISC,LOG_WARN)("DOS not in HMA or XMS is disabled. This may break programs using the CP/M compatibility call method if the A20 gate is switched on.");
-            }
-        }
+		/* NTS: HMA support requires XMS. EMS support may switch on A20 if VCPI emulation requires the odd megabyte */
+		if ((!dos_in_hma || !section->Get_bool("xms")) && (MEM_A20_Enabled() || strcmp(section->Get_string("ems"),"false") != 0) &&
+				cpm_compat_mode != CPM_COMPAT_OFF && cpm_compat_mode != CPM_COMPAT_DIRECT) {
+			/* hold on, only if more than 1MB of RAM and memory access permits it */
+			if (MEM_TotalPages() > 0x100 && MEM_PageMask() > 0xff/*more than 20-bit decoding*/) {
+				LOG(LOG_DOSMISC,LOG_WARN)("DOS not in HMA or XMS is disabled. This may break programs using the CP/M compatibility call method if the A20 gate is switched on.");
+			}
+		}
 
 		DOS_SetupFiles();								/* Setup system File tables */
 		DOS_SetupDevices();							/* Setup dos devices */
@@ -4411,7 +4511,7 @@ public:
 				DOS_MEM_START += (uint16_t)DOS_PRIVATE_SEGMENT_Size;
 				segend = DOS_MEM_START;
 
-				if (segend >= (MEM_TotalPages() << (12 - 4)))
+				if (segend >= (MEM_ConventionalPages() << (12 - 4)))
 					E_Exit("Insufficient room for private area");
 
 				DOS_PRIVATE_SEGMENT = seg;
@@ -4433,66 +4533,74 @@ public:
 		/* carry on setup */
 		DOS_SetupMemory();								/* Setup first MCB */
 
-        /* NTS: The reason PC-98 has a higher minimum free is that the MS-DOS kernel
-         *      has a larger footprint in memory, including fixed locations that
-         *      some PC-98 games will read directly, and an ANSI driver.
-         *
-         *      Some PC-98 games will have problems if loaded below a certain
-         *      threshold as well.
-         *
-         *        Valkyrie: 0xE10 is not enough for the game to run. If a specific
-         *                  FM music selection is chosen, the remaining memory is
-         *                  insufficient for the game to start the battle.
-         *
-         *      The default assumes a DOS kernel and lower memory region of 32KB,
-         *      which might be a reasonable compromise so far.
-         *
-         * NOTES: A minimum mcb free value of at least 0xE10 is needed for Windows 3.1
-         *        386 enhanced to start, else it will complain about insufficient memory (?).
-         *        To get Windows 3.1 to run, either set "minimum mcb free=e10" or run
-         *        "LOADFIX" before starting Windows 3.1 */
+		/* NTS: The reason PC-98 has a higher minimum free is that the MS-DOS kernel
+		 *      has a larger footprint in memory, including fixed locations that
+		 *      some PC-98 games will read directly, and an ANSI driver.
+		 *
+		 *      Some PC-98 games will have problems if loaded below a certain
+		 *      threshold as well.
+		 *
+		 *        Valkyrie: 0xE10 is not enough for the game to run. If a specific
+		 *                  FM music selection is chosen, the remaining memory is
+		 *                  insufficient for the game to start the battle.
+		 *
+		 *      The default assumes a DOS kernel and lower memory region of 32KB,
+		 *      which might be a reasonable compromise so far.
+		 *
+		 * NOTES: A minimum mcb free value of at least 0xE10 is needed for Windows 3.1
+		 *        386 enhanced to start, else it will complain about insufficient memory (?).
+		 *        To get Windows 3.1 to run, either set "minimum mcb free=e10" or run
+		 *        "LOADFIX" before starting Windows 3.1 */
 
-        /* NTS: There is a mysterious memory corruption issue with some DOS games
-         *      and applications when they are loaded at or around segment 0x800.
-         *      This should be looked into. In the meantime, setting the MCB
-         *      start segment before or after 0x800 helps to resolve these issues.
-         *      It also puts DOSBox-X at parity with main DOSBox SVN behavior. */
-        if (minimum_mcb_free == 0)
-            minimum_mcb_free = IS_PC98_ARCH ? 0x800 : 0x700;
-        else if (minimum_mcb_free < minimum_mcb_segment)
-            minimum_mcb_free = minimum_mcb_segment;
+		/* NTS: There is a mysterious memory corruption issue with some DOS games
+		 *      and applications when they are loaded at or around segment 0x800.
+		 *      This should be looked into. In the meantime, setting the MCB
+		 *      start segment before or after 0x800 helps to resolve these issues.
+		 *      It also puts DOSBox-X at parity with main DOSBox SVN behavior. */
+		/* NTS: If the user is trying to emulate a DOS machine with smaller than
+		 *      256KB amounts of memory, then minimum mcb free needs to be much
+		 *      smaller to make room and allow for it */
+		if (minimum_mcb_free == 0) {
+			if (MEM_ConventionalPages() < 0x40/*256KB*/)
+				minimum_mcb_free = minimum_mcb_segment;
+			else
+				minimum_mcb_free = IS_PC98_ARCH ? 0x800 : 0x700;
+		}
+		else if (minimum_mcb_free < minimum_mcb_segment) {
+			minimum_mcb_free = minimum_mcb_segment;
+		}
 
-        LOG(LOG_DOSMISC,LOG_DEBUG)("   min free:     seg 0x%04x",minimum_mcb_free);
+		LOG(LOG_DOSMISC,LOG_DEBUG)("   min free:     seg 0x%04x",minimum_mcb_free);
 
-        if (DOS_MEM_START < minimum_mcb_free) {
-            uint16_t sg=0,tmp;
+		if (DOS_MEM_START < minimum_mcb_free) {
+			uint16_t sg=0,tmp;
 
-            dos.psp(8); // DOS ownership
+			dos.psp(8); // DOS ownership
 
-            tmp = 1; // start small
-            if (DOS_AllocateMemory(&sg,&tmp)) {
-                if (sg < minimum_mcb_free) {
-                    LOG(LOG_DOSMISC,LOG_DEBUG)("   min free pad: seg 0x%04x",sg);
-                }
-                else {
-                    DOS_FreeMemory(sg);
-                    sg = 0;
-                }
-            }
-            else {
-                sg=0;
-            }
+			tmp = 1; // start small
+			if (DOS_AllocateMemory(&sg,&tmp)) {
+				if (sg < minimum_mcb_free) {
+					LOG(LOG_DOSMISC,LOG_DEBUG)("   min free pad: seg 0x%04x",sg);
+				}
+				else {
+					DOS_FreeMemory(sg);
+					sg = 0;
+				}
+			}
+			else {
+				sg=0;
+			}
 
-            if (sg != 0 && sg < minimum_mcb_free) {
-                tmp = minimum_mcb_free - sg;
-                if (!DOS_ResizeMemory(sg,&tmp)) {
-                    LOG(LOG_DOSMISC,LOG_DEBUG)("    WARNING: cannot resize min free pad");
-                }
-            }
-        }
+			if (sg != 0 && sg < minimum_mcb_free) {
+				tmp = minimum_mcb_free - sg;
+				if (!DOS_ResizeMemory(sg,&tmp)) {
+					LOG(LOG_DOSMISC,LOG_DEBUG)("    WARNING: cannot resize min free pad");
+				}
+			}
+		}
 
 #if C_IPX
-	IPX_Setup(NULL);
+		IPX_Setup(NULL);
 #endif
 
 		DOS_SetupPrograms();
@@ -4501,12 +4609,12 @@ public:
 		DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDrive(25); /* Else the next call gives a warning. */
 		DOS_SetDefaultDrive(25);
 
-        if (IS_JEGA_ARCH) {
-            INT10_AX_SetCRTBIOSMode(0x51);
-            INT16_AX_SetKBDBIOSMode(0x51);
-        } else if (IS_J3100) {
-            INT60_J3_Setup();
-        }
+		if (IS_JEGA_ARCH) {
+			INT10_AX_SetCRTBIOSMode(0x51);
+			INT16_AX_SetKBDBIOSMode(0x51);
+		} else if (IS_J3100) {
+			INT60_J3_Setup();
+		}
 #if defined(USE_TTF)
 		if(IS_DOSV || ttf_dosv) {
 #else
@@ -4521,19 +4629,17 @@ public:
 			}
 		}
 
-        const char *keepstr = section->Get_string("keep private area on boot");
-        if (!strcasecmp(keepstr, "true")||!strcasecmp(keepstr, "1")) keep_private_area_on_boot = 1;
-        else if (!strcasecmp(keepstr, "false")||!strcasecmp(keepstr, "0")) keep_private_area_on_boot = 0;
-        else keep_private_area_on_boot = addovl;
-		dos.version.major=5;
-		dos.version.minor=0;
+		const char *keepstr = section->Get_string("keep private area on boot");
+		if (!strcasecmp(keepstr, "true")||!strcasecmp(keepstr, "1")) keep_private_area_on_boot = 1;
+		else if (!strcasecmp(keepstr, "false")||!strcasecmp(keepstr, "0")) keep_private_area_on_boot = 0;
+		else keep_private_area_on_boot = addovl;
 		dos.direct_output=false;
 		dos.internal_output=false;
 
-        std::string fat32setverstr = section->Get_string("fat32setversion");
-        if (fat32setverstr=="auto") fat32setver=1;
-        else if (fat32setverstr=="manual") fat32setver=0;
-        else fat32setver=-1;
+		std::string fat32setverstr = section->Get_string("fat32setversion");
+		if (fat32setverstr=="auto") fat32setver=1;
+		else if (fat32setverstr=="manual") fat32setver=0;
+		else fat32setver=-1;
 
 		std::string lfn = section->Get_string("lfn");
 		if (lfn=="true"||lfn=="1") enablelfn=1;
@@ -4541,90 +4647,75 @@ public:
 		else if (lfn=="autostart") enablelfn=-2;
 		else enablelfn=-1;
 
-        force_conversion=true;
-        mainMenu.get_item("dos_lfn_auto").check(enablelfn==-1).enable(true).refresh_item(mainMenu);
-        mainMenu.get_item("dos_lfn_enable").check(enablelfn==1).enable(true).refresh_item(mainMenu);
-        mainMenu.get_item("dos_lfn_disable").check(enablelfn==0).enable(true).refresh_item(mainMenu);
-        force_conversion=false;
+		force_conversion=true;
+		mainMenu.get_item("dos_lfn_auto").check(enablelfn==-1).enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("dos_lfn_enable").check(enablelfn==1).enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("dos_lfn_disable").check(enablelfn==0).enable(true).refresh_item(mainMenu);
+		force_conversion=false;
 
-        const char *ver = section->Get_string("ver");
-		if (*ver) {
-			if (set_ver((char *)ver)) {
-				/* warn about unusual version numbers */
-				if (dos.version.major >= 10 && dos.version.major <= 30) {
-					LOG_MSG("WARNING, DOS version %u.%u: the major version is set to a "
-						"range that may cause some DOS programs to think they are "
-						"running from within an OS/2 DOS box.",
-						dos.version.major, dos.version.minor);
-				}
-				else if (dos.version.major == 0 || dos.version.major > 8 || dos.version.minor > 90)
-					LOG_MSG("WARNING: DOS version %u.%u is unusual, may confuse DOS programs",
-						dos.version.major, dos.version.minor);
-			}
+		force_conversion=true;
+		dos_ver_menu(true);
+		mainMenu.get_item("dos_ver_edit").enable(true).refresh_item(mainMenu);
+		update_dos_ems_menu();
+		force_conversion=false;
+
+		/* settings */
+		if (first_run) {
+			const Section_prop * section=static_cast<Section_prop *>(control->GetSection("dos"));
+			use_quick_reboot = section->Get_bool("quick reboot");
+			enable_config_as_shell_commands = section->Get_bool("shell configuration as commands");
+			startwait = section->Get_bool("startwait");
+			startquiet = section->Get_bool("startquiet");
+			starttranspath = section->Get_bool("starttranspath");
+			winautorun=startcmd;
+			first_run=false;
 		}
-        force_conversion=true;
-        dos_ver_menu(true);
-        mainMenu.get_item("dos_ver_edit").enable(true).refresh_item(mainMenu);
-        update_dos_ems_menu();
-        force_conversion=false;
-
-        /* settings */
-        if (first_run) {
-            const Section_prop * section=static_cast<Section_prop *>(control->GetSection("dos"));
-            use_quick_reboot = section->Get_bool("quick reboot");
-            enable_config_as_shell_commands = section->Get_bool("shell configuration as commands");
-            startwait = section->Get_bool("startwait");
-            startquiet = section->Get_bool("startquiet");
-            starttranspath = section->Get_bool("starttranspath");
-            winautorun=startcmd;
-            first_run=false;
-        }
-        force_conversion=true;
+		force_conversion=true;
 #if !defined(HX_DOS)
-        mainMenu.get_item("mapper_quickrun").enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("mapper_quickrun").enable(true).refresh_item(mainMenu);
 #endif
-        mainMenu.get_item("mapper_rescanall").enable(true).refresh_item(mainMenu);
-        mainMenu.get_item("enable_a20gate").enable(true).refresh_item(mainMenu);
-        mainMenu.get_item("quick_reboot").check(use_quick_reboot).refresh_item(mainMenu);
-        mainMenu.get_item("shell_config_commands").check(enable_config_as_shell_commands).enable(true).refresh_item(mainMenu);
-        mainMenu.get_item("limit_hdd_rate").check(::disk_data_rate).enable(true).refresh_item(mainMenu);
-        mainMenu.get_item("limit_floppy_rate").check(::floppy_data_rate).enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("mapper_rescanall").enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("enable_a20gate").enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("quick_reboot").check(use_quick_reboot).refresh_item(mainMenu);
+		mainMenu.get_item("shell_config_commands").check(enable_config_as_shell_commands).enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("limit_hdd_rate").check(::disk_data_rate).enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("limit_floppy_rate").check(::floppy_data_rate).enable(true).refresh_item(mainMenu);
 #if defined(WIN32) && !defined(HX_DOS)
-        mainMenu.get_item("dos_win_autorun").check(winautorun).enable(true).refresh_item(mainMenu);
+		mainMenu.get_item("dos_win_autorun").check(winautorun).enable(true).refresh_item(mainMenu);
 #endif
 #if defined(WIN32) && !defined(HX_DOS) || defined(LINUX) || defined(MACOSX)
-        mainMenu.get_item("dos_win_transpath").check(starttranspath).enable(
+		mainMenu.get_item("dos_win_transpath").check(starttranspath).enable(
 #if defined(WIN32) && !defined(HX_DOS)
-        true
+				true
 #else
-        startcmd
+				startcmd
 #endif
-        ).refresh_item(mainMenu);
-        mainMenu.get_item("dos_win_wait").check(startwait).enable(
+				).refresh_item(mainMenu);
+		mainMenu.get_item("dos_win_wait").check(startwait).enable(
 #if defined(WIN32) && !defined(HX_DOS)
-        true
+				true
 #else
-        startcmd
+				startcmd
 #endif
-        ).refresh_item(mainMenu);
-        mainMenu.get_item("dos_win_quiet").check(startquiet).enable(
+				).refresh_item(mainMenu);
+		mainMenu.get_item("dos_win_quiet").check(startquiet).enable(
 #if defined(WIN32) && !defined(HX_DOS)
-        true
+				true
 #else
-        startcmd
+				startcmd
 #endif
-        ).refresh_item(mainMenu);
+				).refresh_item(mainMenu);
 #endif
-        force_conversion=false;
+		force_conversion=false;
 
-        if (IS_PC98_ARCH) {
-            void PC98_InitDefFuncRow(void);
-            PC98_InitDefFuncRow();
+		if (IS_PC98_ARCH) {
+			void PC98_InitDefFuncRow(void);
+			PC98_InitDefFuncRow();
 
-            real_writeb(0x60,0x113,0x01); /* 25-line mode */
-        }
-        *appname=0;
-        *appargs=0;
+			real_writeb(0x60,0x113,0x01); /* 25-line mode */
+		}
+		*appname=0;
+		*appargs=0;
 	}
 	~DOS(){
 		infix=-1;
@@ -4670,6 +4761,7 @@ public:
 		DOS_ShutdownFiles();
 		void DOS_ShutdownDevices(void);
 		DOS_ShutdownDevices();
+		DOS_FreeTableMemory();
 		RealSetVec(0x30,int30);
 		RealSetVec(0x31,int31);
 	}
@@ -4678,13 +4770,13 @@ public:
 static DOS* test = NULL;
 
 void DOS_Write_HMA_CPM_jmp(void) {
-    assert(test != NULL);
-    test->DOS_Write_HMA_CPM_jmp();
+	assert(test != NULL);
+	test->DOS_Write_HMA_CPM_jmp();
 }
 
 uint32_t DOS_Get_CPM_entry_direct(void) {
-    assert(test != NULL);
-    return test->DOS_Get_CPM_entry_direct();
+	assert(test != NULL);
+	return test->DOS_Get_CPM_entry_direct();
 }
 
 void DOS_ShutdownFiles() {
@@ -4727,7 +4819,7 @@ void update_pc98_function_row(unsigned char setting,bool force_redraw=false);
 void DOS_Casemap_Free();
 
 void DOS_EnableDriveMenu(char drv) {
-    if (drv >= 'A' && drv <= 'Z') {
+	if (drv >= 'A' && drv <= 'Z') {
 		std::string name;
 		bool empty=!dos_kernel_disabled && Drives[drv-'A'] == NULL;
 #if defined (WIN32)
@@ -4766,16 +4858,16 @@ void DOS_EnableDriveMenu(char drv) {
 		}
 		name = std::string("drive_") + drv + "_saveimg";
 		mainMenu.get_item(name).enable(Drives[drv-'A'] != NULL && !dynamic_cast<fatDrive*>(Drives[drv-'A'])).refresh_item(mainMenu);
-        if (dos_kernel_disabled || !strcmp(RunningProgram, "LOADLIN")) {
-            bool found = false;
-            for (int i=0; i<MAX_DISK_IMAGES; i++)
-                if (imageDiskList[i] && imageDiskList[i]->ffdd && imageDiskList[i]->drvnum == drv-'A') {
-                    found = true;
-                    break;
-                }
-            if (!found) mainMenu.get_item(name).enable(false).refresh_item(mainMenu);
-        }
-    }
+		if (dos_kernel_disabled || !strcmp(RunningProgram, "LOADLIN")) {
+			bool found = false;
+			for (int i=0; i<MAX_DISK_IMAGES; i++)
+				if (imageDiskList[i] && imageDiskList[i]->ffdd && imageDiskList[i]->drvnum == drv-'A') {
+					found = true;
+					break;
+				}
+			if (!found) mainMenu.get_item(name).enable(false).refresh_item(mainMenu);
+		}
+	}
 }
 
 void DOS_DoShutDown() {
@@ -4784,11 +4876,11 @@ void DOS_DoShutDown() {
 		test = NULL;
 	}
 
-    if (IS_PC98_ARCH) update_pc98_function_row(0);
+	if (IS_PC98_ARCH) update_pc98_function_row(0);
 
-    DOS_Casemap_Free();
+	DOS_Casemap_Free();
 
-    for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
+	for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
 }
 
 void DOS_GetMemory_reinit();
@@ -4806,40 +4898,40 @@ void DOS_OnReset(Section* /*sec*/) {
 }
 
 void DOS_Startup(Section* sec) {
-    (void)sec;//UNUSED
+	(void)sec;//UNUSED
 
 	if (test == NULL) {
-        DOS_GetMemLog.clear();
-        DOS_GetMemory_reinit();
-        LOG(LOG_DOSMISC,LOG_DEBUG)("Allocating DOS kernel");
+		DOS_GetMemLog.clear();
+		DOS_GetMemory_reinit();
+		LOG(LOG_DOSMISC,LOG_DEBUG)("Allocating DOS kernel");
 		test = new DOS(control->GetSection("dos"));
 	}
 
-    force_conversion=true;
-    for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
-    force_conversion=false;
+	force_conversion=true;
+	for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
+	force_conversion=false;
 }
 
 void DOS_RescanAll(bool pressed) {
-    if (!pressed) return;
-    if (dos_kernel_disabled) return;
+	if (!pressed) return;
+	if (dos_kernel_disabled) return;
 
-    LOG(LOG_DOSMISC,LOG_DEBUG)("Triggering rescan on all drives");
-    for(Bitu i =0; i<DOS_DRIVES;i++) {
-        if (Drives[i]) Drives[i]->EmptyCache();
-    }
+	LOG(LOG_DOSMISC,LOG_DEBUG)("Triggering rescan on all drives");
+	for(Bitu i =0; i<DOS_DRIVES;i++) {
+		if (Drives[i]) Drives[i]->EmptyCache();
+	}
 }
 
 void DOS_Init() {
 	LOG(LOG_DOSMISC,LOG_DEBUG)("Initializing DOS kernel (DOS_Init)");
-    LOG(LOG_DOSMISC,LOG_DEBUG)("sizeof(union bootSector) = %u",(unsigned int)sizeof(union bootSector));
-    LOG(LOG_DOSMISC,LOG_DEBUG)("sizeof(struct FAT_BootSector) = %u",(unsigned int)sizeof(struct FAT_BootSector));
-    LOG(LOG_DOSMISC,LOG_DEBUG)("sizeof(direntry) = %u",(unsigned int)sizeof(direntry));
+	LOG(LOG_DOSMISC,LOG_DEBUG)("sizeof(union bootSector) = %u",(unsigned int)sizeof(union bootSector));
+	LOG(LOG_DOSMISC,LOG_DEBUG)("sizeof(struct FAT_BootSector) = %u",(unsigned int)sizeof(struct FAT_BootSector));
+	LOG(LOG_DOSMISC,LOG_DEBUG)("sizeof(direntry) = %u",(unsigned int)sizeof(direntry));
 
-    /* this code makes assumptions! */
-    assert(sizeof(direntry) == 32);
-    assert((SECTOR_SIZE_MAX % sizeof(direntry)) == 0);
-    assert((MAX_DIRENTS_PER_SECTOR * sizeof(direntry)) == SECTOR_SIZE_MAX);
+	/* this code makes assumptions! */
+	assert(sizeof(direntry) == 32);
+	assert((SECTOR_SIZE_MAX % sizeof(direntry)) == 0);
+	assert((MAX_DIRENTS_PER_SECTOR * sizeof(direntry)) == SECTOR_SIZE_MAX);
 
 	AddExitFunction(AddExitFunctionFuncPair(DOS_ShutDown),false);
 	AddVMEventFunction(VM_EVENT_RESET,AddVMEventFunctionFuncPair(DOS_OnReset));
@@ -4847,463 +4939,466 @@ void DOS_Init() {
 	AddVMEventFunction(VM_EVENT_DOS_EXIT_REBOOT_KERNEL,AddVMEventFunctionFuncPair(DOS_ShutDown));
 	AddVMEventFunction(VM_EVENT_DOS_SURPRISE_REBOOT,AddVMEventFunctionFuncPair(DOS_OnReset));
 
-    DOSBoxMenu::item *item;
+	DOSBoxMenu::item *item;
 
-    MAPPER_AddHandler(DOS_RescanAll,MK_nothing,0,"rescanall","Rescan drives",&item);
-    item->enable(false).refresh_item(mainMenu);
-    item->set_text("Rescan all drives");
-    for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
+	MAPPER_AddHandler(DOS_RescanAll,MK_nothing,0,"rescanall","Rescan drives",&item);
+	item->enable(false).refresh_item(mainMenu);
+	item->set_text("Rescan all drives");
+	for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
 }
 
 void DOS_Int21_7139(char *name1, const char *name2) {
-    (void)name2;
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if (DOS_MakeDir(name1)) {
-				reg_ax=0;
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	(void)name2;
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if (DOS_MakeDir(name1)) {
+		reg_ax=0;
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_713a(char *name1, const char *name2) {
-    (void)name2;
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if  (DOS_RemoveDir(name1)) {
-				reg_ax=0;
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-				LOG(LOG_DOSMISC,LOG_NORMAL)("Remove dir failed on %s with error %X",name1,dos.errorcode);
-		}
+	(void)name2;
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if  (DOS_RemoveDir(name1)) {
+		reg_ax=0;
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+		LOG(LOG_DOSMISC,LOG_NORMAL)("Remove dir failed on %s with error %X",name1,dos.errorcode);
+	}
 }
 
 void DOS_Int21_713b(char *name1, const char *name2) {
-    (void)name2;
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if  (DOS_ChangeDir(name1)) {
-				reg_ax=0;
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	(void)name2;
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if  (DOS_ChangeDir(name1)) {
+		reg_ax=0;
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_7141(char *name1, const char *name2) {
-    (void)name2;
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if (DOS_UnlinkFile(name1)) {
-				reg_ax=0;
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	(void)name2;
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if (DOS_UnlinkFile(name1)) {
+		reg_ax=0;
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_7143(char *name1, const char *name2) {
-    (void)name2;
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		switch (reg_bl) {
-				case 0x00:                              /* Get */
-				{
-					uint16_t attr_val=reg_cx;
-					if (DOS_GetFileAttr(name1,&attr_val)) {
-							reg_cx=attr_val;
-							reg_ax=0;
-							CALLBACK_SCF(false);
-					} else {
-							CALLBACK_SCF(true);
-							reg_ax=dos.errorcode;
-					}
-					break;
-				};
-				case 0x01:                              /* Set */
-					if (DOS_SetFileAttr(name1,reg_cx)) {
-							reg_ax=0;
-							CALLBACK_SCF(false);
-					} else {
-							CALLBACK_SCF(true);
-							reg_ax=dos.errorcode;
-					}
-					break;
-				case 0x02:				/* Get compressed file size */
-				{
+	(void)name2;
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	switch (reg_bl) {
+		case 0x00:                              /* Get */
+			{
+				uint16_t attr_val=reg_cx;
+				if (DOS_GetFileAttr(name1,&attr_val)) {
+					reg_cx=attr_val;
 					reg_ax=0;
-					reg_dx=0;
-					unsigned long size = DOS_GetCompressedFileSize(name1);
-					if (size != (unsigned long)(-1l)) {
+					CALLBACK_SCF(false);
+				} else {
+					CALLBACK_SCF(true);
+					reg_ax=dos.errorcode;
+				}
+				break;
+			};
+		case 0x01:                              /* Set */
+			if (DOS_SetFileAttr(name1,reg_cx)) {
+				reg_ax=0;
+				CALLBACK_SCF(false);
+			} else {
+				CALLBACK_SCF(true);
+				reg_ax=dos.errorcode;
+			}
+			break;
+		case 0x02:				/* Get compressed file size */
+			{
+				reg_ax=0;
+				reg_dx=0;
+				unsigned long size = DOS_GetCompressedFileSize(name1);
+				if (size != (unsigned long)(-1l)) {
 #if defined (WIN32)
-						reg_ax = LOWORD(size);
-						reg_dx = HIWORD(size);
+					reg_ax = LOWORD(size);
+					reg_dx = HIWORD(size);
 #endif
-						CALLBACK_SCF(false);
-					} else {
-						CALLBACK_SCF(true);
-						reg_ax=dos.errorcode;
-					}
-					break;
+					CALLBACK_SCF(false);
+				} else {
+					CALLBACK_SCF(true);
+					reg_ax=dos.errorcode;
 				}
-				case 0x03:
-				case 0x05:
-				case 0x07:
-				{
+				break;
+			}
+		case 0x03:
+		case 0x05:
+		case 0x07:
+			{
 #if defined (WIN32) && !defined(HX_DOS)
-					HANDLE hFile = DOS_CreateOpenFile(name1);
-					if (hFile != INVALID_HANDLE_VALUE) {
-						time_t clock = time(NULL), ttime;
-						struct tm *t = localtime(&clock);
-						FILETIME time;
-						t->tm_isdst = -1;
-						t->tm_sec  = (((int)reg_cx) << 1) & 0x3e;
-						t->tm_min  = (((int)reg_cx) >> 5) & 0x3f;
-						t->tm_hour = (((int)reg_cx) >> 11) & 0x1f;
-						t->tm_mday = (int)(reg_di) & 0x1f;
-						t->tm_mon  = ((int)(reg_di >> 5) & 0x0f) - 1;
-						t->tm_year = ((int)(reg_di >> 9) & 0x7f) + 80;
-						ttime=mktime(t);
-						LONGLONG ll = Int32x32To64(ttime, 10000000) + 116444736000000000 + (reg_bl==0x07?reg_si*100000:0);
-						time.dwLowDateTime = (DWORD) ll;
-						time.dwHighDateTime = (DWORD) (ll >> 32);
-						if (!SetFileTime(hFile, reg_bl==0x07?&time:NULL,reg_bl==0x05?&time:NULL,reg_bl==0x03?&time:NULL)) {
-							CloseHandle(hFile);
-							CALLBACK_SCF(true);
-							reg_ax=dos.errorcode;
-							break;
-						}
+				HANDLE hFile = DOS_CreateOpenFile(name1);
+				if (hFile != INVALID_HANDLE_VALUE) {
+					time_t clock = time(NULL), ttime;
+					struct tm *t = localtime(&clock);
+					FILETIME time;
+					t->tm_isdst = -1;
+					t->tm_sec  = (((int)reg_cx) << 1) & 0x3e;
+					t->tm_min  = (((int)reg_cx) >> 5) & 0x3f;
+					t->tm_hour = (((int)reg_cx) >> 11) & 0x1f;
+					t->tm_mday = (int)(reg_di) & 0x1f;
+					t->tm_mon  = ((int)(reg_di >> 5) & 0x0f) - 1;
+					t->tm_year = ((int)(reg_di >> 9) & 0x7f) + 80;
+					ttime=mktime(t);
+					LONGLONG ll = (ttime * 10000000LL) + 116444736000000000LL + (reg_bl==0x07?reg_si*100000:0);
+					time.dwLowDateTime = (DWORD) ll;
+					time.dwHighDateTime = (DWORD) (ll >> 32);
+					if (!SetFileTime(hFile, reg_bl==0x07?&time:NULL,reg_bl==0x05?&time:NULL,reg_bl==0x03?&time:NULL)) {
 						CloseHandle(hFile);
-						reg_ax=0;
-						CALLBACK_SCF(false);
-					} else
-#endif
-					{
 						CALLBACK_SCF(true);
 						reg_ax=dos.errorcode;
+						break;
 					}
-					break;
+					CloseHandle(hFile);
+					reg_ax=0;
+					CALLBACK_SCF(false);
+				} else
+#endif
+				{
+					CALLBACK_SCF(true);
+					reg_ax=dos.errorcode;
 				}
-				case 0x04:
-				case 0x06:
-				case 0x08:
+				break;
+			}
+		case 0x04:
+		case 0x06:
+		case 0x08:
 #if !defined(HX_DOS)
-					struct stat status;
-					if (DOS_GetFileAttrEx(name1, &status)) {
-						const struct tm * ltime;
-						time_t ttime=reg_bl==0x04?status.st_mtime:reg_bl==0x06?status.st_atime:status.st_ctime;
-						if ((ltime=localtime(&ttime))!=0) {
-							reg_cx=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
-							reg_di=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
-						}
-						if (reg_bl==0x08)
-							reg_si = 0;
-						reg_ax=0;
-						CALLBACK_SCF(false);
-					} else
+			struct stat status;
+			if (DOS_GetFileAttrEx(name1, &status)) {
+				const struct tm * ltime;
+				time_t ttime=reg_bl==0x04?status.st_mtime:reg_bl==0x06?status.st_atime:status.st_ctime;
+				if ((ltime=localtime(&ttime))!=nullptr) {
+					reg_cx=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
+					reg_di=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
+				}
+				if (reg_bl==0x08)
+					reg_si = 0;
+				reg_ax=0;
+				CALLBACK_SCF(false);
+			} else
 #endif
-					{
-						CALLBACK_SCF(true);
-						reg_ax=dos.errorcode;
-					}
-					break;
-				default:
-						E_Exit("DOS:Illegal LFN Attr call %2X",reg_bl);
-		}
+			{
+				CALLBACK_SCF(true);
+				reg_ax=dos.errorcode;
+			}
+			break;
+		default:
+			E_Exit("DOS:Illegal LFN Attr call %2X",reg_bl);
+	}
 }
 
 void DOS_Int21_7147(char *name1, const char *name2) {
-    (void)name2;
-		DOS_PSP psp(dos.psp());
-		psp.StoreCommandTail();
-		if (DOS_GetCurrentDir(reg_dl,name1,true)) {
-				MEM_BlockWrite(SegPhys(ds)+reg_si,name1,(Bitu)(strlen(name1)+1));
-				psp.RestoreCommandTail();
-				reg_ax=0;
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	(void)name2;
+	DOS_PSP psp(dos.psp());
+	psp.StoreCommandTail();
+	if (DOS_GetCurrentDir(reg_dl,name1,true)) {
+		MEM_BlockWrite(SegPhys(ds)+reg_si,name1,(Bitu)(strlen(name1)+1));
+		psp.RestoreCommandTail();
+		reg_ax=0;
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_714e(char *name1, char *name2) {
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if (!DOS_GetSFNPath(name1,name2,false)) {
-			reg_ax=dos.errorcode;
-			CALLBACK_SCF(true);
-			return;
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if (!DOS_GetSFNPath(name1,name2,false)) {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+		return;
+	}
+	uint16_t entry;
+	uint8_t i,handle=(uint8_t)DOS_FILES;
+	for (i=1;i<DOS_FILES;i++) {
+		if (!Files[i]) {
+			handle=i;
+			break;
 		}
-		uint16_t entry;
-		uint8_t i,handle=(uint8_t)DOS_FILES;
-		for (i=1;i<DOS_FILES;i++) {
-			if (!Files[i]) {
-				handle=i;
-				break;
-			}
-		}
-		if (handle==DOS_FILES) {
+	}
+	if (handle==DOS_FILES) {
+		reg_ax=DOSERR_TOO_MANY_OPEN_FILES;
+		CALLBACK_SCF(true);
+		return;
+	}
+	if (strlen(name2)>2&&name2[strlen(name2)-2]=='\\'&&name2[strlen(name2)-1]=='*')
+		strcat(name2, ".*");
+	lfn_filefind_handle=handle;
+	bool b=DOS_FindFirst(name2,reg_cx,false);
+	lfn_filefind_handle=LFN_FILEFIND_NONE;
+	int error=dos.errorcode;
+	uint16_t attribute = 0;
+	if (!b&&!(strlen(name2)==3&&*(name2+1)==':'&&*(name2+2)=='\\')&&DOS_GetFileAttr(name2, &attribute) && (attribute&DOS_ATTR_DIRECTORY)) {
+		strcat(name2,"\\*.*");
+		lfn_filefind_handle=handle;
+		b=DOS_FindFirst(name2,reg_cx,false);
+		lfn_filefind_handle=LFN_FILEFIND_NONE;
+		error=dos.errorcode;
+	}
+	if (b) {
+		DOS_PSP psp(dos.psp());
+		entry = psp.FindFreeFileEntry();
+		if (entry==0xff) {
 			reg_ax=DOSERR_TOO_MANY_OPEN_FILES;
 			CALLBACK_SCF(true);
 			return;
 		}
-		if (strlen(name2)>2&&name2[strlen(name2)-2]=='\\'&&name2[strlen(name2)-1]=='*')
-			strcat(name2, ".*");
-		lfn_filefind_handle=handle;
-		bool b=DOS_FindFirst(name2,reg_cx,false);
-		lfn_filefind_handle=LFN_FILEFIND_NONE;
-		int error=dos.errorcode;
-		uint16_t attribute = 0;
-		if (!b&&!(strlen(name2)==3&&*(name2+1)==':'&&*(name2+2)=='\\')&&DOS_GetFileAttr(name2, &attribute) && (attribute&DOS_ATTR_DIRECTORY)) {
-			strcat(name2,"\\*.*");
-			lfn_filefind_handle=handle;
-			b=DOS_FindFirst(name2,reg_cx,false);
-			lfn_filefind_handle=LFN_FILEFIND_NONE;
-			error=dos.errorcode;
+		if (handle>=DOS_DEVICES||!Devices[handle])
+		{
+			int m=0;
+			for (int i=1;i<DOS_DEVICES;i++)
+				if (Devices[i]) m=i;
+			Files[handle]=new DOS_Device(*Devices[m]);
 		}
-		if (b) {
-				DOS_PSP psp(dos.psp());
-				entry = psp.FindFreeFileEntry();
-				if (entry==0xff) {
-					reg_ax=DOSERR_TOO_MANY_OPEN_FILES;
-					CALLBACK_SCF(true);
-					return;
-				}
-				if (handle>=DOS_DEVICES||!Devices[handle])
-					{
-					int m=0;
-					for (int i=1;i<DOS_DEVICES;i++)
-						if (Devices[i]) m=i;
-					Files[handle]=new DOS_Device(*Devices[m]);
-					}
-				else
-					Files[handle]=new DOS_Device(*Devices[handle]);
-				Files[handle]->AddRef();
-				psp.SetFileHandle(entry,handle);
-				reg_ax=handle;
-				DOS_DTA dta(dos.dta());
-				char finddata[CROSS_LEN];
-				int c=0;
-				MEM_BlockWrite(SegPhys(es)+reg_di,finddata,dta.GetFindData((int)reg_si,finddata,&c));
-				reg_cx=c;
-				CALLBACK_SCF(false);
-		} else {
-				dos.errorcode=error;
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+		else
+			Files[handle]=new DOS_Device(*Devices[handle]);
+		Files[handle]->AddRef();
+		psp.SetFileHandle(entry,handle);
+		reg_ax=handle;
+		DOS_DTA dta(dos.dta());
+		char finddata[CROSS_LEN];
+		int c=0;
+		MEM_BlockWrite(SegPhys(es)+reg_di,finddata,dta.GetFindData((int)reg_si,finddata,&c));
+		reg_cx=c;
+		CALLBACK_SCF(false);
+	} else {
+		dos.errorcode=error;
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_714f(const char *name1, const char *name2) {
-    (void)name1;
-    (void)name2;
-		uint8_t handle=(uint8_t)reg_bx;
-		if (!handle || handle>=DOS_FILES || !Files[handle]) {
-			reg_ax=DOSERR_INVALID_HANDLE;
-			CALLBACK_SCF(true);
-			return;
-		}
-		lfn_filefind_handle=handle;
-		if (DOS_FindNext()) {
-				DOS_DTA dta(dos.dta());
-				char finddata[CROSS_LEN];
-				int c=0;
-				MEM_BlockWrite(SegPhys(es)+reg_di,finddata,dta.GetFindData((int)reg_si,finddata,&c));
-				reg_cx=c;
-				CALLBACK_SCF(false);
-				reg_ax=0x4f00+handle;
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
-		lfn_filefind_handle=LFN_FILEFIND_NONE;
+	(void)name1;
+	(void)name2;
+	uint8_t handle=(uint8_t)reg_bx;
+	if (!handle || handle>=DOS_FILES || !Files[handle]) {
+		reg_ax=DOSERR_INVALID_HANDLE;
+		CALLBACK_SCF(true);
+		return;
+	}
+	lfn_filefind_handle=handle;
+	if (DOS_FindNext()) {
+		DOS_DTA dta(dos.dta());
+		char finddata[CROSS_LEN];
+		int c=0;
+		MEM_BlockWrite(SegPhys(es)+reg_di,finddata,dta.GetFindData((int)reg_si,finddata,&c));
+		reg_cx=c;
+		CALLBACK_SCF(false);
+		reg_ax=0x4f00+handle;
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
+	lfn_filefind_handle=LFN_FILEFIND_NONE;
 }
 
 void DOS_Int21_7156(char *name1, char *name2) {
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		MEM_StrCopy(SegPhys(es)+reg_di,name2+1,DOSNAMEBUF);
-		*name2='\"';
-		p=name2+strlen(name2);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if (DOS_Rename(name1,name2)) {
-				reg_ax=0;
-				CALLBACK_SCF(false);                   
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	MEM_StrCopy(SegPhys(es)+reg_di,name2+1,DOSNAMEBUF);
+	*name2='\"';
+	p=name2+strlen(name2);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if (DOS_Rename(name1,name2)) {
+		reg_ax=0;
+		CALLBACK_SCF(false);                   
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_7160(char *name1, char *name2) {
-        MEM_StrCopy(SegPhys(ds)+reg_si,name1+1,DOSNAMEBUF);
-        if (*(name1+1)>=0 && *(name1+1)<32) {
-            reg_ax=!*(name1+1)?2:3;
-            CALLBACK_SCF(true);
-            return;
-        }
-		bool tail = check_last_split_char(name1 + 1, strlen(name1 + 1), '\\');
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if (DOS_Canonicalize(name1,name2)) {
-				if(reg_cl != 0) {
-					strcpy(name1,"\"");
-					strcat(name1,name2);
-					strcat(name1,"\"");
-				}
-				switch(reg_cl)          {
-						case 0:         // Canonoical path name
-								if(tail) strcat(name2, "\\");
-								MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
-								reg_ax=0;
-								CALLBACK_SCF(false);
-								break;
-						case 1:         // SFN path name
-                                checkwat=true;
-								if (DOS_GetSFNPath(name1,name2,false)) {
-									if(tail) strcat(name2, "\\");
-									MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
-									reg_ax=0;
-									CALLBACK_SCF(false);
-								} else {
-									reg_ax=2;
-									CALLBACK_SCF(true);
-								}
-                                checkwat=false;
-								break;
-						case 2:         // LFN path name
-								if (DOS_GetSFNPath(name1,name2,true)) {
-									if(tail) strcat(name2, "\\");
-									MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
-									reg_ax=0;
-									CALLBACK_SCF(false);
-								} else {
-									reg_ax=2;
-									CALLBACK_SCF(true);
-								}
-								break;
-						default:
-								E_Exit("DOS:Illegal LFN GetName call %2X",reg_cl);
-				}
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
+	MEM_StrCopy(SegPhys(ds)+reg_si,name1+1,DOSNAMEBUF);
+	if (*(name1+1)>=0 && *(name1+1)<32) {
+		reg_ax=!*(name1+1)?2:3;
+		CALLBACK_SCF(true);
+		return;
+	}
+	bool tail = check_last_split_char(name1 + 1, strlen(name1 + 1), '\\');
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if (DOS_Canonicalize(name1,name2)) {
+		if(reg_cl != 0) {
+			strcpy(name1,"\"");
+			strcat(name1,name2);
+			strcat(name1,"\"");
 		}
+		switch(reg_cl)          {
+			case 0:         // Canonoical path name
+                //if(tail) strcat(name2, "\\");
+                if(tail && name2[strlen(name2) - 1] != '\\') strcat(name2, "\\");
+                MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
+				reg_ax=0;
+				CALLBACK_SCF(false);
+				break;
+			case 1:         // SFN path name
+				checkwat=true;
+				if (DOS_GetSFNPath(name1,name2,false)) {
+                    //if(tail) strcat(name2, "\\");
+                    if(tail && name2[strlen(name2) - 1] != '\\') strcat(name2, "\\");
+                    MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
+					reg_ax=0;
+					CALLBACK_SCF(false);
+				} else {
+					reg_ax=2;
+					CALLBACK_SCF(true);
+				}
+				checkwat=false;
+				break;
+			case 2:         // LFN path name
+				if (DOS_GetSFNPath(name1,name2,true)) {
+					//if(tail) strcat(name2, "\\");
+                    if(tail && name2[strlen(name2) - 1] != '\\') strcat(name2, "\\");
+					MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));
+					reg_ax=0;
+					CALLBACK_SCF(false);
+				} else {
+					reg_ax=2;
+					CALLBACK_SCF(true);
+				}
+				break;
+			default:
+				E_Exit("DOS:Illegal LFN GetName call %2X",reg_cl);
+		}
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_716c(char *name1, const char *name2) {
-    (void)name2;
-		MEM_StrCopy(SegPhys(ds)+reg_si,name1+1,DOSNAMEBUF);
-		*name1='\"';
-		char *p=name1+strlen(name1);
-		while (*p==' '||*p==0) p--;
-		*(p+1)='\"';
-		*(p+2)=0;
-		if (DOS_OpenFileExtended(name1,reg_bx,reg_cx,reg_dx,&reg_ax,&reg_cx)) {
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	(void)name2;
+	MEM_StrCopy(SegPhys(ds)+reg_si,name1+1,DOSNAMEBUF);
+	*name1='\"';
+	char *p=name1+strlen(name1);
+	while (*p==' '||*p==0) p--;
+	*(p+1)='\"';
+	*(p+2)=0;
+	if (DOS_OpenFileExtended(name1,reg_bx,reg_cx,reg_dx,&reg_ax,&reg_cx)) {
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_71a0(char *name1, char *name2) {
-		/* NTS:  Windows Millennium Edition's SETUP program will make this LFN call to
-		 *		 canonicalize "C:", except the protected mode kernel does not translate
-		 *		 DS:DX and ES:DI from protected mode. So DS:DX correctly points to
-		 *		 ASCII-Z string "C:" but when the jump is made back to real mode and
-		 *		 our INT 21h is actually called, DS:DX points to unrelated memory and
-		 *		 the string we read is gibberish, and ES:DI likewise point to unrelated
-		 *		 memory.
-		 *
-		 *		 If we write to ES:DI, we corrupt memory in a way that quickly causes
-		 *		 the setup program to fault and crash (often, a Segment Not Present
-		 *		 exception but sometimes worse).
-		 *
-		 *		 The reason nobody ever encounters this error when installing Windows
-		 *		 ME normally from a boot disk is because in pure DOS mode where SETUP
-		 *		 is normally run, LFN functions do not exist. This call, INT 21h AX=71A0h,
-		 *		 will normally return an error (CF=1) without reading or writing any
-		 *		 memory, and SETUP carries on without crashing.
-		 *
-		 *		 Therefore, if you want to install Windows ME from the DOSBox-X DOS
-		 *		 environment, you need to disable Long Filename emulation first before
-		 *		 running SETUP.EXE to avoid crashes and instability during the install
-		 *		 process. --J.C. */
-		MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
+	/* NTS:  Windows Millennium Edition's SETUP program will make this LFN call to
+	 *		 canonicalize "C:", except the protected mode kernel does not translate
+	 *		 DS:DX and ES:DI from protected mode. So DS:DX correctly points to
+	 *		 ASCII-Z string "C:" but when the jump is made back to real mode and
+	 *		 our INT 21h is actually called, DS:DX points to unrelated memory and
+	 *		 the string we read is gibberish, and ES:DI likewise point to unrelated
+	 *		 memory.
+	 *
+	 *		 If we write to ES:DI, we corrupt memory in a way that quickly causes
+	 *		 the setup program to fault and crash (often, a Segment Not Present
+	 *		 exception but sometimes worse).
+	 *
+	 *		 The reason nobody ever encounters this error when installing Windows
+	 *		 ME normally from a boot disk is because in pure DOS mode where SETUP
+	 *		 is normally run, LFN functions do not exist. This call, INT 21h AX=71A0h,
+	 *		 will normally return an error (CF=1) without reading or writing any
+	 *		 memory, and SETUP carries on without crashing.
+	 *
+	 *		 Therefore, if you want to install Windows ME from the DOSBox-X DOS
+	 *		 environment, you need to disable Long Filename emulation first before
+	 *		 running SETUP.EXE to avoid crashes and instability during the install
+	 *		 process. --J.C. */
+	MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
 
-		if (DOS_Canonicalize(name1,name2)) {
-				if (reg_cx > 3)
-						MEM_BlockWrite(SegPhys(es)+reg_di,"FAT",4);
-				reg_ax=0;
-				reg_bx=0x4006;
-				reg_cx=0xff;
-				reg_dx=0x104;
-				CALLBACK_SCF(false);
-		} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-		}
+	if (DOS_Canonicalize(name1,name2)) {
+		if (reg_cx > 3)
+			MEM_BlockWrite(SegPhys(es)+reg_di,"FAT",4);
+		reg_ax=0;
+		reg_bx=0x4006;
+		reg_cx=0xff;
+		reg_dx=0x104;
+		CALLBACK_SCF(false);
+	} else {
+		reg_ax=dos.errorcode;
+		CALLBACK_SCF(true);
+	}
 }
 
 void DOS_Int21_71a1(const char *name1, const char *name2) {
-    (void)name1;
-    (void)name2;
-		uint8_t handle=(uint8_t)reg_bx;
-		if (!handle || handle>=DOS_FILES || !Files[handle]) {
-			reg_ax=DOSERR_INVALID_HANDLE;
-			CALLBACK_SCF(true);
-			return;
-		}
-		DOS_PSP psp(dos.psp());
-		uint16_t entry=psp.FindEntryByHandle(handle);
-		if (entry>0&&entry!=0xff) psp.SetFileHandle(entry,0xff);
-		if (entry>0&&Files[handle]->RemoveRef()<=0) {
-			delete Files[handle];
-			Files[handle]=0;
-		}
-		reg_ax=0;
-		CALLBACK_SCF(false);
+	(void)name1;
+	(void)name2;
+	uint8_t handle=(uint8_t)reg_bx;
+	if (!handle || handle>=DOS_FILES || !Files[handle]) {
+		reg_ax=DOSERR_INVALID_HANDLE;
+		CALLBACK_SCF(true);
+		return;
+	}
+	DOS_PSP psp(dos.psp());
+	uint16_t entry=psp.FindEntryByHandle(handle);
+	if (entry>0&&entry!=0xff) psp.SetFileHandle(entry,0xff);
+	if (entry>0&&Files[handle]->RemoveRef()<=0) {
+		delete Files[handle];
+		Files[handle]=nullptr;
+	}
+	reg_ax=0;
+	CALLBACK_SCF(false);
 }
 
 void set_dword(char *buff, uint32_t data)
@@ -5318,12 +5413,12 @@ void set_dword(char *buff, uint32_t data)
 }
 
 void DOS_Int21_71a6(const char *name1, const char *name2) {
-    (void)name1;
-    (void)name2;
+	(void)name1;
+	(void)name2;
 	char buf[64];
 	unsigned long serial_number=0x1234;
-    uint8_t entry = (uint8_t)reg_bx;
-    uint8_t handle = 0;
+	uint8_t entry = (uint8_t)reg_bx;
+	uint8_t handle = 0;
 	if (entry>=DOS_FILES) {
 		reg_ax=DOSERR_INVALID_HANDLE;
 		CALLBACK_SCF(true);
@@ -5398,157 +5493,157 @@ void DOS_Int21_71a6(const char *name1, const char *name2) {
 }
 
 void DOS_Int21_71a7(const char *name1, const char *name2) {
-    (void)name1;
-    (void)name2;
+	(void)name1;
+	(void)name2;
 	switch (reg_bl) {
-			case 0x00:
-				{
-					int64_t ff = ((int64_t)mem_readd(SegPhys(ds) + reg_si + 4) << 32) | mem_readd(SegPhys(ds) + reg_si);
-					time_t tt = (time_t)((ff - 116444736000000000LL) / 10000000LL);
-					struct tm *ftm = localtime(&tt);
-					if(ftm != NULL) {
-						reg_cx = DOS_PackTime((uint16_t)ftm->tm_hour, (uint16_t)ftm->tm_min, (uint16_t)ftm->tm_sec);
-						reg_dx = DOS_PackDate((uint16_t)(ftm->tm_year + 1900), (uint16_t)(ftm->tm_mon + 1), (uint16_t)ftm->tm_mday);
-						reg_bh = (ff / 100000LL) % 200;
-					}
-					reg_ax = 0;
-					CALLBACK_SCF(false);
+		case 0x00:
+			{
+				int64_t ff = ((int64_t)mem_readd(SegPhys(ds) + reg_si + 4) << 32) | mem_readd(SegPhys(ds) + reg_si);
+				time_t tt = (time_t)((ff - 116444736000000000LL) / 10000000LL);
+				struct tm *ftm = localtime(&tt);
+				if(ftm != NULL) {
+					reg_cx = DOS_PackTime((uint16_t)ftm->tm_hour, (uint16_t)ftm->tm_min, (uint16_t)ftm->tm_sec);
+					reg_dx = DOS_PackDate((uint16_t)(ftm->tm_year + 1900), (uint16_t)(ftm->tm_mon + 1), (uint16_t)ftm->tm_mday);
+					reg_bh = (ff / 100000LL) % 200;
 				}
-				break;
-			case 0x01:
-				{
-					struct tm ftm = {0};
-					ftm.tm_year = ((reg_dx >> 9) & 0x7f) + 80;
-					ftm.tm_mon = ((reg_dx >> 5) & 0x0f) - 1;
-					ftm.tm_mday = (reg_dx & 0x1f);
-					ftm.tm_hour = (reg_cx >> 11) & 0x1f;
-					ftm.tm_min = (reg_cx >> 5) & 0x3f;
-					ftm.tm_sec = (reg_cx & 0x1f) * 2;
-					ftm.tm_isdst = -1;
-					int64_t ff = 116444736000000000LL + (int64_t)mktime(&ftm) * 10000000LL + reg_bh * 100000LL;
-					mem_writed(SegPhys(es) + reg_di, (uint32_t)ff);
-					mem_writed(SegPhys(es) + reg_di + 4, (uint32_t)(ff >> 32));
-					reg_ax = 0;
-					CALLBACK_SCF(false);
-				}
-				break;
-			default:
-					E_Exit("DOS:Illegal LFN TimeConv call %2X",reg_bl);
+				reg_ax = 0;
+				CALLBACK_SCF(false);
+			}
+			break;
+		case 0x01:
+			{
+				struct tm ftm = {0};
+				ftm.tm_year = ((reg_dx >> 9) & 0x7f) + 80;
+				ftm.tm_mon = ((reg_dx >> 5) & 0x0f) - 1;
+				ftm.tm_mday = (reg_dx & 0x1f);
+				ftm.tm_hour = (reg_cx >> 11) & 0x1f;
+				ftm.tm_min = (reg_cx >> 5) & 0x3f;
+				ftm.tm_sec = (reg_cx & 0x1f) * 2;
+				ftm.tm_isdst = -1;
+				int64_t ff = 116444736000000000LL + (int64_t)mktime(&ftm) * 10000000LL + reg_bh * 100000LL;
+				mem_writed(SegPhys(es) + reg_di, (uint32_t)ff);
+				mem_writed(SegPhys(es) + reg_di + 4, (uint32_t)(ff >> 32));
+				reg_ax = 0;
+				CALLBACK_SCF(false);
+			}
+			break;
+		default:
+			E_Exit("DOS:Illegal LFN TimeConv call %2X",reg_bl);
 	}
 }
 
 void DOS_Int21_71a8(char* name1, const char* name2) {
-    (void)name2;
+	(void)name2;
 	if (reg_dh == 0 || reg_dh == 1) {
-			MEM_StrCopy(SegPhys(ds)+reg_si,name1,DOSNAMEBUF);
-			int i,j=0,o=0;
-            char c[13];
-            if (reg_dh == 0) memset(c, 0, sizeof(c));
-            if (strcmp(name1, ".") && strcmp(name1, "..")) {
-                const char* s = strrchr(name1, '.');
-                for (i=0;i<8;j++) {
-                        if (name1[j] == 0 || (s==NULL?8:s-name1) <= j) {
-                            if (reg_dh == 0 && s != NULL) for (int j=0; j<8-i; j++) c[o++] = ' ';
-                            break;
-                        }
-                        while (name1[j]&&(name1[j]<=32||name1[j]==127||name1[j]=='"'||name1[j]=='+'||name1[j]=='='||name1[j]=='.'||name1[j]==','||name1[j]==';'||name1[j]==':'||name1[j]=='<'||name1[j]=='>'||name1[j]=='['||name1[j]==']'||name1[j]=='|'||name1[j]=='\\'||name1[j]=='?'||name1[j]=='*')) j++;
-                        c[o++] = toupper(name1[j]);
-                        i++;
-                }
-                if (s != NULL) {
-                        s++;
-                        if (*s != 0 && reg_dh == 1) c[o++] = '.';
-                        j=0;
-                        for (i=0;i<3;i++) {
-                                if (*(s+i+j) == 0) break;
-                                while (*(s+i+j)&&(*(s+i+j)<=32||*(s+i+j)==127||*(s+i+j)=='"'||*(s+i+j)=='+'||*(s+i+j)=='='||*(s+i+j)==','||*(s+i+j)==';'||*(s+i+j)==':'||*(s+i+j)=='<'||*(s+i+j)=='>'||*(s+i+j)=='['||*(s+i+j)==']'||*(s+i+j)=='|'||*(s+i+j)=='\\'||*(s+i+j)=='?'||*(s+i+j)=='*')) j++;
-                                c[o++] = toupper(*(s+i+j));
-                        }
-                }
-                assert(o <= 12);
-                c[o] = 0;
-            } else
-                strcpy(c, name1);
-			MEM_BlockWrite(SegPhys(es)+reg_di,c,reg_dh==1?strlen(c)+1:11);
-			reg_ax=0;
-			CALLBACK_SCF(false);
+		MEM_StrCopy(SegPhys(ds)+reg_si,name1,DOSNAMEBUF);
+		int i,j=0,o=0;
+		char c[13];
+		if (reg_dh == 0) memset(c, 0, sizeof(c));
+		if (strcmp(name1, ".") && strcmp(name1, "..")) {
+			const char* s = strrchr(name1, '.');
+			for (i=0;i<8;j++) {
+				if (name1[j] == 0 || (s==NULL?8:s-name1) <= j) {
+					if (reg_dh == 0 && s != NULL) for (int j=0; j<8-i; j++) c[o++] = ' ';
+					break;
+				}
+				while (name1[j]&&(name1[j]<=32||name1[j]==127||name1[j]=='"'||name1[j]=='+'||name1[j]=='='||name1[j]=='.'||name1[j]==','||name1[j]==';'||name1[j]==':'||name1[j]=='<'||name1[j]=='>'||name1[j]=='['||name1[j]==']'||name1[j]=='|'||name1[j]=='\\'||name1[j]=='?'||name1[j]=='*')) j++;
+				c[o++] = toupper(name1[j]);
+				i++;
+			}
+			if (s != NULL) {
+				s++;
+				if (*s != 0 && reg_dh == 1) c[o++] = '.';
+				j=0;
+				for (i=0;i<3;i++) {
+					if (*(s+i+j) == 0) break;
+					while (*(s+i+j)&&(*(s+i+j)<=32||*(s+i+j)==127||*(s+i+j)=='"'||*(s+i+j)=='+'||*(s+i+j)=='='||*(s+i+j)==','||*(s+i+j)==';'||*(s+i+j)==':'||*(s+i+j)=='<'||*(s+i+j)=='>'||*(s+i+j)=='['||*(s+i+j)==']'||*(s+i+j)=='|'||*(s+i+j)=='\\'||*(s+i+j)=='?'||*(s+i+j)=='*')) j++;
+					c[o++] = toupper(*(s+i+j));
+				}
+			}
+			assert(o <= 12);
+			c[o] = 0;
+		} else
+			strcpy(c, name1);
+		MEM_BlockWrite(SegPhys(es)+reg_di,c,reg_dh==1?strlen(c)+1:11);
+		reg_ax=0;
+		CALLBACK_SCF(false);
 	} else {
-			reg_ax=1;
-			CALLBACK_SCF(true);
+		reg_ax=1;
+		CALLBACK_SCF(true);
 	}
 }
 
 void DOS_Int21_71aa(char* name1, const char* name2) {
-    (void)name2;
+	(void)name2;
 	if (reg_bh<3 && (reg_bl<1 || reg_bl>26)) {
-			reg_ax = DOSERR_INVALID_DRIVE;
-			CALLBACK_SCF(true);
-			return;
+		reg_ax = DOSERR_INVALID_DRIVE;
+		CALLBACK_SCF(true);
+		return;
 	}
 	switch (reg_bh) {
 		case 0:
-		{
-			uint8_t drive=reg_bl-1;
-			if (drive==DOS_GetDefaultDrive() || Drives[drive] || drive==25) {
-				reg_ax = DOSERR_INVALID_DRIVE;
-				CALLBACK_SCF(true);
-			} else {
-				MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
-				char mountstring[DOS_PATHLENGTH+CROSS_LEN+20];
-				char temp_str[3] = { 0,0,0 };
-				temp_str[0]=(char)('A'+reg_bl-1);
-				temp_str[1]=' ';
-				strcpy(mountstring,temp_str);
-				strcat(mountstring,name1);
-				strcat(mountstring," -Q");
-				runMount(mountstring);
-				if (Drives[drive]) {
+			{
+				uint8_t drive=reg_bl-1;
+				if (drive==DOS_GetDefaultDrive() || Drives[drive] || drive==25) {
+					reg_ax = DOSERR_INVALID_DRIVE;
+					CALLBACK_SCF(true);
+				} else {
+					MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
+					char mountstring[DOS_PATHLENGTH+CROSS_LEN+20];
+					char temp_str[3] = { 0,0,0 };
+					temp_str[0]=(char)('A'+reg_bl-1);
+					temp_str[1]=' ';
+					strcpy(mountstring,temp_str);
+					strcat(mountstring,name1);
+					strcat(mountstring," -Q");
+					runMount(mountstring);
+					if (Drives[drive]) {
+						reg_ax=0;
+						CALLBACK_SCF(false);
+					} else {
+						reg_ax=DOSERR_PATH_NOT_FOUND;
+						CALLBACK_SCF(true);
+					}
+				}
+				break;
+			}
+		case 1:
+			{
+				uint8_t drive=reg_bl-1;
+				if (drive==DOS_GetDefaultDrive() || !Drives[drive] || drive==25) {
+					reg_ax = DOSERR_INVALID_DRIVE;
+					CALLBACK_SCF(true);
+				} else {
+					char mountstring[DOS_PATHLENGTH+CROSS_LEN+20];
+					char temp_str[2] = { 0,0 };
+					temp_str[0]=(char)('A'+reg_bl-1);
+					strcpy(mountstring,temp_str);
+					strcat(mountstring," -Q -U");
+					runMount(mountstring);
+					if (!Drives[drive]) {
+						reg_ax =0;
+						CALLBACK_SCF(false);
+					} else {
+						reg_ax=5;
+						CALLBACK_SCF(true);
+					}
+				}
+				break;
+			}
+		case 2:
+			{
+				uint8_t drive=reg_bl>0?reg_bl-1:DOS_GetDefaultDrive();
+				if (Drives[drive]&&!strncmp(Drives[drive]->GetInfo(),"local directory ",16)) {
+					strcpy(name1,Drives[drive]->GetInfo()+16);
+					MEM_BlockWrite(SegPhys(ds)+reg_dx,name1,(Bitu)(strlen(name1)+1));
 					reg_ax=0;
 					CALLBACK_SCF(false);
 				} else {
-					reg_ax=DOSERR_PATH_NOT_FOUND;
+					reg_ax=3;
 					CALLBACK_SCF(true);
 				}
+				break;
 			}
-			break;
-		}
-		case 1:
-		{
-			uint8_t drive=reg_bl-1;
-			if (drive==DOS_GetDefaultDrive() || !Drives[drive] || drive==25) {
-				reg_ax = DOSERR_INVALID_DRIVE;
-				CALLBACK_SCF(true);
-			} else {
-				char mountstring[DOS_PATHLENGTH+CROSS_LEN+20];
-				char temp_str[2] = { 0,0 };
-				temp_str[0]=(char)('A'+reg_bl-1);
-				strcpy(mountstring,temp_str);
-				strcat(mountstring," -Q -U");
-				runMount(mountstring);
-				if (!Drives[drive]) {
-					reg_ax =0;
-					CALLBACK_SCF(false);
-				} else {
-					reg_ax=5;
-					CALLBACK_SCF(true);
-				}
-			}
-			break;
-		}
-		case 2:
-		{
-			uint8_t drive=reg_bl>0?reg_bl-1:DOS_GetDefaultDrive();
-			if (Drives[drive]&&!strncmp(Drives[drive]->GetInfo(),"local directory ",16)) {
-				strcpy(name1,Drives[drive]->GetInfo()+16);
-				MEM_BlockWrite(SegPhys(ds)+reg_dx,name1,(Bitu)(strlen(name1)+1));
-				reg_ax=0;
-				CALLBACK_SCF(false);
-			} else {
-				reg_ax=3;
-				CALLBACK_SCF(true);
-			}
-			break;
-		}
 		default:
 			E_Exit("DOS:Illegal LFN Subst call %2X",reg_bh);
 	}
@@ -5571,97 +5666,96 @@ extern void POD_Load_DOS_Tables( std::istream& stream );
 
 namespace
 {
-class SerializeDos : public SerializeGlobalPOD
-{
-public:
-	SerializeDos() : SerializeGlobalPOD("Dos") 
-	{}
-
-private:
-	virtual void getBytes(std::ostream& stream)
+	class SerializeDos : public SerializeGlobalPOD
 	{
-		SerializeGlobalPOD::getBytes(stream);
+		public:
+			SerializeDos() : SerializeGlobalPOD("Dos") { }
 
-		//***********************************************
-		//***********************************************
-		//***********************************************
-		// - pure data
-		WRITE_POD( &dos_copybuf, dos_copybuf );
+		private:
+			void getBytes(std::ostream& stream) override
+			{
+				SerializeGlobalPOD::getBytes(stream);
 
-		// - pure data
-		WRITE_POD( &dos.firstMCB, dos.firstMCB );
-		WRITE_POD( &dos.errorcode, dos.errorcode );
-		//WRITE_POD( &dos.env, dos.env );
-		//WRITE_POD( &dos.cpmentry, dos.cpmentry );
-		WRITE_POD( &dos.return_code, dos.return_code );
-		WRITE_POD( &dos.return_mode, dos.return_mode );
+				//***********************************************
+				//***********************************************
+				//***********************************************
+				// - pure data
+				WRITE_POD( &dos_copybuf, dos_copybuf );
 
-		WRITE_POD( &dos.current_drive, dos.current_drive );
-		WRITE_POD( &dos.verify, dos.verify );
-		WRITE_POD( &dos.breakcheck, dos.breakcheck );
-		WRITE_POD( &dos.echo, dos.echo );
-		WRITE_POD( &dos.direct_output, dos.direct_output );
-		WRITE_POD( &dos.internal_output, dos.internal_output );
+				// - pure data
+				WRITE_POD( &dos.firstMCB, dos.firstMCB );
+				WRITE_POD( &dos.errorcode, dos.errorcode );
+				//WRITE_POD( &dos.env, dos.env );
+				//WRITE_POD( &dos.cpmentry, dos.cpmentry );
+				WRITE_POD( &dos.return_code, dos.return_code );
+				WRITE_POD( &dos.return_mode, dos.return_mode );
 
-		WRITE_POD( &dos.loaded_codepage, dos.loaded_codepage );
-		WRITE_POD( &dos.version.major, dos.version.major );
-		WRITE_POD( &dos.version.minor, dos.version.minor );
-		WRITE_POD( &countryNo, countryNo );
-		WRITE_POD( &uselfn, uselfn );
-		WRITE_POD( &lfn_filefind_handle, lfn_filefind_handle );
-		WRITE_POD( &bootdrive, bootdrive );
-		WRITE_POD( &dos_kernel_disabled, dos_kernel_disabled );
+				WRITE_POD( &dos.current_drive, dos.current_drive );
+				WRITE_POD( &dos.verify, dos.verify );
+				WRITE_POD( &dos.breakcheck, dos.breakcheck );
+				WRITE_POD( &dos.echo, dos.echo );
+				WRITE_POD( &dos.direct_output, dos.direct_output );
+				WRITE_POD( &dos.internal_output, dos.internal_output );
 
-		POD_Save_DOS_Devices(stream);
-		POD_Save_DOS_DriveManager(stream);
-		POD_Save_DOS_Files(stream);
-		POD_Save_DOS_Memory(stream);
-		POD_Save_DOS_Mscdex(stream);
-		POD_Save_DOS_Tables(stream);
-	}
+				WRITE_POD( &dos.loaded_codepage, dos.loaded_codepage );
+				WRITE_POD( &dos.version.major, dos.version.major );
+				WRITE_POD( &dos.version.minor, dos.version.minor );
+				WRITE_POD( &countryNo, countryNo );
+				WRITE_POD( &uselfn, uselfn );
+				WRITE_POD( &lfn_filefind_handle, lfn_filefind_handle );
+				WRITE_POD( &bootdrive, bootdrive );
+				WRITE_POD( &dos_kernel_disabled, dos_kernel_disabled );
 
-	virtual void setBytes(std::istream& stream)
-	{
-		SerializeGlobalPOD::setBytes(stream);
+				POD_Save_DOS_Devices(stream);
+				POD_Save_DOS_DriveManager(stream);
+				POD_Save_DOS_Files(stream);
+				POD_Save_DOS_Memory(stream);
+				POD_Save_DOS_Mscdex(stream);
+				POD_Save_DOS_Tables(stream);
+			}
 
-		//***********************************************
-		//***********************************************
-		//***********************************************
-		// - pure data
-		READ_POD( &dos_copybuf, dos_copybuf );
+			void setBytes(std::istream& stream) override
+			{
+				SerializeGlobalPOD::setBytes(stream);
 
-		// - pure data
-		READ_POD( &dos.firstMCB, dos.firstMCB );
-		READ_POD( &dos.errorcode, dos.errorcode );
-		//READ_POD( &dos.env, dos.env );
-		//READ_POD( &dos.cpmentry, dos.cpmentry );
-		READ_POD( &dos.return_code, dos.return_code );
-		READ_POD( &dos.return_mode, dos.return_mode );
+				//***********************************************
+				//***********************************************
+				//***********************************************
+				// - pure data
+				READ_POD( &dos_copybuf, dos_copybuf );
 
-		READ_POD( &dos.current_drive, dos.current_drive );
-		READ_POD( &dos.verify, dos.verify );
-		READ_POD( &dos.breakcheck, dos.breakcheck );
-		READ_POD( &dos.echo, dos.echo );
-		READ_POD( &dos.direct_output, dos.direct_output );
-        READ_POD( &dos.internal_output, dos.internal_output );
-	
-		READ_POD( &dos.loaded_codepage, dos.loaded_codepage );
-		READ_POD( &dos.version.major, dos.version.major );
-		READ_POD( &dos.version.minor, dos.version.minor );
-		READ_POD( &countryNo, countryNo );
-		READ_POD( &uselfn, uselfn );
-		READ_POD( &lfn_filefind_handle, lfn_filefind_handle );
-		READ_POD( &bootdrive, bootdrive );
-        bool olddisable = dos_kernel_disabled;
-		READ_POD( &dos_kernel_disabled, dos_kernel_disabled );
-        if (!olddisable && dos_kernel_disabled) DispatchVMEvent(VM_EVENT_DOS_EXIT_KERNEL);
+				// - pure data
+				READ_POD( &dos.firstMCB, dos.firstMCB );
+				READ_POD( &dos.errorcode, dos.errorcode );
+				//READ_POD( &dos.env, dos.env );
+				//READ_POD( &dos.cpmentry, dos.cpmentry );
+				READ_POD( &dos.return_code, dos.return_code );
+				READ_POD( &dos.return_mode, dos.return_mode );
 
-		POD_Load_DOS_Devices(stream);
-		POD_Load_DOS_DriveManager(stream);
-		POD_Load_DOS_Files(stream);
-		POD_Load_DOS_Memory(stream);
-		POD_Load_DOS_Mscdex(stream);
-		POD_Load_DOS_Tables(stream);
-	}
-} dummy;
+				READ_POD( &dos.current_drive, dos.current_drive );
+				READ_POD( &dos.verify, dos.verify );
+				READ_POD( &dos.breakcheck, dos.breakcheck );
+				READ_POD( &dos.echo, dos.echo );
+				READ_POD( &dos.direct_output, dos.direct_output );
+				READ_POD( &dos.internal_output, dos.internal_output );
+
+				READ_POD( &dos.loaded_codepage, dos.loaded_codepage );
+				READ_POD( &dos.version.major, dos.version.major );
+				READ_POD( &dos.version.minor, dos.version.minor );
+				READ_POD( &countryNo, countryNo );
+				READ_POD( &uselfn, uselfn );
+				READ_POD( &lfn_filefind_handle, lfn_filefind_handle );
+				READ_POD( &bootdrive, bootdrive );
+				bool olddisable = dos_kernel_disabled;
+				READ_POD( &dos_kernel_disabled, dos_kernel_disabled );
+				if (!olddisable && dos_kernel_disabled) DispatchVMEvent(VM_EVENT_DOS_EXIT_KERNEL);
+
+				POD_Load_DOS_Devices(stream);
+				POD_Load_DOS_DriveManager(stream);
+				POD_Load_DOS_Files(stream);
+				POD_Load_DOS_Memory(stream);
+				POD_Load_DOS_Mscdex(stream);
+				POD_Load_DOS_Tables(stream);
+			}
+	} dummy;
 }

@@ -27,13 +27,17 @@
 /* do not issue CPU-side I/O here -- this code emulates functions that the GDC itself carries out, not on the CPU */
 #include "cpu_io_is_forbidden.h"
 
-void SD3_Reset(bool enable);
-bool has_pcibus_enable(void);
-
-extern bool enable_pci_vga;
-
-extern unsigned int vbe_window_granularity;
-extern unsigned int vbe_window_size;
+void S3_UpdateXGAColorMode(void) {
+	switch (vga.s3.reg_50 & S3_XGA_CMASK) {
+		case S3_XGA_32BPP: vga.s3.xga_color_mode = M_LIN32; break;
+		case S3_XGA_16BPP: vga.s3.xga_color_mode = M_LIN16; break;
+		case S3_XGA_8BPP:
+			/* FIXME: 4/8bpp packed is controlled by the advanced function control register (0x4AE8) bit 2 which is not yet emulated here */
+			vga.s3.xga_color_mode = M_LIN8;
+			if ((vga.s3.misc_control_2 >> 4) == 0xF/*hacked 4bpp*/) vga.s3.xga_color_mode = M_LIN4;
+			break;
+	}
+}
 
 void SVGA_S3_WriteCRTC(Bitu reg,Bitu val,Bitu iolen) {
     (void)iolen;//UNUSED
@@ -170,11 +174,7 @@ void SVGA_S3_WriteCRTC(Bitu reg,Bitu val,Bitu iolen) {
         break;
     case 0x50:  // Extended System Control 1
         vga.s3.reg_50 = (uint8_t)val;
-        switch (val & S3_XGA_CMASK) {
-            case S3_XGA_32BPP: vga.s3.xga_color_mode = M_LIN32; break;
-            case S3_XGA_16BPP: vga.s3.xga_color_mode = M_LIN16; break;
-            case S3_XGA_8BPP: vga.s3.xga_color_mode = M_LIN8; break;
-        }
+        S3_UpdateXGAColorMode();
         switch (val & S3_XGA_WMASK) {
             case S3_XGA_1024: vga.s3.xga_screen_width = 1024; break;
             case S3_XGA_1152: vga.s3.xga_screen_width = 1152; break;
@@ -399,6 +399,7 @@ void SVGA_S3_WriteCRTC(Bitu reg,Bitu val,Bitu iolen) {
                     13  (732/764) 32bit (1 pixel/VCLK)
         */
         vga.s3.misc_control_2=(uint8_t)val;
+        S3_UpdateXGAColorMode();
         VGA_DetermineMode();
         break;
     case 0x69:  /* Extended System Control 3 */
@@ -585,7 +586,7 @@ Bitu SVGA_S3_ReadCRTC( Bitu reg, Bitu iolen) {
         return (uint8_t)((vga.config.display_start & 0x1f0000)>>16);
     case 0x6a:  /* Extended System Control 4 */
         return (uint8_t)(vga.svga.bank_read & 0x7f);
-    case 0x6b:  // BIOS scatchpad: LFB address
+    case 0x6b:  // BIOS scratchpad: LFB address
         return vga.s3.reg_6b;
     default:
         return 0x00;
@@ -691,44 +692,136 @@ void SVGA_Setup_S3Trio(void) {
     svga.read_p3d5 = &SVGA_S3_ReadCRTC;
     svga.write_p3c5 = &SVGA_S3_WriteSEQ;
     svga.read_p3c5 = &SVGA_S3_ReadSEQ;
-    svga.write_p3c0 = 0; /* no S3-specific functionality */
-    svga.read_p3c1 = 0; /* no S3-specific functionality */
+    svga.write_p3c0 = nullptr; /* no S3-specific functionality */
+    svga.read_p3c1 = nullptr; /* no S3-specific functionality */
 
-    svga.set_video_mode = 0; /* implemented in core */
-    svga.determine_mode = 0; /* implemented in core */
-    svga.set_clock = 0; /* implemented in core */
+    svga.set_video_mode = nullptr; /* implemented in core */
+    svga.determine_mode = &VGA_DetermineMode_S3;
+    svga.set_clock = &SetClock_S3;
     svga.get_clock = &SVGA_S3_GetClock;
     svga.hardware_cursor_active = &SVGA_S3_HWCursorActive;
     svga.accepts_mode = &SVGA_S3_AcceptsMode;
 
     if (vga.mem.memsize == 0)
-        vga.mem.memsize = 2*1024*1024; // the most common S3 configuration
+        vga.mem.memsize = vga.mem.memsize_original = 2*1024*1024; // the most common S3 configuration
 
-    // Set CRTC 36 to specify amount of VRAM and PCI
-    if (vga.mem.memsize < 1024*1024) {
+    // Set CRTC 36 to specify amount of VRAM and PCI.
+    // NTS: Apparently this register can't count beyond 4MB.
+    // The Windows 98 driver appears to read bits [7:5] as 4MB - (x * 512KB),
+    // for example x = 2 for 3MB, x = 7 for 512KB. Unusual sizes can be indicated
+    // such as x = 3 for 2.5MB which is what older versions of this code did.
+    if (vga.mem.memsize_original < 1024*1024) {
         vga.mem.memsize = 512*1024;
         vga.s3.reg_36 = 0xfa;       // less than 1mb fast page mode
-    } else if (vga.mem.memsize < 2048*1024)    {
+    } else if (vga.mem.memsize_original < 2048*1024)    {
         vga.mem.memsize = 1024*1024;
         vga.s3.reg_36 = 0xda;       // 1mb fast page mode
-    } else if (vga.mem.memsize < 3072*1024)    {
+    } else if (vga.mem.memsize_original < 3072*1024)    {
         vga.mem.memsize = 2048*1024;
         vga.s3.reg_36 = 0x9a;       // 2mb fast page mode
-    } else if (vga.mem.memsize < 4096*1024)    {
-        vga.mem.memsize = 3072*1024;
+    } else if (vga.mem.memsize_original < 4096*1024)    {
+        vga.mem.memsize = 4096*1024; // must be power of 2
         vga.s3.reg_36 = 0x5a;       // 3mb fast page mode
-    } else if (vga.mem.memsize < 8192*1024) {  // Trio64 supported only up to 4M
+    } else if (vga.mem.memsize_original < 6144*1024) {
         vga.mem.memsize = 4096*1024;
         vga.s3.reg_36 = 0x1a;       // 4mb fast page mode
-    } else if (vga.mem.memsize < 16384*1024) {  // 8M
+    } else if (vga.mem.memsize_original < 8192*1024) {
+        vga.mem.memsize = 8192*1024; // must be power of 2
+        if (s3Card == S3_Vision964 || s3Card == S3_Vision968) 
+            vga.s3.reg_36 = 0xba;       // 6mb fast page mode
+        else
+            vga.s3.reg_36 = 0x1a;       // 4mb fast page mode
+    } else if (vga.mem.memsize_original < 16384*1024) {
         vga.mem.memsize = 8192*1024;
-        vga.s3.reg_36 = 0x7a;       // 8mb fast page mode
-    } else {    // HACK: 16MB mode, with value not supported by actual hardware
-        vga.mem.memsize = 16384*1024; // FIXME: This breaks the cursor in Windows 3.1, though Windows 95 has no problem with it
-        vga.s3.reg_36 = 0x7a;       // 8mb fast page mode
+        if (s3Card == S3_Vision964 || s3Card == S3_Vision968 || s3Card == S3_ViRGEVX)
+            vga.s3.reg_36 = 0x7a;       // 8mb fast page mode
+        else
+            vga.s3.reg_36 = 0x1a;       // 4mb fast page mode
+    } else {
+        vga.mem.memsize = 16384*1024;
+        if (s3Card == S3_ViRGEVX)
+            vga.s3.reg_36 = 0x7a;       // 8mb fast page mode
+        else
+            vga.s3.reg_36 = 0x1a;       // 4mb fast page mode
     }
 
     PCI_AddSVGAS3_Device();
+}
+
+void VGA_DetermineMode_S3(void) {
+	/* Test for VGA output active or direct color modes */
+	switch (vga.s3.misc_control_2 >> 4) {
+		case 0:
+			if (vga.attr.mode_control & 1) { // graphics mode
+				if (IS_VGA_ARCH && ((vga.gfx.mode & 0x40)||(vga.s3.reg_3a&0x10))) {
+					// access above 256k?
+					if (vga.s3.reg_31 & 0x8) VGA_SetMode(M_LIN8);
+					else VGA_SetMode(M_VGA);
+				}
+				// NTS: Also handled by M_EGA case
+				//          else if (vga.gfx.mode & 0x20) VGA_SetMode(M_CGA4);
+
+				// NTS: Two things here. One is that CGA 2-color mode (and the MCGA 640x480 2-color mode)
+				//      are just EGA planar modes with fewer bitplanes enabled. The planar render mode can
+				//      display them just fine. The other is that checking for 2-color CGA mode entirely by
+				//      whether video RAM is mapped to B8000h is a really lame way to go about it.
+				//
+				//      The only catch here is that a contributor (Wengier, I think?) tied a DOS/V CGA rendering
+				//      mode into M_CGA2 that we need to watch for.
+				//
+				else if (VGA_DetermineMode_IsDCGA()) {
+					VGA_SetMode(M_DCGA);
+				}
+				else {
+					// access above 256k?
+					if (vga.s3.reg_31 & 0x8) VGA_SetMode(M_LIN4);
+					else VGA_SetMode(M_EGA);
+				}
+			} else {
+				VGA_SetMode(M_TEXT);
+			}
+			break;
+		case 1:VGA_SetMode(M_LIN8);break;
+		case 3:VGA_SetMode(M_LIN15);break;
+		case 5:VGA_SetMode(M_LIN16);break;
+		case 7:VGA_SetMode(M_LIN24);break;
+		case 13:VGA_SetMode(M_LIN32);break;
+		case 15:VGA_SetMode(M_PACKED4);break;// hacked
+	}
+}
+
+void SetClock_S3(Bitu which,Bitu target) {
+	struct{
+		Bitu n,m;
+		Bits err;
+	} best;
+	best.err=(Bits)target;
+	best.m=1u;
+	best.n=1u;
+	Bitu r;
+
+	for (r = 0; r <= 3; r++) {
+		Bitu f_vco = target * ((Bitu)1u << (Bitu)r);
+		if (MIN_VCO <= f_vco && f_vco < MAX_VCO) break;
+	}
+	for (Bitu n=1;n<=31;n++) {
+		Bits m=(Bits)((target * (n + 2u) * ((Bitu)1u << (Bitu)r) + (S3_CLOCK_REF / 2u)) / S3_CLOCK_REF) - 2;
+		if (0 <= m && m <= 127) {
+			Bitu temp_target = (Bitu)S3_CLOCK(m,n,r);
+			Bits err = (Bits)(target - temp_target);
+			if (err < 0) err = -err;
+			if (err < best.err) {
+				best.err = err;
+				best.m = (Bitu)m;
+				best.n = (Bitu)n;
+			}
+		}
+	}
+	/* Program the s3 clock chip */
+	vga.s3.clk[which].m=best.m;
+	vga.s3.clk[which].r=r;
+	vga.s3.clk[which].n=best.n;
+	VGA_StartResize();
 }
 
 // save state support

@@ -62,9 +62,9 @@ class SlirpEthernetConnection : public EthernetConnection {
 		/* Boilerplate EthernetConnection interface */
 		SlirpEthernetConnection();
 		~SlirpEthernetConnection();
-		bool Initialize(Section* config);
-		void SendPacket(const uint8_t* packet, int len);
-		void GetPackets(std::function<void(const uint8_t*, int)> callback);
+		bool Initialize(Section* config) override;
+		void SendPacket(const uint8_t* packet, int len) override;
+		void GetPackets(std::function<void(const uint8_t*, int)> callback) override;
 
 		/* Called by libslirp when it has a packet for us */
 		void ReceivePacket(const uint8_t* packet, int len);
@@ -95,9 +95,9 @@ class SlirpEthernetConnection : public EthernetConnection {
 
 		Slirp* slirp = nullptr; /*!< Handle to libslirp */
 		SlirpConfig config = { 0 }; /*!< Configuration passed to libslirp */
-		SlirpCb slirp_callbacks = { 0 }; /*!< Callbacks used by libslirp */
+		SlirpCb slirp_callbacks = { nullptr }; /*!< Callbacks used by libslirp */
 		std::list<struct slirp_timer*> timers; /*!< Stored timers */
-                
+
 		/** The GetPacket callback
 		 * When libslirp has a new packet for us it calls ReceivePacket,
 		 * but the EthernetConnection interface requires users to poll

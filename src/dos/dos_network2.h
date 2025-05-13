@@ -42,11 +42,23 @@ extern bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CRO
 
  bool Network_IsNetworkResource(const char * filename)
 {
-	if(strlen(filename)>1 && enable_network_redirector && !control->SecureMode() && ((filename[0]=='\\' && filename[1]=='\\') || (strlen(filename)>2 && filename[0]=='"' && filename[1]=='\\' && filename[2]=='\\'))) {
-        char *p = strrchr_dbcs((char *)filename, '\\');
-        return p && ((filename[0]=='\\' && p > filename+1) || (filename[0]=='"' && p > filename+2));
-    } else
-		return false;
+    if (!enable_network_redirector || control->SecureMode())
+        return false;
+
+    // Must begin with two backslashes optionally preceded by a double quote:
+    switch (*filename) {
+        case '"':
+            if (*++filename != '\\')
+                return false;
+            /* fallthrough */
+        case '\\':
+            if (*++filename != '\\')
+                return false;
+            // The rest of the string must contain at least one backslash:
+            return strchr_dbcs(const_cast<char *>(filename + 1), '\\');
+        default:
+            return false;
+    }
 }//bool	Network_IsNetworkFile(uint16_t entry)
 
 
@@ -207,7 +219,7 @@ HANDLE hFind = INVALID_HANDLE_VALUE;
 	if (wc?MoveFileW((LPCWSTR)namehost, (LPCWSTR)namehost1):MoveFile(name1.c_str(), name2.c_str()))
 		return true;
 	uint16_t error=(uint16_t)GetLastError();
-	if (error == ERROR_ALREADY_EXISTS)												// Not kwnown by DOS
+	if (error == ERROR_ALREADY_EXISTS)												// Not known by DOS
 		error = DOSERR_ACCESS_DENIED;
 	DOS_SetError(error);
 	return false;
@@ -292,7 +304,7 @@ bool Network_SetFileAttr(char const * const filename, uint16_t attr) {
     t->tm_mon  = ((int)(odate >> 5) & 0x0f) - 1;
     t->tm_year = ((int)(odate >> 9) & 0x7f) + 80;
     ttime=mktime(t);
-    LONGLONG ll = Int32x32To64(ttime, 10000000) + 116444736000000000;
+    LONGLONG ll = (ttime * 10000000LL) + 116444736000000000LL;
     time.dwLowDateTime = (DWORD) ll;
     time.dwHighDateTime = (DWORD) (ll >> 32);
 	if (!SetFileTime(hand, NULL, NULL, &time)) {
@@ -318,7 +330,7 @@ bool Network_SetFileAttr(char const * const filename, uint16_t attr) {
 {
 	int attribs = FILE_ATTRIBUTE_NORMAL;
 	if (attributes&3)																		// Read-only (1), Hidden (2), System (4) are the same in DOS and Windows
-		attribs = attributes&3;															// We dont want (Windows) system files
+		attribs = attributes&3;															// We don't want (Windows) system files
 
     std::string name = filename;
     if (filename[0]=='"') {

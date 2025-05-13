@@ -42,6 +42,34 @@ extern diskGeo DiskGeometryList[];
 
 extern const uint8_t freedos_mbr[];
 
+#define BytsPerSec 0x0b /* 2-bytes */
+#define SecPerClus 0x0d /* 1-byte  */
+#define RsvdSecCnt 0x0e /* 2-bytes */
+#define NumFATs    0x10 /* 1-byte  */
+#define RootEntCnt 0x11 /* 2-bytes */
+#define TotSec16   0x13 /* 2-bytes */
+#define Media      0x15 /* 1-byte  */
+#define FATSz16    0x16 /* 2-bytes */
+#define SecPerTrk  0x18 /* 2-bytes */
+#define NumHeads   0x1a /* 2-bytes */
+#define HiddSec    0x1c /* 4-bytes */
+#define TotSec32   0x20 /* 4-bytes */
+#define DrvNum     0x24 /* 1-byte  */
+#define BootSig    0x26 /* 1-byte  */
+#define VolID      0x27 /* 4-bytes */
+#define VolLab     0x2b /* 11-bytes*/
+#define FilSysType 0x36 /* 8-bytes */
+#define BootCode   0x3e 
+#define BootSign   0x1fe /*2-bytes */
+
+#define FATSz32    0x24 /* 4-bytes */
+#define DrvNum32   0x40 /* 1-byte  */
+#define BootSig32  0x42 /* 1-bytes */
+#define VolID32    0x43 /* 4-bytes */
+#define VolLab32   0x47 /* 11-bytes*/
+#define FilSysType32  0x52 /* 8-bytes */
+#define BootCode32 0x5A
+
 class imageDisk {
 	public:
 		enum IMAGE_TYPE {
@@ -51,7 +79,9 @@ class imageDisk {
 			ID_MEMORY,
 			ID_VHD,
 			ID_D88,
-			ID_NFD
+			ID_NFD,
+			ID_EMPTY_DRIVE,
+			ID_INT13
 		};
 
 		virtual uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0);
@@ -59,6 +89,7 @@ class imageDisk {
 		virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
 		virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
 
+		virtual void UpdateFloppyType(void);
 		virtual void Set_Reserved_Cylinders(Bitu resCyl);
 		virtual uint32_t Get_Reserved_Cylinders();
 		virtual void Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize);
@@ -83,6 +114,10 @@ class imageDisk {
 		bool hardDrive = false;
 		uint64_t diskSizeK = 0;
 		FILE* diskimg = NULL;
+		bool diskChangeFlag = false;
+
+		/* this is intended only for when the disk can change out from under us while mounted */
+		virtual bool detectDiskChange(void) { const bool r = diskChangeFlag; diskChangeFlag = false; return r; }
 
 	protected:
 		imageDisk(IMAGE_TYPE class_id);
@@ -130,12 +165,23 @@ class imageDisk {
 		}
 };
 
+class imageDiskEmptyDrive : public imageDisk {
+public:
+	uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0) override;
+	uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0) override;
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
+
+	imageDiskEmptyDrive();
+	virtual ~imageDiskEmptyDrive();
+};
+
 class imageDiskD88 : public imageDisk {
 public:
-	virtual uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0);
-	virtual uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0);
-	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
-	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
+	uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0) override;
+	uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0) override;
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
 
 	imageDiskD88(FILE *imgFile, const char *imgName, uint32_t imgSizeK, bool isHardDisk);
 	virtual ~imageDiskD88();
@@ -170,10 +216,10 @@ public:
 
 class imageDiskNFD : public imageDisk {
 public:
-	virtual uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0);
-	virtual uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0);
-	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
-	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
+	uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0) override;
+	uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0) override;
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
 
 	imageDiskNFD(FILE *imgFile, const char *imgName, uint32_t imgSizeK, bool isHardDisk, unsigned int revision);
 	virtual ~imageDiskNFD();
@@ -199,10 +245,10 @@ public:
 
 class imageDiskVFD : public imageDisk {
 public:
-	virtual uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0);
-	virtual uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0);
-	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
-	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
+	uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0) override;
+	uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0) override;
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
 
 	imageDiskVFD(FILE *imgFile, const char *imgName, uint32_t imgSizeK, bool isHardDisk);
 	virtual ~imageDiskVFD();
@@ -236,11 +282,11 @@ public:
 
 class imageDiskMemory : public imageDisk {
 public:
-	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
-	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
-	virtual uint8_t GetBiosType(void);
-	virtual void Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize);
-	// Parition and format the ramdrive
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
+	uint8_t GetBiosType(void) override;
+	void Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) override;
+	// Partition and format the ramdrive
 	virtual uint8_t Format();
 
 	// Create a hard drive image of a specified size; automatically select c/h/s
@@ -332,8 +378,8 @@ public:
         std::string diskname;
     };
     VHDTypes vhdType = VHD_TYPE_NONE;
-	virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data);
-	virtual uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data);
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
 	static ErrorCodes Open(const char* fileName, const bool readOnly, imageDisk** disk);
 	static VHDTypes GetVHDType(const char* fileName);
 	VHDTypes GetVHDType(void) const;
@@ -345,6 +391,7 @@ public:
     static uint32_t CreateDifferencing(const char* filename, const char* basename);
     uint32_t CreateSnapshot();
     void DetectGeometry(Bitu sizes[]);
+    static void DetectGeometry(uint8_t* buf, Bitu sizes[], uint64_t currentSize);
     static uint64_t scanMBR(uint8_t* mbr, Bitu sizes[], uint64_t disksize=0);
     bool MergeSnapshot(uint32_t* totalSectorsMerged, uint32_t* totalBlocksUpdated);
     static void SizeToCHS(uint64_t size, uint16_t* c, uint8_t* h, uint8_t* s);
@@ -402,7 +449,7 @@ private:
 	uint32_t currentBlock = 0xFFFFFFFF;
     bool currentBlockAllocated = false;
 	uint32_t currentBlockSectorOffset = 0;
-	uint8_t* currentBlockDirtyMap = 0;
+	uint8_t* currentBlockDirtyMap = nullptr;
 };
 
 /* C++ class implementing El Torito floppy emulation */
@@ -410,7 +457,7 @@ class imageDiskElToritoFloppy : public imageDisk {
 public:
     /* Read_Sector and Write_Sector take care of geometry translation for us,
      * then call the absolute versions. So, we override the absolute versions only */
-    virtual uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) {
+    uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override {
         unsigned char buffer[2048];
 
         bool GetMSCDEXDrive(unsigned char drive_letter,CDROM_Interface **_cdrom);
@@ -424,7 +471,7 @@ public:
         memcpy(data,buffer+((sectnum&3)*512),512);
         return 0x00;
     }
-    virtual uint8_t Write_AbsoluteSector(uint32_t sectnum,const void * data) {
+    uint8_t Write_AbsoluteSector(uint32_t sectnum,const void * data) override {
         (void)sectnum;//UNUSED
         (void)data;//UNUSED
         return 0x05; /* fail, read only */
@@ -485,8 +532,8 @@ public:
  * Maximum 16 entries. */
 #pragma pack(push,1)
 struct _PC98RawPartition {
-	uint8_t		mid;		/* 0x80 - boot */
-	uint8_t		sid;		/* 0x80 - active */
+	uint8_t		mid;		/* 0x00: unused, 0x20: MS-DOS(not bootable), 0xa1-0xaf: MS-DOS(bootable) */
+	uint8_t		sid;		/* 0x00: unused, 0x81,0x91,0xa1,0xe1: MS-DOS(active), 0x01,0x11,0x21,0x61: MS-DOS(sleep) */
 	uint8_t		dum1;		/* dummy for padding */
 	uint8_t		dum2;		/* dummy for padding */
 	uint8_t		ipl_sect;	/* IPL sector */
@@ -550,5 +597,34 @@ std::string PartitionIdentifyType(imageDisk *loadedDisk);
 
 void LogPrintPartitionTable(const std::vector<_PC98RawPartition> &parts);
 void LogPrintPartitionTable(const std::vector<partTable::partentry_t> &parts);
+
+extern unsigned char INT13_ElTorito_NoEmuDriveNumber;
+extern signed char INT13_ElTorito_IDEInterface;
+extern char INT13_ElTorito_NoEmuCDROMDrive;
+
+class imageDiskINT13Drive : public imageDisk {
+public:
+	uint8_t Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size=0) override;
+	uint8_t Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size=0) override;
+	uint8_t Read_AbsoluteSector(uint32_t sectnum, void * data) override;
+	uint8_t Write_AbsoluteSector(uint32_t sectnum, const void * data) override;
+
+	void UpdateFloppyType(void) override;
+	void Set_Reserved_Cylinders(Bitu resCyl) override;
+	uint32_t Get_Reserved_Cylinders() override;
+	void Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) override;
+	void Get_Geometry(uint32_t * getHeads, uint32_t *getCyl, uint32_t *getSect, uint32_t *getSectSize) override;
+	uint8_t GetBiosType(void) override;
+	uint32_t getSectSize(void) override;
+	bool detectDiskChange(void) override;
+
+	imageDiskINT13Drive(imageDisk *sdisk);
+	virtual ~imageDiskINT13Drive();
+
+	uint8_t bios_disk = 0;
+	bool enable_int13 = false;
+	imageDisk* subdisk = NULL;
+	bool busy = false;
+};
 
 #endif

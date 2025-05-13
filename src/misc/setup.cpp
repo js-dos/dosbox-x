@@ -54,7 +54,7 @@ void Value::destroy() {
 }
 
 Value& Value::copy(Value const& in) {
-    if (this != &in) { //Selfassigment!
+    if (this != &in) { //Selfassignment!
         if (type != V_NONE && type != in.type) throw WrongType();
         destroy();
         plaincopy(in);
@@ -318,7 +318,7 @@ bool Prop_int::CheckValue(Value const& in, bool warn) {
 //  if (!suggested_values.empty() && Property::CheckValue(in,warn)) return true;
     if (!suggested_values.empty()) return Property::CheckValue(in,warn);
 
-    //No >= and <= in Value type and == is ambigiuous
+    //No >= and <= in Value type and == is ambiguous
     int mi = min;
     int ma = max;
     int va = static_cast<int>(Value(in));
@@ -470,7 +470,7 @@ bool Prop_multival_remain::SetValue(std::string const& input,bool init) {
         if (loc != string::npos) local.erase(0,loc);
         loc = local.find_first_of(separator);
         string in = "";//default value
-        /* when i == number_of_properties add the total line. (makes more then
+        /* when i == number_of_properties add the total line. (makes more than
          * one string argument possible for parameters of cpu) */
         if (loc != string::npos && i < number_of_properties) { //separator found
             in = local.substr(0,loc);
@@ -1081,7 +1081,7 @@ Section* Config::GetSectionFromProperty(char const * const prop) const{
 
 
 bool Config::ParseConfigFile(char const * const configfilename) {
-    LOG(LOG_MISC,LOG_DEBUG)("Attempting to load config file #%zu from %s",configfiles.size(),configfilename);
+    LOG(LOG_MISC,LOG_DEBUG)("CONFIG: Attempting to load config file #%zu from %s",configfiles.size(),configfilename);
 
     //static bool first_configfile = true;
     ifstream in(configfilename);
@@ -1090,7 +1090,7 @@ bool Config::ParseConfigFile(char const * const configfilename) {
     settings_type = (configfiles.size() == 0)? "primary":"additional";
     configfiles.emplace_back(configfilename);
 
-    LOG(LOG_MISC,LOG_NORMAL)("Loading %s settings from config file %s", settings_type,configfilename);
+    LOG(LOG_MISC,LOG_NORMAL)("CONFIG: Loading %s settings from config file %s", settings_type,configfilename);
 
     //Get directory from configfilename, used with relative paths.
     current_config_dir=configfilename;
@@ -1142,7 +1142,7 @@ bool Config::ParseConfigFile(char const * const configfilename) {
 					}
 				}
             } catch(const char* message) {
-                message=0;
+                message = nullptr;
                 //EXIT with message
             }
             break;

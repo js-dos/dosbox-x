@@ -46,6 +46,12 @@
 #include "logging.h"
 #include "support.h"
 #include "setup.h"
+
+#ifdef __MINGW32__
+#ifndef __MINGW64__
+#pragma push_macro("__inline__")
+#endif
+#endif
 #include "src/libs/decoders/audio_convert.c"
 #include "src/libs/decoders/SDL_sound.c"
 #include "src/libs/decoders/vorbis.c"
@@ -54,27 +60,29 @@
 #include "src/libs/decoders/wav.c"
 #include "src/libs/decoders/mp3_seek_table.cpp"
 #include "src/libs/decoders/mp3.cpp"
+#include "src/libs/decoders/dr_flac.h"
+#ifdef __MINGW32__
+#ifndef __MINGW64__
+#pragma pop_macro("__inline__")
+#endif
+#endif
 #include "src/libs/libchdr/chd.h"
 #include "src/libs/libchdr/libchdr_chd.c"
 #include "src/libs/libchdr/libchdr_cdrom.c"
 #include "src/libs/libchdr/libchdr_flac.c"
 #include "src/libs/libchdr/libchdr_huffman.c"
 #include "src/libs/libchdr/libchdr_bitstream.c"
-#include "src/libs/libchdr/FLAC/stream_decoder.c"
-#include "src/libs/libchdr/FLAC/bitreader.c"
-#include "src/libs/libchdr/FLAC/format.c"
-#include "src/libs/libchdr/FLAC/cpu.c"
-#include "src/libs/libchdr/FLAC/crc.c"
-#include "src/libs/libchdr/FLAC/fixed.c"
-#include "src/libs/libchdr/FLAC/lpc.c"
-#include "src/libs/libchdr/FLAC/md5.c"
-#include "src/libs/libchdr/FLAC/memory.c"
-#if defined(WIN32) && !defined(HX_DOS) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
-#include "src/libs/libchdr/FLAC/windows_unicode_filenames.c"
-#endif
 #include "src/libs/libchdr/lzma/LzmaDec.c"
 #include "src/libs/libchdr/lzma/LzmaEnc.c"
 #include "src/libs/libchdr/lzma/LzFind.c"
+#include "src/libs/libchdr/zstd/common/entropy_common.c"
+#include "src/libs/libchdr/zstd/common/error_private.c"
+#include "src/libs/libchdr/zstd/common/fse_decompress.c"
+#include "src/libs/libchdr/zstd/common/zstd_common.c"
+#include "src/libs/libchdr/zstd/decompress/huf_decompress.c"
+#include "src/libs/libchdr/zstd/decompress/zstd_decompress_block.c"
+#include "src/libs/libchdr/zstd/decompress/zstd_decompress.c"
+#include "src/libs/libchdr/zstd/decompress/zstd_ddict.c"
 
 using namespace std;
 
@@ -470,6 +478,7 @@ CDROM_Interface_Image::imagePlayer CDROM_Interface_Image::player;
 CDROM_Interface_Image::CDROM_Interface_Image(uint8_t subUnit)
 		      :subUnit(subUnit)
 {
+	class_id = ID_IMAGE;
 	images[subUnit] = this;
 	if (refCount == 0) {
 		if (player.channel == NULL) {
@@ -500,7 +509,7 @@ extern bool qmount;
 bool CDROM_Interface_Image::SetDevice(char* path, int forceCD)
 {
 	(void)forceCD;//UNUSED
-	const bool result = LoadCueSheet(path) || LoadIsoFile(path) || LoadChdFile(path);
+	const bool result = LoadCueSheet(path) || LoadCloneCDSheet(path) || LoadIsoFile(path) || LoadChdFile(path);
 	if (!result && !qmount) {
 		// print error message on dosbox-x console
 		char buf[MAX_LINE_LENGTH];
@@ -508,7 +517,20 @@ bool CDROM_Interface_Image::SetDevice(char* path, int forceCD)
 		uint16_t size = (uint16_t)strlen(buf);
 		DOS_WriteFile(STDOUT, (uint8_t*)buf, &size);
 	}
-	return result;
+
+    int datatracks=0, audiotracks=0;
+    for(const auto& track : tracks) {
+        if(track.attr == 0x40) {
+            datatracks++;
+        }
+        else if(track.attr == 0) {
+            audiotracks++;
+        }
+    }
+    LOG_MSG("CDROM: Image loaded No. of data tracks=%d, audio tracks=%d",
+        datatracks, audiotracks-1
+        );
+    return result;
 }
 
 bool CDROM_Interface_Image::GetUPC(unsigned char& attr, char* upc)
@@ -524,14 +546,15 @@ bool CDROM_Interface_Image::GetAudioTracks(int& stTrack, int& end, TMSF& leadOut
 	end = (int)(tracks.size() - 1);
 	FRAMES_TO_MSF(tracks[tracks.size() - 1].start + 150, &leadOut.min, &leadOut.sec, &leadOut.fr);
 
-	//#ifdef DEBUG
-	LOG_MSG("CDROM: GetAudioTracks, stTrack=%d, end=%d, leadOut.min=%d, leadOut.sec=%d, leadOut.fr=%d",
-	  stTrack,
-	  end,
+	#ifdef DEBUG
+	LOG_MSG("%s CDROM: GetAudioTracks, stTrack=%d, end=%d, leadOut.min=%d, leadOut.sec=%d, leadOut.fr=%d",
+      get_time(),
+      stTrack,
+      end,
 	  leadOut.min,
 	  leadOut.sec,
 	  leadOut.fr);
-	//#endif
+	#endif
 
 	return true;
 }
@@ -565,8 +588,8 @@ bool CDROM_Interface_Image::GetAudioSub(unsigned char& attr, unsigned char& trac
 	track = (unsigned char)cur_track;
 	attr = tracks[track - 1].attr;
 	index = 1;
-	FRAMES_TO_MSF(player.currFrame + 150, &absPos.min, &absPos.sec, &absPos.fr);
-	FRAMES_TO_MSF(player.currFrame - tracks[track - 1].start + 150, &relPos.min, &relPos.sec, &relPos.fr);
+	FRAMES_TO_MSF(player.currFrame, &absPos.min, &absPos.sec, &absPos.fr);
+	FRAMES_TO_MSF(player.currFrame - tracks[track - 1].start, &relPos.min, &relPos.sec, &relPos.fr);
 	if(IS_PC98_ARCH && player.playbackRemaining == 0 && !strcmp(RunningProgram, "ITP")) {
 		// POLICENAUTS
 		// It freeze at the end of the Konami logo or opening.
@@ -581,13 +604,13 @@ bool CDROM_Interface_Image::GetAudioSub(unsigned char& attr, unsigned char& trac
 
 	LOG_MSG("%s CDROM: GetAudioSub absolute offset (%d), MSF=%d:%d:%d",
       get_time(),
-	  player.currFrame + 150,
+	  player.currFrame,
 	  absPos.min,
 	  absPos.sec,
 	  absPos.fr);
 	LOG_MSG("%s CDROM: GetAudioSub relative offset (%d), MSF=%d:%d:%d",
       get_time(),
-	  player.currFrame - tracks[track - 1].start + 150,
+	  player.currFrame - tracks[track - 1].start,
 	  relPos.min,
 	  relPos.sec,
 	  relPos.fr);
@@ -1059,8 +1082,241 @@ static string dirname(char * file) {
 }
 #endif
 
+struct ImageCCDEntry {
+	int		Point = -1;
+	int		Session = -1;
+	int		ADR = -1;
+	int		Control = -1;
+	int		TrackNo = -1;
+	int		AMin = -1,ASec = -1,AFrame = -1;
+	long		ALBA = -99999999/*can be -150*/,Zero = -1;
+	int		PMin = -1,PSec = -1,PFrame = -1;
+	long		PLBA = -99999999;
+};
+
+static void CloneCDEntryToTrack(CDROM_Interface_Image::Track &trk,ImageCCDEntry &ent) {
+	trk.number = ent.Point;
+	trk.sectorSize = RAW_SECTOR_SIZE;
+	if (ent.Control & 0x04) trk.attr = 0x40;//data
+	else trk.attr = 0x00;//audio
+	trk.start = ent.PLBA;
+}
+
+bool CDROM_Interface_Image::LoadCloneCDSheet(char *cuefile) {
+	// If we're going to support CUE vs CCD vs anything else then this function must
+	// reject any file who's file extension is not .CCD
+	{
+		char *s = strrchr(cuefile,'.');
+		if (!s) return false;
+		if (strcasecmp(s,".ccd")) return false;
+	}
+
+	enum {
+		NONE=0,
+		CLONECD,
+		DISC,
+		ENTRY
+	};
+
+	/* locate corresponding IMG file */
+	std::string imgfile;
+	{
+		char *ext = strrchr(cuefile,'.');
+		if (!ext) return false;
+		imgfile = std::string(cuefile,(size_t)(ext-cuefile));
+		imgfile += ".img";
+//		LOG_MSG("CUE: %s",cuefile);
+//		LOG_MSG("IMG: %s",imgfile.c_str());
+	}
+
+	Track track = {0, 0, 0, 0, 0, 0, 0, false, NULL};
+	long leadOutLBA = -1;
+	ImageCCDEntry entry;
+	tracks.clear();
+	int mode=NONE;
+	int shift = 0;
+	int currPregap = 0;
+	int totalPregap = 0;
+	int prestart = -1;
+	int Version=0;
+	//int Sessions=0;
+	int TocEntries=0;
+	bool isCloneCD=false;
+	int currentEntry = -1;
+	std::string currentSection;
+	char tmp[MAX_FILENAME_LENGTH];  // dirname can change its argument
+	safe_strncpy(tmp, cuefile, MAX_FILENAME_LENGTH);
+	string pathname(dirname(tmp));
+	ifstream in;
+	in.open(cuefile, ios::in);
+	if (in.fail()) return false;
+
+	bool error = true;
+	track.file = new BinaryFile(imgfile.c_str(), error);
+	if (!track.file) {
+		LOG_MSG("Unable to load image file %s\n",imgfile.c_str());
+		return false;
+	}
+
+	while(!in.eof()) {
+		// get next line
+		char buf[MAX_LINE_LENGTH],*s;
+		in.getline(buf, MAX_LINE_LENGTH);
+		if (in.fail() && !in.eof()) return false;  // probably a binary file
+		s = buf;
+
+		while (*s == ' ') s++;
+		if (*s == 0) continue;
+
+		if (*s == '[') {
+			s++;
+			char *base = s;
+			while (*s != 0 && *s != ']') s++;
+			currentSection = std::string(base,(size_t)(s-base));
+
+			if (mode == ENTRY) {
+//				LOG_MSG("Entry point %02x\n",entry.Point);
+				if (entry.Point == 0xA2) leadOutLBA = entry.PLBA;
+				else if (entry.Point > 0 && entry.Point <= TocEntries) {
+					CloneCDEntryToTrack(track,entry);
+					AddTrack(track, shift, prestart, totalPregap, currPregap);
+				}
+				entry = ImageCCDEntry();
+			}
+
+			mode = NONE;
+			if (currentSection == "CloneCD") {
+				mode = CLONECD;
+			}
+			else if (currentSection == "Disc") {
+				mode = DISC;
+			}
+			else if (strncmp(currentSection.c_str(),"Entry ",6) == 0) {
+				const char *s = currentSection.c_str()+5;
+				while (*s == ' ') s++;
+
+				if (isdigit(*s)) {
+					currentEntry = atoi(s);
+					if (currentEntry >= 0 && currentEntry < TocEntries) {
+						mode = ENTRY;
+					}
+				}
+			}
+
+//			LOG_MSG("[%s]",currentSection.c_str());
+
+			continue;
+		}
+		else {
+			std::string name,value;
+			char *base_name = s;
+			while (*s != 0 && *s != '=' && *s != '\r' && *s != '\n') s++;
+			name = std::string(base_name,(size_t)(s-base_name));
+			if (*s == '=') {
+				s++;
+				char *base_value = s;
+				while (*s != 0 && *s != '\r' && *s != '\n') s++;
+				value = std::string(base_value,(size_t)(s-base_value));
+			}
+
+			switch (mode) {
+				case CLONECD:
+					if (name == "Version") {
+						Version = atoi(value.c_str());
+						if (Version >= 3) {
+							isCloneCD = true;
+						}
+					}
+					break;
+				case DISC:
+					if (name == "TocEntries")
+						TocEntries = strtol(value.c_str(),NULL,0);
+					#if 0
+					else if (name == "Sessions")
+						Sessions = strtol(value.c_str(),NULL,0);
+					#endif
+					break;
+				case ENTRY:
+					if (name == "Session")
+						entry.Session = strtol(value.c_str(),NULL,0);
+					else if (name == "Point")
+						entry.Point = strtol(value.c_str(),NULL,0);
+					else if (name == "ADR")
+						entry.ADR = strtol(value.c_str(),NULL,0);
+					else if (name == "Control")
+						entry.Control = strtol(value.c_str(),NULL,0);
+					else if (name == "TrackNo")
+						entry.TrackNo = strtol(value.c_str(),NULL,0);
+					else if (name == "AMin")
+						entry.AMin = strtol(value.c_str(),NULL,0);
+					else if (name == "ASec")
+						entry.ASec = strtol(value.c_str(),NULL,0);
+					else if (name == "AFrame")
+						entry.AFrame = strtol(value.c_str(),NULL,0);
+					else if (name == "ALBA")
+						entry.ALBA = strtol(value.c_str(),NULL,0);
+					else if (name == "Zero")
+						entry.Zero = strtol(value.c_str(),NULL,0);
+					else if (name == "PMin")
+						entry.PMin = strtol(value.c_str(),NULL,0);
+					else if (name == "PSec")
+						entry.PSec = strtol(value.c_str(),NULL,0);
+					else if (name == "PFrame")
+						entry.PFrame = strtol(value.c_str(),NULL,0);
+					else if (name == "PLBA")
+						entry.PLBA = strtol(value.c_str(),NULL,0);
+					break;
+			};
+
+//			LOG_MSG("[%s] '%s'='%s' mode=%u curEnt=%d",currentSection.c_str(),name.c_str(),value.c_str(),(unsigned int)mode,currentEntry);
+		}
+	}
+
+	if (mode == ENTRY) {
+		if (entry.Point == 0xA2) leadOutLBA = entry.PLBA;
+		else if (entry.Point > 0 && entry.Point <= TocEntries) {
+			CloneCDEntryToTrack(track,entry);
+			AddTrack(track, shift, prestart, totalPregap, currPregap);
+			entry = ImageCCDEntry();
+		}
+	}
+
+	// lead out
+	if (leadOutLBA >= 0) {
+		track.number = 1+tracks.size();
+		track.attr = 0;//sync with load iso
+		track.start = leadOutLBA;
+		track.length = 0;
+		track.file = NULL;
+		AddTrack(track, shift, -1, totalPregap, 0);
+	}
+
+//	LOG_MSG("Version=%d TocEntries=%d Sessions=%d\n",Version,TocEntries,Sessions);
+
+#if 0//DEBUG
+	LOG_MSG("Tracks:");
+	for (size_t si=0;si < tracks.size();si++) {
+		LOG_MSG("  Number:     %u",tracks[si].number);
+		LOG_MSG("  Attr:       0x%02x",tracks[si].attr);
+		LOG_MSG("  Start:      %lu",(unsigned long)tracks[si].start);
+		LOG_MSG("  Length:     %lu\n",(unsigned long)tracks[si].length);
+	}
+#endif
+
+	return (leadOutLBA >= 0 && isCloneCD);
+}
+
 bool CDROM_Interface_Image::LoadCueSheet(char *cuefile)
 {
+	// reject any file which are not a CUE sheet, GOG is so smart that they set several different extensions so that we can't assume .cue only.
+    // Known extensions at the moment are: .cue, .ins, .dat, .inst (not sure it is an exhaustive list)
+	{
+		char *s = strrchr(cuefile,'.');
+		if (!s) return false;
+		if (!strcasecmp(s,".ccd") || !strcasecmp(s, ".chd") || !strcasecmp(s, ".iso") || !strcasecmp(s, ".img") || !strcasecmp(s, ".gog")
+            || !strcasecmp(s, ".mds") || !strcasecmp(s, ".mdf") || !strcasecmp(s, ".bin")) return false;
+	}
+
 	Track track = {0, 0, 0, 0, 0, 0, 0, false, NULL};
 	tracks.clear();
 //	int curr_track = 0; // unused
