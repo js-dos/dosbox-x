@@ -1987,7 +1987,7 @@ void voodoo_ogl_shutdown(voodoo_state *v) {
 	v->active = false;
 }
 
-#else
+#elifndef JSDOS
 
 
 bool voodoo_ogl_init(voodoo_state *v) {

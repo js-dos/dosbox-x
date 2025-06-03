@@ -28,7 +28,7 @@
 #include "cross.h"
 
 
-#if C_OPENGL
+#if defined(C_OPENGL) || defined(JSDOS)
 
 #include "voodoo_vogl.h"
 #include "voodoo_types.h"

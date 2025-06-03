@@ -1575,7 +1575,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* voodoo_settings[] = {
         "false",
         "software",
-#if C_OPENGL
+#if defined(C_OPENGL) || defined(JSDOS)
         "opengl",
 #endif
         "auto",
