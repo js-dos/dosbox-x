@@ -21,7 +21,12 @@
 
 #if C_IPX
 
+#if defined(JSDOS) && !defined(JSDOS_SDL)
+#include <cstdint>
+#include "ipx.h"
+#else
 #include "SDL_net.h"
+#endif
 
 struct packetBuffer {
 	uint8_t buffer[1024];
