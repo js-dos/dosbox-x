@@ -694,7 +694,22 @@ Property* Section_prop::Get_prop(string const& _propname) {
 const char* Section_prop::Get_string(string const& _propname) const {
     for(const_it tel = properties.begin();tel != properties.end();++tel){
         if ((*tel)->propname == _propname){
-            return ((*tel)->GetValue());
+            const char* value = ((*tel)->GetValue());
+#ifdef JSDOS
+            if (_propname == "cputype") {
+                bool isMMX = strcmp(value, "pentium_mmx") == 0;
+                if (isMMX) {
+                  printf("WARN! pentium_mmx is not supported (using pentium instead), use 'jsdos_pentium_mmx' to enable MMX\n");
+                  return "pentium";
+                }
+            }
+
+            if (strcmp(value, "jsdos_pentium_mmx") == 0) {
+                printf("WARN! pentium_mmx is enabled, emulation can be buggy\n");
+                return "penitum_mmx";
+            }
+#endif
+            return value;
         }
     }
     return "";
