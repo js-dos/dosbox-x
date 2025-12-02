@@ -385,7 +385,7 @@ void spx_fft_float(void *table, float *in, float *out)
 #endif
    for (i=0;i<N;i++)
       _in[i] = (int)floor(.5+in[i]);
-   spx_fft(table, _in, _out);
+   spx_fft(table, (float *) _in, (float *) _out);
    for (i=0;i<N;i++)
       out[i] = _out[i];
 #if 0
@@ -421,7 +421,7 @@ void spx_ifft_float(void *table, float *in, float *out)
 #endif
    for (i=0;i<N;i++)
       _in[i] = (int)floor(.5+in[i]);
-   spx_ifft(table, _in, _out);
+   spx_ifft(table, (float *) _in, (float *) _out);
    for (i=0;i<N;i++)
       out[i] = _out[i];
 #if 0
