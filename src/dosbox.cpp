@@ -282,8 +282,8 @@ S3Card              s3Card;
 ATICard             atiCard;
 HerculesCard        hercCard;
 bool                SDLNetInited;
-int32_t              ticksDone;
-uint32_t              ticksScheduled;
+int32_t             ticksDone;
+uint32_t            ticksScheduled;
 bool                ticksLocked;
 bool                mono_cga=false;
 bool                ignore_opcode_63 = true;
@@ -471,11 +471,7 @@ static Bitu Normal_Loop(void) {
 
                 saved_allow = dosbox_allow_nonrecursive_page_fault;
                 dosbox_allow_nonrecursive_page_fault = true;
-                auto cycles = CPU_Cycles;
                 ret = (*cpudecoder)();
-#ifdef JSDOS_X
-                jsdos::incCycles(cycles - CPU_Cycles);
-#endif
                 dosbox_allow_nonrecursive_page_fault = saved_allow;
 
                 if (GCC_UNLIKELY(ret<0))
@@ -566,9 +562,17 @@ static Bitu Normal_Loop(void) {
 	return 0;
 }
 
+#ifdef JSDOS
+extern std::string cpuMetrics;
+#endif
+
 void increaseticks() { //Make it return ticksRemain and set it in the function above to remove the global variable.
+#ifdef JSDOS
+    jsdos::increaseticks();
+#else
     static int32_t lastsleepDone = -1;
     static Bitu sleep1count = 0;
+#endif
     if (GCC_UNLIKELY(ticksLocked)) { // For Fast Forward Mode
         ticksRemainSpeedFrac = 0;
         ticksRemain = 5;
@@ -584,9 +588,13 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
 
     if (ticksNew <= ticksLast) { //lower should not be possible, only equal.
         ticksAdded = 0;
-#ifdef JSDOS_X
-		asyncify_sleep(1, true);
-        int32_t timeslept = std::max((int32_t)(GetTicks() - ticksNew), int32_t(1));
+#ifdef JSDOS
+        int32_t timeslept = 0;
+        while (timeslept < 1) {
+	  asyncify_sleep(1, true);
+          timeslept = std::round(GetMsPassedFromStart() - ticksNew);
+        }
+        cpuMetrics += std::to_string(timeslept) + " ";
 #else
         if (!CPU_CycleAutoAdjust || CPU_SkipCycleAutoAdjust || sleep1count < 3) {
             wrap_delay(1);
@@ -680,7 +688,11 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
         }
 
         if (new_cmax < CPU_CYCLES_LOWER_LIMIT)
-            new_cmax = CPU_CYCLES_LOWER_LIMIT;
+          new_cmax = CPU_CYCLES_LOWER_LIMIT;
+
+#ifdef JSDOS
+        cpuMetrics += "r" + std::to_string(ratio) +  "|" + std::to_string(new_cmax) + "|" + std::to_string(ticksDone) + "|" + std::to_string(ticksScheduled) + " ";
+#endif
 
         /*
            LOG_MSG("cyclelog: current %6d   cmax %6d   ratio  %5d  done %3d   sched %3d",
@@ -710,8 +722,10 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
         CPU_IODelayRemoved = 0;
         ticksDone = 0;
         ticksScheduled = 0;
+#ifndef JSDOS
         lastsleepDone = -1;
         sleep1count = 0;
+#endif
     }
     else if (ticksAdded > 15) {
         /* ticksAdded > 15 but ticksScheduled < 5, lower the cycles
