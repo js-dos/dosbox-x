@@ -33,6 +33,17 @@
 #include "clockdomain.h"
 #include "config.h"
 
+/* HACK: To make SDL3 porting easier, define SDL2 to prevent SDL1 code from compiling */
+#if defined(C_SDL3) && !defined(C_SDL2)
+# define C_SDL2 1
+#endif
+
+/* allow for OS-free builds where the MS-DOS emulation is disabled and
+ * you have to provide your own boot disks to run MS-DOS or whatever you like. */
+#ifdef C_OSFREE
+# define OSFREE 1
+#endif
+
 #if defined(OS2) && defined(C_SDL2)
 #undef VERSION
 #endif
@@ -142,7 +153,8 @@ enum SVGACards {
 	SVGA_TsengET4K,
 	SVGA_TsengET3K,
 	SVGA_ParadisePVGA1A,
-	SVGA_ATI
+	SVGA_ATI,
+	SVGA_DOSBoxIG                // special "integrated graphics" emulator accelerated card
 };
 
 enum S3Card {
@@ -243,36 +255,37 @@ enum {
 
 extern uint32_t guest_msdos_LoL;
 extern uint16_t guest_msdos_mcb_chain;
+extern uint32_t guest_msdos_dev_chain;
 extern int boothax;
 
 /* C++11 user-defined literal, to help with byte units */
 typedef unsigned long long bytecount_t;
 
-static inline constexpr bytecount_t operator "" _bytes(const bytecount_t x) {
+static inline constexpr bytecount_t operator""_bytes(const bytecount_t x) {
     return x;
 }
 
-static inline constexpr bytecount_t operator "" _parabytes(const bytecount_t x) { /* AKA bytes per segment increment in real mode */
+static inline constexpr bytecount_t operator""_parabytes(const bytecount_t x) { /* AKA bytes per segment increment in real mode */
     return x << bytecount_t(4u);
 }
 
-static inline constexpr bytecount_t operator "" _kibibytes(const bytecount_t x) {
+static inline constexpr bytecount_t operator""_kibibytes(const bytecount_t x) {
     return x << bytecount_t(10u);
 }
 
-static inline constexpr bytecount_t operator "" _pagebytes(const bytecount_t x) { /* bytes per 4KB page in protected mode */
+static inline constexpr bytecount_t operator""_pagebytes(const bytecount_t x) { /* bytes per 4KB page in protected mode */
     return x << bytecount_t(12u);
 }
 
-static inline constexpr bytecount_t operator "" _mibibytes(const bytecount_t x) {
+static inline constexpr bytecount_t operator""_mibibytes(const bytecount_t x) {
     return x << bytecount_t(20u);
 }
 
-static inline constexpr bytecount_t operator "" _gibibytes(const bytecount_t x) {
+static inline constexpr bytecount_t operator""_gibibytes(const bytecount_t x) {
     return x << bytecount_t(30u);
 }
 
-static inline constexpr bytecount_t operator "" _tebibytes(const bytecount_t x) {
+static inline constexpr bytecount_t operator""_tebibytes(const bytecount_t x) {
     return x << bytecount_t(40u);
 }
 
@@ -406,13 +419,14 @@ public:
 protected:
     void getBytes(std::ostream& stream) override
     {
-        std::for_each(podRef.begin(), podRef.end(), std::bind1st(WriteGlobalPOD(), &stream));
+        for (auto& x : podRef) { WriteGlobalPOD(stream, x); }
     }
 
     void setBytes(std::istream& stream) override
     {
-        std::for_each(podRef.begin(), podRef.end(), std::bind1st(ReadGlobalPOD(), &stream));
+        for (auto& x : podRef) { ReadGlobalPOD(stream, x); }
     }
+
 
 private:
     struct POD
@@ -423,21 +437,15 @@ private:
         size_t size;
     };
 
-    struct WriteGlobalPOD : public std::binary_function<std::ostream*, POD, void>
+    static inline void WriteGlobalPOD(std::ostream& stream, const POD& data)
     {
-        void operator()(std::ostream* stream, const POD& data) const
-        {
-            stream->write(static_cast<const char*>(data.address), data.size);
-        }
-    };
+        stream.write(static_cast<const char*>(data.address), data.size);
+    }
 
-    struct ReadGlobalPOD : public std::binary_function<std::istream*, POD, void>
+    static inline void ReadGlobalPOD(std::istream& stream, POD& data)
     {
-        void operator()(std::istream* stream, const POD& data) const
-        {
-            stream->read(static_cast<char*>(data.address), data.size);
-        }
-    };
+        stream.read(static_cast<char*>(data.address), data.size);
+    }
 
     std::vector<POD> podRef;
 };
@@ -482,5 +490,11 @@ void readString(std::istream& stream, std::string& data)
 int _wmkdir_p(const wchar_t *pathname);
 #else
 int mkdir_p(const char *pathname, mode_t mode);
+#endif
+
+#if defined(C_HAVE_DUKTAPE)
+# include "duktape.h"
+
+extern duk_context *js_heap;
 #endif
 

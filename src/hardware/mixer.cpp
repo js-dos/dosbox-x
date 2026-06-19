@@ -68,6 +68,9 @@
 SDL_AudioDeviceID SDL2_AudioDevice = 0; /* valid IDs are 2 or higher, 1 for compat, 0 is never a valid ID */
 #endif
 
+#define DC_ADJBITS (24u)
+static int32_t DC_ADJUSTMENT_STEP = 0;
+
 static INLINE int16_t MIXER_CLIP(Bits SAMP) {
     if (SAMP < MAX_AUDIO) {
         if (SAMP > MIN_AUDIO)
@@ -88,6 +91,8 @@ static struct {
     int32_t          work[MIXER_BUFSIZE][2];
     Bitu            work_in,work_out,work_wrap;
     Bitu            pos,done;
+    int32_t         last_dac[2];
+    int32_t         dc_adj[2];
     float           mastervol[2];
     float           recordvol[2];
     MixerChannel*   channels;
@@ -101,117 +106,16 @@ static struct {
     bool            sampleaccurate;
     bool            prebuffer_wait;
     Bitu            prebuffer_samples;
+    bool            dc_bias_adj;
     bool            mute;
 } mixer;
 
 uint32_t Mixer_MIXQ(void) {
-    return  ((uint32_t)mixer.freq) |
-            ((uint32_t)2u/*channels*/ << (uint32_t)20u) |
-            (mixer.swapstereo ?      ((uint32_t)1u << (uint32_t)29u) : 0u) |
-            (mixer.mute       ?      ((uint32_t)1u << (uint32_t)30u) : 0u) |
-            (mixer.nosound    ? 0u : ((uint32_t)1u << (uint32_t)31u));
-}
-
-PhysPt mixer_capture_write = 0;
-PhysPt mixer_capture_write_begin = 0;
-PhysPt mixer_capture_write_end = 0;
-uint32_t mixer_control = 0;
-
-// mixer capture source bits [23:16]
-enum {
-    MIXER_SRC_MIXDOWN=0
-};
-
-unsigned int Mixer_MIXC_Source(void) {
-    return (unsigned int)((mixer_control >> 16ul) & 0xFFul);
-}
-
-bool Mixer_MIXC_Active(void) {
-    return ((mixer_control & 3u) == 3u)/*capture interface enable|write to memory*/;
-}
-
-bool Mixer_MIXC_Error(void) {
-    return ((mixer_control & 8u) == 8u);
-}
-
-bool Mixer_MIXC_ShouldLoop(void) {
-    return ((mixer_control & 4u) == 4u);
-}
-
-void Mixer_MIXC_Stop(void) {
-    mixer_control &= ~1u; // clear enable
-}
-
-void Mixer_MIXC_LoopAround(void) {
-    mixer_capture_write = mixer_capture_write_begin;
-}
-
-// NTS: Check AFTER writing sample
-bool Mixer_MIXC_AtEnd(void) {
-    return (mixer_capture_write >= mixer_capture_write_end);
-}
-
-void Mixer_MIXC_MarkError(void) {
-    mixer_control &= ~1u; // clear enable
-    mixer_control |=  8u; // set error
-}
-
-PhysPt Mixer_MIXWritePos(void) {
-    return mixer_capture_write;
-}
-
-void Mixer_MIXWritePos_Write(PhysPt np) {
-    if (!Mixer_MIXC_Active())
-        mixer_capture_write = np;
-}
-
-void Mixer_MIXWriteBegin_Write(PhysPt np) {
-    if (!Mixer_MIXC_Active())
-        mixer_capture_write_begin = np;
-}
-
-void Mixer_MIXWriteEnd_Write(PhysPt np) {
-    if (!Mixer_MIXC_Active())
-        mixer_capture_write_end = np;
-}
-
-void Mixer_MIXC_Validate(void) {
-    if (Mixer_MIXC_Active()) {
-        // NTS: phys_writew() will cause a segfault if the address is beyond the end of memory,
-        //      because it computes MemBase+addr
-        PhysPt MemMax = (PhysPt)MEM_TotalPages() * (PhysPt)4096ul;
-
-        if (Mixer_MIXC_Error() ||
-            Mixer_MIXC_Source() != 0x00 ||
-            mixer_capture_write == 0 || mixer_capture_write_begin == 0 || mixer_capture_write_end == 0 ||
-            mixer_capture_write < mixer_capture_write_begin ||
-            mixer_capture_write > mixer_capture_write_end ||
-            mixer_capture_write_begin > mixer_capture_write_end ||
-            mixer_capture_write >= MemMax ||
-            mixer_capture_write_end >= MemMax ||
-            mixer_capture_write_begin >= MemMax)
-            Mixer_MIXC_MarkError();
-    }
-}
-
-uint32_t Mixer_MIXC(void) {
-    return mixer_control;
-}
-
-void Mixer_MIXC_Write(uint32_t v) {
-    /* bit [0:0] = enable capture interface
-     * bit [1:1] = enable writing to memory
-     * bit [2:2] = enable loop around, when write == write_end, set write == write_begin
-     * bit [3:3] = 1=error condition  0=no error
-     * bit [23:16] = source selection (see list) */
-    if (mixer_control != v) {
-        mixer_control = (v & 0x00FF00FFUL);
-        Mixer_MIXC_Validate();
-    }
-}
-
-bool Mixer_SampleAccurate() {
-    return mixer.sampleaccurate;
+	return  ((uint32_t)mixer.freq) |
+		((uint32_t)2u/*channels*/ << (uint32_t)20u) |
+		(mixer.swapstereo ?      ((uint32_t)1u << (uint32_t)29u) : 0u) |
+		(mixer.mute       ?      ((uint32_t)1u << (uint32_t)30u) : 0u) |
+		(mixer.nosound    ? 0u : ((uint32_t)1u << (uint32_t)31u));
 }
 
 uint8_t MixTemp[MIXER_BUFSIZE];
@@ -790,6 +694,29 @@ static void MIXER_MixData(Bitu fracs/*render up to*/) {
         chan=chan->next;
     }
 
+    /* In case of DOS games that play samples with a DC offset that is WAY off center,
+     * the mixdown should do a very slow adjustment to center the waveform. On modern
+     * systems, the user might wonder why a YouTube video always gets distorted audio
+     * while a game like In Extremis is running without this adjustment. */
+    if (mixer.dc_bias_adj) {
+        Bitu added = whole - prev_rendered;
+        Bitu readpos = mixer.work_in + prev_rendered;
+        int32_t ns;
+
+        for (Bitu i=0;i<added;i++) {
+            for (unsigned int ch=0;ch < 2;ch++) {
+                ns = mixer.work[readpos][ch] + mixer.dc_adj[ch];
+                if (ns > -((int32_t)(30000u << MIXER_VOLSHIFT)) && ns < ((int32_t)(30000u << MIXER_VOLSHIFT)))
+                    mixer.dc_adj[ch] -= (int32_t)(((int64_t)ns * (int64_t)DC_ADJUSTMENT_STEP) >> (int64_t)DC_ADJBITS);
+                else//if the sample is out of range or nearly out of range then DC adjust FASTER to minimize distortion
+                    mixer.dc_adj[ch] -= (int32_t)(((int64_t)ns * (int64_t)DC_ADJUSTMENT_STEP * 64ll) >> (int64_t)DC_ADJBITS);
+                mixer.work[readpos][ch] = ns;
+            }
+
+            readpos++;
+        }
+    }
+
     if (CaptureState & (CAPTURE_WAVE|CAPTURE_VIDEO)) {
         int32_t volscale1 = (int32_t)(mixer.recordvol[0] * (1 << MIXER_VOLSHIFT));
         int32_t volscale2 = (int32_t)(mixer.recordvol[1] * (1 << MIXER_VOLSHIFT));
@@ -804,35 +731,6 @@ static void MIXER_MixData(Bitu fracs/*render up to*/) {
         }
         assert(readpos <= MIXER_BUFSIZE);
         CAPTURE_AddWave( mixer.freq, added, (int16_t*)convert );
-    }
-
-    if (Mixer_MIXC_Active() && prev_rendered < whole) {
-        Bitu readpos = mixer.work_in + prev_rendered;
-        Bitu added = whole - prev_rendered;
-        Bitu cando = (mixer_capture_write_end - mixer_capture_write) / 2/*bytes/sample*/ / 2/*channels*/;
-        if (cando > added) cando = added;
-
-        if (cando == 0 && !Mixer_MIXC_AtEnd()) {
-            Mixer_MIXC_MarkError();
-        }
-        else if (cando != 0) {
-            for (Bitu i=0;i < cando;i++) {
-                phys_writew(mixer_capture_write,(uint16_t)MIXER_CLIP(((int64_t)mixer.work[readpos][0]) >> (MIXER_VOLSHIFT)));
-                mixer_capture_write += 2;
-
-                phys_writew(mixer_capture_write,(uint16_t)MIXER_CLIP(((int64_t)mixer.work[readpos][1]) >> (MIXER_VOLSHIFT)));
-                mixer_capture_write += 2;
-
-                readpos++;
-            }
-
-            if (Mixer_MIXC_AtEnd()) {
-                if (Mixer_MIXC_ShouldLoop())
-                    Mixer_MIXC_LoopAround();
-                else
-                    Mixer_MIXC_Stop();
-            }
-        }
     }
 
     mixer.samples_rendered_ms.w = whole;
@@ -932,7 +830,7 @@ static void SDLCALL MIXER_CallBack(void * userdata, Uint8 *stream, int len) {
             mixer.prebuffer_wait = false;
     }
 
-    if (!mixer.prebuffer_wait && !mixer.mute) {
+    if (!mixer.prebuffer_wait && !mixer.mute && need > 0) {
         int32_t *in = &mixer.work[mixer.work_out][0];
         while (need > 0) {
             if (mixer.work_out == mixer.work_in) break;
@@ -945,14 +843,17 @@ static void SDLCALL MIXER_CallBack(void * userdata, Uint8 *stream, int len) {
             }
             need--;
         }
+        /* assume output != stream */
+        mixer.last_dac[0] = (output-2)[0];
+        mixer.last_dac[1] = (output-2)[1];
     }
 
     if (need > 0)
         mixer.prebuffer_wait = true;
 
     while (need > 0) {
-        *output++ = 0;
-        *output++ = 0;
+        *output++ = mixer.last_dac[0];
+        *output++ = mixer.last_dac[1];
         need--;
     }
 
@@ -1202,6 +1103,7 @@ void MIXER_Init() {
     mixer.blocksize=(unsigned int)section->Get_int("blocksize");
     mixer.swapstereo=section->Get_bool("swapstereo");
     mixer.sampleaccurate=section->Get_bool("sample accurate");
+    mixer.dc_bias_adj=section->Get_bool("dc bias correction");
     mixer.mute=false;
     if (control->opt_silent) mixer.nosound = true;
 
@@ -1216,6 +1118,10 @@ void MIXER_Init() {
     mixer.mastervol[1]=1.0f;
     mixer.recordvol[0]=1.0f;
     mixer.recordvol[1]=1.0f;
+    mixer.last_dac[0]=0;
+    mixer.last_dac[1]=0;
+    mixer.dc_adj[0]=0;
+    mixer.dc_adj[1]=0;
 
     /* Start the Mixer using SDL Sound at 22 khz */
     SDL_AudioSpec spec;
@@ -1297,7 +1203,10 @@ void MIXER_Init() {
     mixer.samples_rendered_ms.fn = 0;
     mixer.samples_rendered_ms.fd = mixer.samples_per_ms.fd;
 
-    LOG(LOG_MISC,LOG_DEBUG)("Mixer: sample_accurate=%u blocksize=%u sdl_rate=%uHz mixer_rate=%uHz channels=%u samples=%u min/max/need=%u/%u/%u per_ms=%u %u/%u samples prebuffer=%u",
+    // DC bias adjustment for games like In Extremis and their digitized samples that are WAY off center
+    DC_ADJUSTMENT_STEP = (int32_t)((1ul << DC_ADJBITS) / (unsigned long)mixer.freq);
+
+    LOG(LOG_MISC,LOG_DEBUG)("Mixer: sample_accurate=%u blocksize=%u sdl_rate=%uHz mixer_rate=%uHz channels=%u samples=%u min/max/need=%u/%u/%u per_ms=%u %u/%u samples prebuffer=%u dcadj=%.10f(en=%u)",
         (unsigned int)mixer.sampleaccurate,
         (unsigned int)mixer.blocksize,
         (unsigned int)obtained.freq,
@@ -1310,7 +1219,9 @@ void MIXER_Init() {
         (unsigned int)mixer.samples_per_ms.w,
         (unsigned int)mixer.samples_per_ms.fn,
         (unsigned int)mixer.samples_per_ms.fd,
-        (unsigned int)mixer.prebuffer_samples);
+        (unsigned int)mixer.prebuffer_samples,
+        (double)DC_ADJUSTMENT_STEP / (1u << DC_ADJBITS),
+        mixer.dc_bias_adj);
 
     AddVMEventFunction(VM_EVENT_DOS_INIT_KERNEL_READY,AddVMEventFunctionFuncPair(MIXER_DOS_Boot));
 

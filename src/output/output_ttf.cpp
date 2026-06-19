@@ -30,6 +30,7 @@
 #include "inout.h"
 #include "bios.h"
 #include "regs.h"
+#include "cpu.h"
 #include "control.h"
 #include "menudef.h"
 #include "callback.h"
@@ -69,6 +70,7 @@ uint16_t cpMap_AX[32] = {
 #endif
 
 Render_ttf ttf;
+bool enablePercLimit = true;
 bool char512 = true;
 bool showbold = true;
 bool showital = true;
@@ -213,7 +215,7 @@ Bitu OUTPUT_TTF_SetSize() {
         GFX_SetResizeable(false);
         sdl.window = GFX_SetSDLSurfaceWindow(sdl.draw.width + sdl.clip.x, sdl.draw.height + sdl.clip.y);
         sdl.surface = sdl.window?SDL_GetWindowSurface(sdl.window):NULL;
-        if (firstsize && (posx < 0 || posy < 0) && !(posx == -2 && posy == -2) && text) {
+        if (/* firstsize && */ (posx < 0 || posy < 0) && !(posx == -2 && posy == -2) && text) {
             firstsize=false;
             if (sdl.displayNumber==0) SDL_SetWindowPosition(sdl.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
             else SDL_SetWindowPosition(sdl.window, bx, by);
@@ -339,7 +341,7 @@ bool readTTF(const char *fName, bool bold, bool ital) {
     }
     if (!ttf_fh) {
         std::string config_path;
-        Cross::GetPlatformConfigDir(config_path);
+        config_path = Cross::GetPlatformConfigDir();
         struct stat info;
         if (!stat(config_path.c_str(), &info) && (info.st_mode & S_IFDIR)) {
             strcpy(ttfPath, config_path.c_str());
@@ -355,7 +357,7 @@ bool readTTF(const char *fName, bool bold, bool ital) {
     }
     if (!ttf_fh) {
         std::string res_path;
-        Cross::GetPlatformResDir(res_path);
+        res_path = Cross::GetPlatformResDir();
         struct stat info;
         if (!stat(res_path.c_str(), &info) && (info.st_mode & S_IFDIR)) {
             strcpy(ttfPath, res_path.c_str());
@@ -496,69 +498,75 @@ void CheckTTFLimit() {
 }
 
 int setTTFMap(bool changecp) {
-    char text[2];
-    uint16_t uname[4], wcTest[256];
-    int cp = dos.loaded_codepage;
-    for (int i = 0; i < 256; i++) {
-        text[0]=i;
-        text[1]=0;
-        uname[0]=0;
-        uname[1]=0;
-        if (cp == 932 && (halfwidthkana || IS_JEGA_ARCH)) forceswk=true;
-        if (CheckDBCSCP(cp)) dos.loaded_codepage = 437;
-        if (CodePageGuestToHostUTF16(uname,text)) {
-            wcTest[i] = uname[1]==0?uname[0]:i;
-            if (cp == 932 && lowboxdrawmap.find(i)!=lowboxdrawmap.end() && TTF_GlyphIsProvided(ttf.SDL_font, wcTest[i]))
-                cpMap[i] = wcTest[i];
-        }
-        forceswk=false;
-        if (CheckDBCSCP(cp)) dos.loaded_codepage = cp;
-    }
-    uint16_t unimap;
-    int notMapped = 0;
-    for (int y = ((cpMap[1]!=1&&cpMap[1]!=0x263A)||cp==867||(customcp&&(dos.loaded_codepage==customcp||changecp))||(altcp&&(dos.loaded_codepage==altcp||changecp))?0:8); y < 16; y++)
-        for (int x = 0; x < 16; x++) {
-            if (y<8 && (wcTest[y*16+x] == y*16+x || wcTest[y*16+x] == cp437_to_unicode[y*16+x])) unimap = cpMap_copy[y*16+x];
-            else unimap = wcTest[y*16+x];
-            if (!TTF_GlyphIsProvided(ttf.SDL_font, unimap)) {
-                cpMap[y*16+x] = 0;
-                notMapped++;
-                LOG_MSG("Unmapped character: %3d - %4x", y*16+x, unimap);
-            } else
-                cpMap[y*16+x] = unimap;
-        }
-    if (eurAscii != -1 && TTF_GlyphIsProvided(ttf.SDL_font, 0x20ac))
-        cpMap[eurAscii] = 0x20ac;
-    return notMapped;
+	char text[2];
+	uint16_t uname[4], wcTest[256];
+	int cp = dos.loaded_codepage;
+
+	// BUGFIX: If not started with output=ttf, then ttf.SDL_font == NULL and this code will cause a segfault.
+	if (ttf.SDL_font == NULL) return 256;
+
+	for (int i = 0; i < 256; i++) {
+		text[0]=i;
+		text[1]=0;
+		uname[0]=0;
+		uname[1]=0;
+		if (cp == 932 && (halfwidthkana || IS_JEGA_ARCH)) forceswk=true;
+		if (CheckDBCSCP(cp)) dos.loaded_codepage = 437;
+		if (CodePageGuestToHostUTF16(uname,text)) {
+			wcTest[i] = uname[1]==0?uname[0]:i;
+			if (cp == 932 && lowboxdrawmap.find(i)!=lowboxdrawmap.end() && TTF_GlyphIsProvided(ttf.SDL_font, wcTest[i]))
+				cpMap[i] = wcTest[i];
+		}
+		forceswk=false;
+		if (CheckDBCSCP(cp)) dos.loaded_codepage = cp;
+	}
+	uint16_t unimap;
+	int notMapped = 0;
+	for (int y = ((cpMap[1]!=1&&cpMap[1]!=0x263A)||cp==867||(customcp&&(dos.loaded_codepage==customcp||changecp))||(altcp&&(dos.loaded_codepage==altcp||changecp))?0:8); y < 16; y++)
+		for (int x = 0; x < 16; x++) {
+			if (y<8 && (wcTest[y*16+x] == y*16+x || wcTest[y*16+x] == cp437_to_unicode[y*16+x])) unimap = cpMap_copy[y*16+x];
+			else unimap = wcTest[y*16+x];
+			if (!TTF_GlyphIsProvided(ttf.SDL_font, unimap)) {
+				cpMap[y*16+x] = 0;
+				notMapped++;
+				LOG_MSG("Unmapped character: %3d - %4x", y*16+x, unimap);
+			} else
+				cpMap[y*16+x] = unimap;
+		}
+	if (eurAscii != -1 && TTF_GlyphIsProvided(ttf.SDL_font, 0x20ac))
+		cpMap[eurAscii] = 0x20ac;
+	return notMapped;
 }
 
 int setTTFCodePage() {
-    if (!copied) {
-        memcpy(cpMap_copy,cpMap,sizeof(cpMap[0])*256);
-        copied=true;
-    }
-    int cp = dos.loaded_codepage;
-    if (IS_PC98_ARCH) {
-        static_assert(sizeof(cpMap[0])*256 >= sizeof(cpMap_PC98), "sizeof err 1");
-        static_assert(sizeof(cpMap[0]) == sizeof(cpMap_PC98[0]), "sizeof err 2");
-        memcpy(cpMap,cpMap_PC98,sizeof(cpMap[0])*256);
-        return 0;
-    }
+	if (!copied) {
+		memcpy(cpMap_copy,cpMap,sizeof(cpMap[0])*256);
+		copied=true;
+	}
+	int cp = dos.loaded_codepage;
+	if (IS_PC98_ARCH) {
+		static_assert(sizeof(cpMap[0])*256 >= sizeof(cpMap_PC98), "sizeof err 1");
+		static_assert(sizeof(cpMap[0]) == sizeof(cpMap_PC98[0]), "sizeof err 2");
+		memcpy(cpMap,cpMap_PC98,sizeof(cpMap[0])*256);
+		return 0;
+	}
 
-    if (cp) {
-        LOG_MSG("Loaded system codepage: %d\n", cp);
-        int notMapped = setTTFMap(true);
-        if (strcmp(RunningProgram, "LOADLIN") && !dos_kernel_disabled)
-            initcodepagefont();
-#if defined(WIN32) && !defined(HX_DOS)
-        DOSBox_SetSysMenu();
+	if (cp) {
+		LOG_MSG("Loaded system codepage: %d\n", cp);
+		int notMapped = setTTFMap(true);
+#if !defined(OSFREE)
+		if (strcmp(RunningProgram, "LOADLIN") && !dos_kernel_disabled)
+			initcodepagefont();
 #endif
-        if(IS_JEGA_ARCH) memcpy(cpMap,cpMap_AX,sizeof(cpMap[0])*32);
-        if (cp == 932 && halfwidthkana) resetFontSize();
-        refreshExtChar();
-        return notMapped;
-    } else
-        return -1;
+#if defined(WIN32) && !defined(HX_DOS)
+		DOSBox_SetSysMenu();
+#endif
+		if(IS_JEGA_ARCH) memcpy(cpMap,cpMap_AX,sizeof(cpMap[0])*32);
+		if (cp == 932 && halfwidthkana) resetFontSize();
+		refreshExtChar();
+		return notMapped;
+	} else
+		return -1;
 }
 
 void GFX_SelectFontByPoints(int ptsize) {
@@ -572,27 +580,27 @@ void GFX_SelectFontByPoints(int ptsize) {
 	if (ttf.SDL_fontbi) TTF_CloseFont(ttf.SDL_fontbi);
 	SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFont, (int)ttfSize);
 	ttf.SDL_font = TTF_OpenFontRW(rwfont, 1, ptsize);
-    if (ttfSizeb>0) {
-        SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFontb, (int)ttfSizeb);
-        ttf.SDL_fontb = TTF_OpenFontRW(rwfont, 1, ptsize);
-    } else
-        ttf.SDL_fontb = NULL;
-    if (ttfSizei>0) {
-        SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFonti, (int)ttfSizei);
-        ttf.SDL_fonti = TTF_OpenFontRW(rwfont, 1, ptsize);
-    } else
-        ttf.SDL_fonti = NULL;
-    if (ttfSizebi>0) {
-        SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFontbi, (int)ttfSizebi);
-        ttf.SDL_fontbi = TTF_OpenFontRW(rwfont, 1, ptsize);
-    } else
-        ttf.SDL_fontbi = NULL;
-    ttf.pointsize = ptsize;
+	if (ttfSizeb>0) {
+		SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFontb, (int)ttfSizeb);
+		ttf.SDL_fontb = TTF_OpenFontRW(rwfont, 1, ptsize);
+	} else
+		ttf.SDL_fontb = NULL;
+	if (ttfSizei>0) {
+		SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFonti, (int)ttfSizei);
+		ttf.SDL_fonti = TTF_OpenFontRW(rwfont, 1, ptsize);
+	} else
+		ttf.SDL_fonti = NULL;
+	if (ttfSizebi>0) {
+		SDL_RWops *rwfont = SDL_RWFromConstMem(ttfFontbi, (int)ttfSizebi);
+		ttf.SDL_fontbi = TTF_OpenFontRW(rwfont, 1, ptsize);
+	} else
+		ttf.SDL_fontbi = NULL;
+	ttf.pointsize = ptsize;
 	TTF_GlyphMetrics(ttf.SDL_font, 65, NULL, NULL, NULL, NULL, &ttf.width);
 	ttf.height = TTF_FontAscent(ttf.SDL_font)-TTF_FontDescent(ttf.SDL_font);
 	if (ttf.fullScrn) {
-        unsigned int maxWidth, maxHeight;
-        GetMaxWidthHeight(&maxWidth, &maxHeight);
+		unsigned int maxWidth, maxHeight;
+		GetMaxWidthHeight(&maxWidth, &maxHeight);
 		ttf.offX = (maxWidth-ttf.width*ttf.cols)/2;
 		ttf.offY = (maxHeight-ttf.height*ttf.lins)/2;
 	}
@@ -685,7 +693,7 @@ void OUTPUT_TTF_Select(int fsize) {
         }
         const char * colors = ttf_section->Get_string("colors");
         staycolors = strlen(colors) && *colors == '+'; // Always switch to preset value when '+' is specified
-        if ((*colors && (!init_once || !init_twice))|| staycolors) {
+        if ((*colors && (!init_once || !init_twice))|| (staycolors && !ttf.inUse)) {
             if (!setColors(colors,-1)) {
                 LOG_MSG("Incorrect color scheme: %s", colors);
                 //setColors("#000000 #0000aa #00aa00 #00aaaa #aa0000 #aa00aa #aa5500 #aaaaaa #555555 #5555ff #55ff55 #55ffff #ff5555 #ff55ff #ffff55 #ffffff",-1);
@@ -724,6 +732,7 @@ void OUTPUT_TTF_Select(int fsize) {
         winPerc = ttf_section->Get_int("winperc");
         if (winPerc>100||(fsize==2&&GFX_IsFullscreen())||(fsize!=1&&fsize!=2&&(control->opt_fullscreen||static_cast<Section_prop *>(control->GetSection("sdl"))->Get_bool("fullscreen")))) winPerc=100;
         else if (winPerc<25) winPerc=25;
+        enablePercLimit = ttf_section->Get_bool("enableWinPercLimit");
 #if defined(HX_DOS)
         winPerc=100;
 #else
@@ -821,9 +830,22 @@ void OUTPUT_TTF_Select(int fsize) {
     } else
         ttf.fullScrn = false;
 
+    // FIXME: TTF output makes the window non-resizeable, which is a problem, because
+    //        this code picks a font point size designed to fill as much screen as possible!
+    //        Until resizing is an option, limit the window to 2/3 of each dimension. --J.C.
+
     unsigned int maxWidth, maxHeight;
     GetMaxWidthHeight(&maxWidth, &maxHeight);
 
+    // Limit dimensions
+    if(!ttf.fullScrn) {
+        #if !defined(HX_DOS)
+        if(enablePercLimit) {
+            maxWidth = (maxWidth * 2) / 3;
+            maxHeight = (maxHeight * 2) / 3;
+        }
+        #endif
+    }
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW /* SDL drawn menus */
     maxHeight -= mainMenu.menuBarHeightBase * 2;
 #endif
@@ -834,7 +856,7 @@ void OUTPUT_TTF_Select(int fsize) {
         maxHeight -= GetSystemMetrics(SM_CYCAPTION) + GetSystemMetrics(SM_CYBORDER)*2;
     }
 #endif
-    int	curSize = fontSize>=MIN_PTSIZE?fontSize:30;													// no clear idea what would be a good starting value
+    int	curSize = fontSize>=MIN_PTSIZE?fontSize:12;
     int lastGood = -1;
     int trapLoop = 0;
 
@@ -1414,7 +1436,11 @@ void ttf_setlines(int cols, int lins) {
 void ttf_switch_on(bool ss=true) {
     if ((ss&&ttfswitch)||(!ss&&switch_output_from_ttf)) {
         checkcol = 0;
-        if (strcmp(RunningProgram, "LOADLIN")) {
+        /* Do NOT run a real-mode guest interrupt while the guest CPU is in
+         * protected mode (e.g. a game using a DOS extender). CALLBACK_RunRealInt()
+         * would push a real-mode-style frame and corrupt the extender,
+         * causing a #GP storm on the handler's IRETD. */
+        if (strcmp(RunningProgram, "LOADLIN") && !cpu.pmode) {
             uint16_t oldax=reg_ax;
             reg_ax=0x1600;
             CALLBACK_RunRealInt(0x2F);
@@ -1431,7 +1457,7 @@ void ttf_switch_on(bool ss=true) {
         bool OpenGL_using(void), gl = OpenGL_using();
 	(void)gl; // unused var warning
 #if defined(WIN32) && !defined(C_SDL2)
-        //change_output(0); // call OUTPUT_SURFACE_Select() to initialize output before enabling TTF output on Windows builds
+        change_output(0); // call OUTPUT_SURFACE_Select() to initialize output before enabling TTF output on Windows builds
 #endif
         change_output(10); // call OUTPUT_TTF_Select()
         SetVal("sdl", "output", "ttf");

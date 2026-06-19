@@ -62,7 +62,11 @@
 #include <ctime>
 #endif
 
+#if defined(C_SDL2_NET) && C_SDL2_NET
+#include <SDL2/SDL_net.h>
+#else
 #include <SDL_net.h>
+#endif
 
 #if !defined(__MINGW32__) || defined(__MINGW64_VERSION_MAJOR)
 #define WITH_ENET_HEADER

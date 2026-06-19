@@ -1659,6 +1659,18 @@
       <Filter>Sources\builtin</Filter>
     </ClCompile>
     <ClCompile Include="..\src\libs\tinyfiledialogs\tinyfiledialogs.c" />
+    <ClCompile Include="..\src\builtin\ipspatch.cpp">
+      <Filter>Sources\builtin</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\builtin\ipsmake.cpp">
+      <Filter>Sources\builtin</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\mic_input_win32.cpp">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\output\output_direct3d11.cpp">
+      <Filter>Sources\output</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\aviwriter\avi.h">
@@ -1788,6 +1800,9 @@
       <Filter>Sources\hardware</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\nukedopl.h">
+      <Filter>Sources\hardware</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\nukedopl_wf_rom.h">
       <Filter>Sources\hardware</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\opl.h">
@@ -2606,7 +2621,6 @@
     <ClInclude Include="..\src\hardware\snd_pc98\cbus\pcm86io.h">
       <Filter>Sources\hardware\snd_pc98\cbus</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\libs\mt32\Types.h" />
     <ClInclude Include="..\src\gamelink\gamelink.h" />
     <ClInclude Include="..\src\gamelink\scancodes_windows.h" />
     <ClInclude Include="..\src\output\output_gamelink.h" />
@@ -2616,6 +2630,15 @@
     <ClInclude Include="..\include\version_string.h" />
     <ClInclude Include="..\src\hardware\esfmu\esfm.h" />
     <ClInclude Include="..\src\libs\tinyfiledialogs\tinyfiledialogs.h" />
+    <ClInclude Include="..\src\hardware\mic_input_win32.h">
+      <Filter>Sources\hardware</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\output\output_direct3d11.h">
+      <Filter>Sources\output</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\mt32\Types.h">
+      <Filter>Sources\libs\mt32</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\src\winres.rc">

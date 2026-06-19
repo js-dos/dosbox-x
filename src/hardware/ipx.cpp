@@ -39,7 +39,11 @@
 #include "ipx.h"
 #include "ipxserver.h"
 #include "timer.h"
+#if defined(C_SDL2_NET) && C_SDL2_NET
+#include <SDL2/SDL_net.h>
+#else
 #include "SDL_net.h"
+#endif
 #include "programs.h"
 #include "pic.h"
 #include "control.h"

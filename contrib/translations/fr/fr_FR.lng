@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:French (France)
 :DOSBOX-X:CODEPAGE:859
-:DOSBOX-X:VERSION:2025.05.03
+:DOSBOX-X:VERSION:2026.06.02
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Les lignes de cette section seront exécutées au démarrage.
@@ -49,6 +49,9 @@ Annuler
 .
 :CLOSE
 Fermer
+.
+:THEME
+Thème
 .
 :DEBUGCMD
 Commande de débogueur
@@ -150,7 +153,7 @@ Volumes actuels de la table de mixage
 Configuration Sound Blaster
 .
 :CURRENT_MIDICONFIG
-Configuration MIDI actuelle
+Configuration MIDI/OPL actuelle
 .
 :CREATE_IMAGE
 Créer une image disque vierge
@@ -1549,10 +1552,10 @@ Chemin non valide, pas de répertoire, ou répertoire non vide - %s
 
 .
 :SHELL_CMD_RMDIR_FULLTREE_CONFIRM
-Delete directory "%s" and all its subdirectories? (Y/N)?
+Effacer le répertoire "%s" et tous ses sous-répertoires (O/N) ?
 .
 :SHELL_CMD_RMDIR_SINGLE_CONFIRM
-Delete file "%s" (Y/N)?
+Effacer le fichier "%s" (O/N) ?
 .
 :SHELL_CMD_RENAME_ERROR
 Impossible de renommer - %s
@@ -2421,6 +2424,9 @@ Programme de lancement rapide...
 :MENU:mapper_shutdown
 Quitter
 .
+:MENU:mapper_capkeyboard
+Capturer le clavier
+.
 :MENU:mapper_capmouse
 Capturer la souris
 .
@@ -2990,7 +2996,7 @@ Afficher les volumes du mélangeur de sons
 Afficher la configuration Sound Blaster
 .
 :MENU:midi_info
-Afficher la configuration du périphérique MIDI
+Afficher la configuration du périphérique MIDI/OPL
 .
 :MENU:DOSMenu
 DOS
@@ -3511,6 +3517,9 @@ Envoyer touche du menu
 .
 :MENU:sendkey_alttab
 Envoyer Alt+Tab
+.
+:MENU:sendkey_altsysrq
+Enoyer Alt+SysRq/ImpÉcr
 .
 :MENU:sendkey_ctrlesc
 Envoyer Ctrl+Esc
@@ -4118,7 +4127,7 @@ Lance une entrée scriptée au clavier dans un programme DOS lancé.
 
 AUTOTYPE [-list] [-w WAIT] [-p PACE] button_1 [button_2 [...]]
 
-Where:
+Où :
   -list :   affiche tous les noms de boutons disponibles.
   -w WAIT : seconds avant que la saisie commence. Deux secondes par défaut; maximum 30.
   -p PACE : secondes entre chaque frappe. Une demi-seconde par défaut; maximum 10.
@@ -4432,8 +4441,8 @@ Lecteur inexistant ou est monté depuis une image disque.
 :MENU_JP_CPONLY
 Cette fonction n'est disponible que pour le code de page Japonais (932).
 .
-:MENU_CN_CPONLY
-Cette fonction n'est disponible que pour le code de page Chinois (936 ou 950).
+:MENU_CH_CPONLY
+Cette fonction n'est disponible que pour le code de page Chinois (936, 950 ou 951).
 .
 :MENU_GLIDE_ERROR
 La fonction Glide passthrough ne peut pas être activée. Vérifiez l'installation 
@@ -4496,4 +4505,64 @@ Vous avez spécifié un fichier de langue qui utilise un code de page incompatib
 .
 :LANG_CHANGE_CP
 Le fichier de langue spécifié utilise la page de code %d. Voulez-vous passer à cette page de code en conséquence ?.
+.
+:SCALER_LOAD_WARN
+Cette échelle peut ne pas fonctionner correctement ou avoir des effets indésirables :
+
+%s
+
+Voulez-vous forcer le chargement de l'échelle ?
+.
+:PIXEL_SHADER_WARN
+Ce pixel shader peut être inutile ou avoir un effet indésirable.:
+
+%s
+
+Voulez-vous charger le pixel shader malgré tout ?
+
+(Vous pouvez ajouter « forcé » au paramètre Pixel shader pour forcer le chargement du Pixel shader sans ce message)
+.
+:PIXEL_SHADER_LOADED
+Pixel shader chargé - %s
+.
+:MAPPEREDITOR_NOT_AVAILABLE
+L'éditeur de mappage n'est pas disponible actuellement.
+.
+:OPL_REC_COMPLETED
+Enregistrement de la sortie OPL brute dans le fichier :
+
+%s
+.
+:OPL_CAPTURE_FAILED
+Impossible de capturer la sortie Raw OPL car le mode natif ESFM est utilisé par l'application actuelle, ce qui n'est pas pris en charge par 
+le format Raw OPL.
+.
+:TTF_DBCS_ONLY
+Cette fonction n'est disponible que pour les code de pages chinoises/japonaises/coréennes..
+.
+:SAVE_FAILED
+Échec de la sauvegarde de l'état actuel.
+.
+:SAVE_CORRUPTED
+L'état de la sauvegarde est corrompu ! Le programme peut ne pas fonctionner.
+.
+:SAVE_SCREENSHOT
+Enregistrement de la capture d'écran dans le fichier :
+
+%s
+.
+:HELP_ABOUT_VERSION
+DOSBox-X ver.%s (%s %s %s-bit)%s
+.
+:HELP_ABOUT_UPDATED
+Date/heure de compilation : %s
+.
+:HELP_ABOUT_COPYRIGHT
+Copyright %s-%s %s
+.
+:HELP_ABOUT_MAINTAINER
+Mainteneur du projet : %s
+.
+:HELP_ABOUT_HOMEPAGE
+Site de DOSBox-X : %s
 .

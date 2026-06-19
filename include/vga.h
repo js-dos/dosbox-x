@@ -163,7 +163,7 @@ inline MonochromeColor& operator++(MonochromeColor& color)
     return color;
 }
 
-typedef struct {
+struct VGA_Draw {
 	bool resizing;
 	Bitu width;
 	Bitu height;
@@ -173,7 +173,7 @@ typedef struct {
 	Bitu bytes_skip;
 	uint8_t *linear_base;
 	Bitu linear_mask;
-    Bitu planar_mask;
+	Bitu planar_mask;
 	Bitu address_add;
 	Bitu line_length;
 	Bitu address_line_total;
@@ -184,7 +184,7 @@ typedef struct {
 	Bitu split_line;
 	Bitu hsync_events;
 	Bitu byte_panning_shift;
-    Bitu render_step,render_max;
+	Bitu render_step,render_max;
 	struct {
 		double framestart;
 		double vrstart, vrend;		// V-retrace
@@ -210,6 +210,8 @@ typedef struct {
 	} cursor;
 	Drawmode mode;
 	bool has_split;
+	bool must_draw_again;
+	bool must_complete_frame;
 	bool vret_triggered;
 	bool vga_override;
 	bool modeswitch_set;
@@ -219,12 +221,22 @@ typedef struct {
 	Bitu bpp;
 	double clock;
 	double oscclock;
+
+	/* memory write checker will do:
+	 *
+	 * if ((addr-draw_base_planar) < draw_base_size)
+	 *   ...
+	 *
+	 * memory write checking must be as simple as possible because mem write code is called VERY OFTEN */
+    unsigned int draw_base_planar = 0;
+    unsigned int draw_base_size = 0;
+
 	uint8_t cga_snow[80];			// one bit per horizontal column where snow should occur
 
 	/*Color and brightness for monochrome display*/
 	MonochromeColor monochrome_pal;
 	uint8_t monochrome_bright;
-} VGA_Draw;
+};
 
 typedef struct {
 	uint8_t curmode;
@@ -582,6 +594,7 @@ typedef struct {
 	uint8_t	bank_read;
 	uint8_t	bank_write;
 	Bitu	bank_size;
+	uint16_t bank_mask;
 } VGA_SVGA;
 
 typedef union CGA_Latch {
@@ -608,6 +621,7 @@ typedef struct VGA_Memory_t {
     uint32_t    memmask = 0;
     uint32_t    memmask_crtc = 0;       // in CRTC-visible units (depends on byte/word/dword mode)
     uint32_t    memsize_original = 0;	// memsize prior to rounding up to a power of 2
+    uint32_t    vbe_memsize = 0;        // memory size reported through the VBE
 } VGA_Memory;
 
 typedef struct {
@@ -657,6 +671,45 @@ typedef struct VGA_Override_t {
 	uint32_t		start = ~uint32_t(0u);
 } VGA_Override;
 
+enum VGA_DOSBoxIG_VidFormat {
+	DBIGVF_NONE=0,          // none (blank screen)
+	DBIGVF_1BPP=1,		// 1bpp monochrome
+	DBIGVF_4BPP=2,		// 4bpp packed 16-color
+	DBIGVF_8BPP=3,		// 8bpp packed 256-color
+	DBIGVF_15BPP=4,		// 16bpp R:G:B 1:5:5:5
+	DBIGVF_16BPP=5,		// 16bpp R:G:B 5:6:5
+	DBIGVF_24BPP8=6,	// 24bpp RGB
+	DBIGVF_32BPP8=7,	// 32bpp XRGB 8:8:8:8
+	DBIGVF_32BPP10=8,	// 32bpp XRGB 2:10:10:10
+	DBIGVF_1BPP4PLANE=9	// 1bpp planar
+};
+
+typedef struct VGA_DOSBoxIG {
+	bool                    svga = false; /* override VGA output with DOSBoxIG SVGA graphics */
+	bool                    vga_reg_lockout = false; /* lock out standard VGA registers except 3BAh/3DAh and DAC registers */
+	bool                    vga_3da_lockout = false; /* lock out port 3BAh/3DAh */
+	bool                    vga_dac_lockout = false; /* lock out DAC registers */
+	bool			vga_acpal_bypass = false; /* VGA DAC bypass AC palette */
+	bool			override_refresh = false; /* force a refresh rate */
+	bool			vesa_bios_lockout = false; /* disable VESA BIOS modesetting (for Windows driver) */
+	bool			force_A0000 = false; /* force VGA memory map to A0000-AFFFF */
+	unsigned int            width = 16;
+	unsigned int            height = 16;
+	unsigned int		bytes_per_scanline = 0;
+	unsigned int            wa_total = 0,ha_total = 0; /* additional cols/rows to add to get htotal/vtotal */
+	uint16_t		dar_width = 0,dar_height = 0; /* display aspect ratio, if nonzero */
+	uint32_t                vratefp16 = 0; /* video sync rate as a fixed point 16.16 number */
+	uint32_t		display_offset = 0; /* offset in video memory to display */
+	uint32_t		rbank_offset = 0; /* offset of 64KB bank window in video memory */
+	uint32_t		wbank_offset = 0; /* offset of 64KB bank window in video memory */
+	uint8_t                 vidformat = 0; /* video pixel format (VGA_DOSBoxIG_VidFormat) */
+	uint8_t			hpel = 0; /* horizontal pan */
+	uint8_t			vpel = 0; /* vertical pan */
+	uint8_t			hscale = 0; /* horizontal pixel duplication */
+	uint8_t			vscale = 0; /* vertical pixel duplication */
+	uint32_t		ctlreg = 0; /* raw data written to CTL register */
+} VGA_DOSBoxIG;
+
 typedef struct VGA_Type_t {
     VGAModes mode = {};                              /* The mode the vga system is in */
     VGAModes lastmode = {};
@@ -681,6 +734,8 @@ typedef struct VGA_Type_t {
     VGA_LFB lfb = {};
     VGA_Complexity complexity = {};
     VGA_Override overopts = {};
+    VGA_DOSBoxIG dosboxig = {};
+    unsigned int max_svga_width = 0,max_svga_height = 0;
 } VGA_Type;
 
 

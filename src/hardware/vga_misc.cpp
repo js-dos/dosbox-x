@@ -33,6 +33,7 @@ void vga_write_p3d4(Bitu port,Bitu val,Bitu iolen);
 Bitu vga_read_p3d4(Bitu port,Bitu iolen);
 void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen);
 Bitu vga_read_p3d5(Bitu port,Bitu iolen);
+extern bool vga_render_wait_for_changes;
 extern void DISP2_RegisterPorts(void);
 extern bool DISP2_Active(void);
 
@@ -56,10 +57,13 @@ Bitu vga_read_p3da(Bitu port,Bitu iolen) {
 	uint8_t retval = vga_p3da_undefined_bits;
 	double timeInFrame = PIC_FullIndex()-vga.draw.delay.framestart;
 
+	if (vga.dosboxig.vga_3da_lockout)
+		return 0;
+
 	// If the game or demo is wasting time in a loop polling this register (not merely reading to
 	// clear the port 3C0h flip/flop) then now is as good a time as any to render the VGA raster
 	// up to the current point.
-	if (vga_render_on_demand && !vga.attr.disabled/*screen not disabled*/ && !vga.internal.attrindex/*attribute controller flipflop clear*/) VGA_RenderOnDemandUpTo();
+	if (vga_render_on_demand && !vga_render_wait_for_changes && !vga.attr.disabled/*screen not disabled*/ && !vga.internal.attrindex/*attribute controller flipflop clear*/) VGA_RenderOnDemandUpTo();
 
 	vga.internal.attrindex=false;
 	vga.tandy.pcjr_flipflop=false;
@@ -71,17 +75,27 @@ Bitu vga_read_p3da(Bitu port,Bitu iolen) {
 	if (timeInFrame >= vga.draw.delay.vdend) {
 		retval |= 1; // vertical blanking
 	} else {
-		double timeInLine=fmod(timeInFrame,vga.draw.delay.htotal);
-		if (timeInLine >= vga.draw.delay.hblkstart && 
-				timeInLine <= vga.draw.delay.hblkend) {
+		const double timeInLine = fmod(timeInFrame,vga.draw.delay.htotal);
+		if (timeInLine >= vga.draw.delay.hblkstart && timeInLine <= vga.draw.delay.hblkend)
 			retval |= 1; // horizontal blanking
-		}
 	}
 
-	if (timeInFrame >= vga.draw.delay.vrstart &&
-			timeInFrame <= vga.draw.delay.vrend) {
+	if (timeInFrame >= vga.draw.delay.vrstart && timeInFrame <= vga.draw.delay.vrend)
 		retval |= 8; // vertical retrace
-	}
+
+	/* Tseng ET3000/ET4000 cards have additional documented bits:
+	 * [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20IBM%20compatible/Video/VGA/SVGA/Tseng%20Labs/Tseng%20ET4000%20Graphics%20Controller%20%281990%29%2epdf]
+	 *
+	 * bit   0  ~display enable (hblank | vblank)
+	 * bit   1-2 zero
+	 * bit   3   vretrace
+	 * bit   4-5 diagnostic feedback from attribute controller(?)
+	 * bi6   6   zero
+	 * bit   7  ~vretrace (invert of bit 3)
+	 *
+	 * VGAKIT must read bit 7 as a complement of bit 3 to test for ET3000/ET4000 */
+	if (IS_VGA_ARCH && (svgaCard == SVGA_TsengET3K || svgaCard == SVGA_TsengET4K))
+		retval ^= ((retval & 8u) ^ 8u) << 4u;
 
 	vsync_poll_debug_notify();
 	return retval;
@@ -90,6 +104,10 @@ Bitu vga_read_p3da(Bitu port,Bitu iolen) {
 static void write_p3c2(Bitu port,Bitu val,Bitu iolen) {
     (void)port;//UNUSED
     (void)iolen;//UNUSED
+
+	if (vga.dosboxig.vga_reg_lockout)
+		return;
+
 	if((machine==MCH_EGA) && ((vga.misc_output^val)&0xc)) VGA_StartResize();
 	vga.misc_output=(uint8_t)val;
 	Bitu base=(val & 0x1) ? 0x3d0 : 0x3b0;

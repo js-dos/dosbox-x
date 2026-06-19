@@ -37,6 +37,7 @@
 #include "shell.h"
 #include "menudef.h"
 #include "hardware.h"
+#include "../dos/drives.h"
 #include "mapper.h"
 #include "menu.h"
 #include "bios.h"
@@ -44,7 +45,9 @@
 #include "jfont.h"
 #include "render.h"
 #include "../ints/int10.h"
+#include "bios_disk.h"
 #include "sdlmain.h"
+#include "cpu.h"
 #if defined(WIN32)
 #include "windows.h"
 RECT monrect;
@@ -61,7 +64,7 @@ extern unsigned int sendkeymap;
 extern std::string langname, configfile, dosbox_title;
 extern int autofixwarn, enablelfn, fat32setver, paste_speed, wheel_key, freesizecap, wpType, wpVersion, wpBG, wpFG, lastset, blinkCursor, msgcodepage;
 extern bool dos_kernel_disabled, force_nocachedir, wpcolon, convertimg, lockmount, enable_config_as_shell_commands, lesssize, load, winrun, winautorun, startcmd, startwait, startquiet, starttranspath, mountwarning, wheel_guest, clipboard_dosapi, noremark_save_state, force_load_state, sync_time, manualtime, ttfswitch, loadlang, showbold, showital, showline, showsout, char512, printfont, rtl, gbk, chinasea, uao, showdbcs, dbcs_sbcs, autoboxdraw, halfwidthkana, ticksLocked, outcon, enable_dbcs_tables, show_recorded_filename, internal_program, pipetmpdev, notrysgf, uselangcp, incall;
-
+extern bool clipboard_biospaste;
 /* This registers a file on the virtual drive and creates the correct structure for it*/
 
 static uint8_t exe_block[]={
@@ -175,20 +178,30 @@ static Bitu PROGRAMS_Handler(void) {
 
 /* Main functions used in all program */
 
-Program::Program() {
-	/* Find the command line and setup the PSP */
-	psp = new DOS_PSP(dos.psp());
-	/* Scan environment for filename */
-	PhysPt envscan=PhysMake(psp->GetEnvironment(),0);
-	while (mem_readb(envscan)) envscan+=(PhysPt)(mem_strlen(envscan)+1);	
-	envscan+=3;
-	CommandTail tail;
-    MEM_BlockRead(PhysMake(dos.psp(),CTBUF+1),&tail,CTBUF+1);
-    if (tail.count<CTBUF) tail.buffer[tail.count]=0;
-    else tail.buffer[CTBUF-1]=0;
-	char filename[256+1];
-	MEM_StrCopy(envscan,filename,256);
-	cmd = new CommandLine(filename,tail.buffer);
+Program::Program(const unsigned int fl) {
+	if (dos_kernel_disabled && !(fl & prg_nopsp))
+		LOG(LOG_MISC,LOG_DEBUG)("Program constructor: DOS kernel disabled and prg_nopsp was not specified");
+
+	if (!dos_kernel_disabled && !(fl & prg_nopsp)) {
+		/* Find the command line and setup the PSP */
+		psp = new DOS_PSP(dos.psp());
+		/* Scan environment for filename */
+		PhysPt envscan=PhysMake(psp->GetEnvironment(),0);
+		while (mem_readb(envscan)) envscan+=(PhysPt)(mem_strlen(envscan)+1);	
+		envscan+=3;
+		CommandTail tail;
+		MEM_BlockRead(PhysMake(dos.psp(),CTBUF+1),&tail,CTBUF+1);
+		if (tail.count<CTBUF) tail.buffer[tail.count]=0;
+		else tail.buffer[CTBUF-1]=0;
+		char filename[256+1];
+		MEM_StrCopy(envscan,filename,256);
+		cmd = new CommandLine(filename,tail.buffer);
+	}
+	else {
+		psp = NULL;
+		cmd = NULL;
+	}
+
 	exit_status = 0;
 }
 
@@ -711,7 +724,7 @@ private:
 		if (configdir) {
 			// write file to the default config directory
 			std::string config_path;
-			Cross::GetPlatformConfigDir(config_path);
+			config_path = Cross::GetPlatformConfigDir();
 			struct stat info;
 			if (!stat(config_path.c_str(), &info) || !(info.st_mode & S_IFDIR)) {
 #ifdef WIN32
@@ -817,6 +830,10 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
             } else if (!strcasecmp(pvar.c_str(), "sdl")) {
                 modifier = section->Get_string("clip_key_modifier");
                 paste_speed = section->Get_int("clip_paste_speed");
+                const char* pastebios = section->Get_string("clip_paste_bios");
+                if(!strcasecmp(pastebios, "default") || !strcasecmp(pastebios, "true") || !strcmp(pastebios, "1")) clipboard_biospaste = true;
+                else if(!strcasecmp(pastebios, "false") || !strcmp(pastebios, "0")) clipboard_biospaste = false;
+                mainMenu.get_item("clipboard_biospaste").check(clipboard_biospaste).refresh_item(mainMenu);
                 if (!strcasecmp(inputline.substr(0, 16).c_str(), "mouse_wheel_key=")) {
                     wheel_key = section->Get_int("mouse_wheel_key");
                     wheel_guest=wheel_key>0;
@@ -1004,8 +1021,10 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
                     } else if (set_ver((char *)ver))
                         dos_ver_menu(false);
                 } else if (!strcasecmp(inputline.substr(0, 4).c_str(), "ems=")) {
+#if !defined(OSFREE)
                     EMS_DoShutDown();
                     EMS_Startup(NULL);
+#endif
                     update_dos_ems_menu();
                 } else if (!strcasecmp(inputline.substr(0, 32).c_str(), "shell configuration as commands=")) {
                     enable_config_as_shell_commands = section->Get_bool("shell configuration as commands");
@@ -1284,6 +1303,617 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
     }
 }
 
+#if !defined(OSFREE)
+uint8_t device_nextdrive = 0;
+#endif
+
+#if !defined(OSFREE)
+uint8_t imageDiskMSDOSBlockDevice::Read_AbsoluteSector(uint32_t sectnum, void * data) {
+	const unsigned int max_sects = (bdevbuf_sz - 16) / sector_size;
+	if (max_sects == 0) return 0x05;
+
+	const uint16_t count = 1;
+	const uint32_t sector = sectnum;
+	const uint16_t strategy = mem_readw(devhdr+6);
+	const uint16_t intrupt = mem_readw(devhdr+8);
+	unsigned char *p_data = (unsigned char*)data;
+
+	uint16_t oldbx = reg_bx;
+	uint16_t oldds = SegValue(ds);
+	uint16_t oldes = SegValue(es);
+
+	DOS_DEVHDR::req_rwio req = {0};
+	req.hdr.record_length = sizeof(req);
+	req.hdr.unit_code = unit_code;
+	req.hdr.cmd_code = DEVFUNC_READ;
+	req.xfer_addr = RealMake(bdevbuf_seg+1,0);
+	req.count = count;
+	req.ptr_volid = RealMake(bdevbuf_seg,0);
+	if (attr & DEVATTRBLK_EXTENDED) {
+		req.start_sector = 0xFFFF;
+		req.start_sector32 = sector;
+	}
+	else {
+		if (sector > 0xFFFFu) return 0x05;
+		req.start_sector = sector;
+		req.start_sector32 = 0;
+	}
+	req.media_dpb = media_dpb;
+	MEM_BlockWrite(PhysMake(dos.dcp,0),&req,sizeof(req));
+
+	LOG(LOG_MISC,LOG_DEBUG)("Block device read devseg=%x sectnum %x devseg %x strat %x intr %x xfer=%x:%x",
+		devseg,sectnum,devseg,strategy,intrupt,
+		req.xfer_addr>>16,req.xfer_addr&0xFFFFu);
+
+	reg_bx = 0;
+	SegSet16(ds, devseg);
+	SegSet16(es, dos.dcp);
+	CALLBACK_RunRealFar(devseg, strategy);
+	CALLBACK_RunRealFar(devseg, intrupt);
+	reg_bx = oldbx;
+	SegSet16(es, oldes);
+	SegSet16(ds, oldds);
+
+	MEM_BlockRead(PhysMake(dos.dcp,0),&req,sizeof(req));
+
+	LOG(LOG_MISC,LOG_DEBUG)("--result status=%x count=%u",
+		req.hdr.status,req.count);
+
+	if (req.hdr.status & 0x8000) return 0x05;/*error*/
+	if (req.count == 0) return 0x05;/*error*/
+
+	MEM_BlockRead(PhysMake(bdevbuf_seg+1,0),p_data,sector_size);
+        return 0;
+}
+#endif
+
+#if !defined(OSFREE)
+uint8_t imageDiskMSDOSBlockDevice::Write_AbsoluteSector(uint32_t sectnum, const void * data) {
+	const unsigned int max_sects = (bdevbuf_sz - 16) / sector_size;
+	if (max_sects == 0) return 0x05;
+
+	const uint16_t count = 1;
+	const uint32_t sector = sectnum;
+	const uint16_t strategy = mem_readw(devhdr+6);
+	const uint16_t intrupt = mem_readw(devhdr+8);
+	const unsigned char *p_data = (const unsigned char*)data;
+
+	uint16_t oldbx = reg_bx;
+	uint16_t oldds = SegValue(ds);
+	uint16_t oldes = SegValue(es);
+
+	DOS_DEVHDR::req_rwio req = {0};
+	req.hdr.record_length = sizeof(req);
+	req.hdr.unit_code = unit_code;
+	req.hdr.cmd_code = DEVFUNC_WRITE;
+	req.xfer_addr = RealMake(bdevbuf_seg+1,0);
+	req.count = count;
+	req.ptr_volid = RealMake(bdevbuf_seg,0);
+	if (attr & DEVATTRBLK_EXTENDED) {
+		req.start_sector = 0xFFFF;
+		req.start_sector32 = sector;
+	}
+	else {
+		if (sector > 0xFFFFu) return 0x05;
+		req.start_sector = sector;
+		req.start_sector32 = 0;
+	}
+	req.media_dpb = media_dpb;
+	MEM_BlockWrite(PhysMake(dos.dcp,0),&req,sizeof(req));
+	MEM_BlockWrite(PhysMake(bdevbuf_seg+1,0),p_data,sector_size);
+
+	LOG(LOG_MISC,LOG_DEBUG)("Block device write devseg=%x sectnum %x devseg %x strat %x intr %x xfer=%x:%x",
+		devseg,sectnum,devseg,strategy,intrupt,
+		req.xfer_addr>>16,req.xfer_addr&0xFFFFu);
+
+	reg_bx = 0;
+	SegSet16(ds, devseg);
+	SegSet16(es, dos.dcp);
+	CALLBACK_RunRealFar(devseg, strategy);
+	CALLBACK_RunRealFar(devseg, intrupt);
+	reg_bx = oldbx;
+	SegSet16(es, oldes);
+	SegSet16(ds, oldds);
+
+	MEM_BlockRead(PhysMake(dos.dcp,0),&req,sizeof(req));
+
+	LOG(LOG_MISC,LOG_DEBUG)("--result status=%x count=%u",
+		req.hdr.status,req.count);
+
+	if (req.hdr.status & 0x8000) return 0x05;/*error*/
+	if (req.count == 0) return 0x05;/*error*/
+
+        return 0;
+}
+#endif
+
+#if !defined(OSFREE)
+bool imageDiskMSDOSBlockDevice::detectDiskChange(void) {
+	return false;//TODO
+}
+#endif
+
+#if !defined(OSFREE)
+imageDiskMSDOSBlockDevice::imageDiskMSDOSBlockDevice() : imageDisk(ID_MSDOSBLOCKDEV) {
+}
+#endif
+
+#if !defined(OSFREE)
+imageDiskMSDOSBlockDevice::~imageDiskMSDOSBlockDevice() {
+}
+#endif
+
+#if !defined(OSFREE)
+bool DeviceLoad(const std::string &device,const std::string &devparm) {
+	bool user_wants_mcb_per_driver = false;
+	uint16_t devseg = 0,ofs,attr;
+	bool adj_mcb_base = false;
+	uint16_t stacksz = 256u;
+
+	std::string devname = device;
+	{
+		const char *s = strrchr(device.c_str(),'\\');
+		if (s && *s) {
+			s++;
+			if (*s) devname = s;
+		}
+	}
+
+	Section_prop * section=static_cast<Section_prop *>(control->GetSection("config"));
+
+	if (section->Get_bool("device driver mcb"))
+		user_wants_mcb_per_driver = true;
+
+	/* reduce our executable image down to only the PSP segment to maximize memory for the device driver load */
+	unsigned int psp_sz = 0x80 + devname.length() + 1 + devparm.length() + 3u + stacksz;
+	uint16_t psp_blocks = (psp_sz + 15u) / 16u; /* just enough for a PSP segment so DOS exit is possible -- we don't care about the command tail either */
+	uint16_t blocks = psp_blocks;
+	if (!DOS_ResizeMemory(dos.psp(),&blocks))
+		return false;
+
+	/* free the environment block associated with the PSP */
+	{
+		DOS_PSP p(dos.psp());
+		const uint16_t s = p.GetEnvironment();
+		if (s != 0) {
+			DOS_FreeMemory(s);
+			p.SetEnvironment(0);
+		}
+	}
+
+	/* relocate PSP segment to end of memory, if possible, to help load the driver image as low as possible
+	 * and try to avoid leaving behind small blocks of free memory behind */
+	{
+		uint16_t pmemstrat = DOS_GetMemAllocStrategy();
+		DOS_SetMemAllocStrategy(2/*lastfit*/);
+		uint16_t blocks = psp_blocks;
+		uint16_t newpsp = 0;
+		bool ok = DOS_AllocateMemory(&newpsp,&blocks);
+		DOS_SetMemAllocStrategy(pmemstrat);
+
+		if (ok && newpsp) {
+			LOG(LOG_MISC,LOG_DEBUG)("Relocating PSP segment from %x to %x",dos.psp(),newpsp);
+			mem_memcpy(PhysMake(newpsp,0),PhysMake(dos.psp(),0),psp_blocks << 4u);
+			DOS_FreeMemory(dos.psp());
+			dos.psp(newpsp);
+
+			/* update the pointer to the Job File Table to prevent breaking all file I/O past this point */
+			real_writew(dos.psp(),0x36,dos.psp());
+
+			DOS_MCB dev_mcb((uint16_t)(dos.psp()-1));
+			dev_mcb.SetPSPSeg(dos.psp());
+
+			CPU_SetSegGeneral(cs,dos.psp());
+			CPU_SetSegGeneral(ds,dos.psp());
+			CPU_SetSegGeneral(es,dos.psp());
+		}
+	}
+
+	/* redirect instruction pointer to PSP:0 so that CONFIG exits immediately after this function returns */
+	reg_ip = 0;
+
+	/* redirect the stack pointer */
+	CPU_SetSegGeneral(ss,dos.psp());
+	reg_esp = psp_sz - 2u;
+
+	/* allocate a new memory block to hold the device driver image. */
+	/* ownership remains with CONFIG unless successful driver init and initialization, so that on error it is freed automatically */
+	blocks = 0xFFFFu;
+	if (DOS_AllocateMemory(&devseg,&blocks)) E_Exit("Allocate memory: memory availability check actually allocated memory unexpectedly");
+	LOG(LOG_MISC,LOG_DEBUG)("Device driver load: %u bytes available",(unsigned int)blocks * 16u);
+
+	if (!DOS_AllocateMemory(&devseg,&blocks))
+		return false;
+
+	uint8_t devseg_mcb[16];
+	MEM_BlockRead(PhysMake(devseg-1,0),devseg_mcb,16);
+
+	/* if the allocated block is the first in the chain, and the CONFIG shell is active, and the MCB block is
+	 * owned by this program, we might be able to load over the MCB block and write a new one at the end of
+	 * the image and adjust the MCB start in order to pack the drivers together into the DOS segment like
+	 * real MS-DOS does. */
+	if (!user_wants_mcb_per_driver && first_shell && first_shell->config_shell && devseg == (dos_infoblock.GetFirstMCB()+1)) {
+		DOS_MCB mcb(devseg-1u);
+
+		/* this program must own the PSP segment (because we allocated it) */
+		if (mcb.GetPSPSeg() == 0 || mcb.GetPSPSeg() == dos.psp()) {
+			LOG(LOG_MISC,LOG_DEBUG)("Allocated memory for driver is the first in MCB chain, may adjust it forward");
+			adj_mcb_base = true;
+			devseg--; /* load overtop the MCB */
+		}
+	}
+
+	LOG(LOG_MISC,LOG_DEBUG)("Device driver load area: segment %x-%x for driver '%s'",(unsigned int)devseg,(unsigned int)(devseg+blocks-1u),device.c_str());
+
+	/* Use DOS_Execute() with special device driver flag value, which loads it like an overlay.
+	 * Contrary to what you've probably been told about device drivers, they do not have to be
+	 * flat COM type images. They can be EXE files too (MZ header with relocation table and
+	 * everything), in which case the device driver header is within the first 18 bytes of the
+	 * resident image.
+	 *
+	 * If you've ever wondered how MS-DOS allows EMM386.EXE to work as both an executable program
+	 * AND a device driver, and how DEVICE=C:\DOS\EMM386.EXE is even allowed, that is how. */
+	if (!DOS_Execute(device.c_str(),devseg | ((devseg+blocks)<<16u),DOSEXEC_DEVICEDRIVER)) {
+		if (adj_mcb_base) MEM_BlockWrite(PhysMake(devseg,0),devseg_mcb,16); /* put the MCB back */
+		return false;
+	}
+
+	/* FIXME: Apparently you are allowed to put multiple device drivers in one file.
+	 *        That would suggest that the header could have some valid next pointer
+	 *        instead of FFFF:FFFF.
+	 *
+	 *        I do not have any such driver to test with, therefore, that is not supported.
+	 *
+	 *        Guess: If it's a flat SYS file, maybe you can't do that. Maybe.
+	 *               If it's an EXE file, you could do that, because the relocation
+	 *               table could automatically set the segment value properly to
+	 *               point to the next driver. */
+	if (real_readd(devseg,0) != 0xFFFFFFFF) {
+		LOG(LOG_MISC,LOG_DEBUG)("FIXME: Device driver files with multiple drivers inside it not yet supported");
+	}
+
+	attr = real_readw(devseg,4);
+	LOG(LOG_MISC,LOG_DEBUG)("Device driver attributes: %x",attr);
+	if (attr & DEVATTR_ISCHAR) {
+		std::string blah;
+
+		if (attr & DEVATTRCHR_IOCTL_CTLSTRINGS) blah += " ctlstrings";
+		if (attr & DEVATTRCHR_IOCTL_OUTPUT_UNTIL_BUSY) blah += " outubusy";
+		if (attr & DEVATTRCHR_OPENCLOSE) blah += " openclose";
+		if (attr & DEVATTRCHR_INT29) blah += " int29";
+		if (attr & DEVATTRCHR_CLOCK) blah += " CLOCK$";
+		if (attr & DEVATTRCHR_NULL) blah += " NULL";
+		if (attr & DEVATTRCHR_CONOUT) blah += " CONOUT";
+		if (attr & DEVATTRCHR_CONIN) blah += " CONIN";
+
+		LOG(LOG_MISC,LOG_DEBUG)("Supports:%s",blah.c_str());
+	}
+	else {
+		std::string blah;
+
+		if (attr & DEVATTRBLK_IOCTL_CTLSTRINGS) blah += " ctlstrings";
+		if (attr & DEVATTRBLK_IOCTL_MEDIA_FAT_BYTE) blah += " mediafatbyte";
+		if (attr & DEVATTRBLK_OPENCLOSEREMOVABLE) blah += " opencloseremove";
+		if (attr & DEVATTRBLK_IBM_DRIVE_SHARED) blah += " ibmdriveshared";
+		if (attr & DEVATTRBLK_IOCTL_GEN) blah += " ioctl-generic";
+		if (attr & DEVATTRBLK_EXTENDED) blah += " extended>32mb";
+
+		LOG(LOG_MISC,LOG_DEBUG)("Supports:%s",blah.c_str());
+	}
+
+	/* Call strategy routine in driver so it knows where to look for structure, give it ES:BX = dos.dcp:0 */
+	ofs = real_readw(devseg,0x6);
+	reg_bx = 0; CPU_SetSegGeneral(ds,devseg);
+	CPU_SetSegGeneral(es,dos.dcp);
+	LOG(LOG_MISC,LOG_DEBUG)("Calling device driver strategy routine at %x:%x",devseg,ofs);
+	CALLBACK_RunRealFar(devseg,ofs); /* no return value */
+
+	/* INIT */
+	{
+		struct DOS_DEVHDR::req_init s;
+		memset(&s,0,sizeof(s));
+
+		if (dos.version.major >= 4)
+			s.hdr.record_length = 25;
+		else
+			s.hdr.record_length = 22;
+
+		/* init arguments */
+		/* NTS: This is also not documented by Microsoft apparently, but the init string apparently includes
+		 *      the name of the device driver. It's not just the text following the device.
+		 *
+		 *      Apparently 'DEVICE=C:\DOS\BLAH.SYS /X /Y /Z'
+		 *      will produce an init string of 'BLAH.SYS /X /Y /Z' not '/X /Y /Z'
+		 *
+		 *      RAMDRIVE.SYS is hardcoded to assume this. If we don't prepend the driver name into the init
+		 *      str the first command line switch will be silently ignored.
+		 *
+		 *      Sometimes I wonder if the MS-DOS environment was chaotic and buggy purely because so many
+		 *      programmers had to guess and hack around to figure things out like that from lack of good
+		 *      or any documentation. */
+		{
+			unsigned int i=0;
+			const char *s;
+
+			s = devname.c_str();
+			LOG(LOG_MISC,LOG_DEBUG)("Init device name '%s'",s);
+			while (*s) real_writeb(dos.psp(),0x80+(i++),*s++);
+
+			real_writeb(dos.psp(),0x80+(i++),' ');
+
+			s = devparm.c_str();
+			LOG(LOG_MISC,LOG_DEBUG)("Init str '%s'",s);
+			while (*s) real_writeb(dos.psp(),0x80+(i++),*s++);
+
+			/* \r\n terminated */
+			/* OAKCDROM.SYS requires \r\n, or else scans memory for eternity */
+			real_writeb(dos.psp(),0x80+(i++),0x0D);
+			real_writeb(dos.psp(),0x80+(i++),0x0A);
+
+			/* NULL terminator */
+			real_writeb(dos.psp(),0x80+(i++),0);
+
+			assert((0x80+i) <= (psp_sz - stacksz));
+		}
+
+		/* block device: fill in drive number so RAMDRIVE.SYS can properly claim anything but drive A: */
+		/* NTS: If a block device reports multiple units, that means it occupies consecutive drive letters.
+		 *      If we can't guarantee that, that might be a problem. Maybe. */
+		if (!(attr & DEVATTR_ISCHAR)) {
+			s.drive_num = device_nextdrive;
+
+			while (s.drive_num<DOS_DRIVES && Drives[s.drive_num]) s.drive_num++;
+
+			if (s.drive_num >= DOS_DRIVES) {
+				if (adj_mcb_base) MEM_BlockWrite(PhysMake(devseg,0),devseg_mcb,16); /* put the MCB back */
+				LOG(LOG_MISC,LOG_DEBUG)("No available drive letters for block device");
+				return false;
+			}
+		}
+
+		s.bpb_ptr = RealMake(dos.psp(),0x80);
+		s.end_ptr = RealMake(devseg+blocks,0);/*tell the driver where the current end is, perhaps as a memory size detect?*/
+		const uint32_t bpb_ptr_initial = s.bpb_ptr;
+		LOG(LOG_MISC,LOG_DEBUG)("Giving device driver in DEVINIT request initial endptr %x:%x initstr %x:%x",devseg+blocks,0,dos.psp(),0x80);
+		s.hdr.cmd_code = DEVFUNC_INIT;
+		MEM_BlockWrite(PhysMake(dos.dcp,0),&s,sizeof(s));
+
+		/* interrupt routine is not expected to accept or return register values but must preserve all registers.
+		 * if device drivers happen to assume things anyway, then, well'll deal with that later */
+		ofs = real_readw(devseg,0x8);
+		LOG(LOG_MISC,LOG_DEBUG)("Calling device driver interrupt routine (DEVINIT request) at %x:%x",devseg,ofs);
+		CALLBACK_RunRealFar(devseg,ofs); /* no return value */
+
+		/* so what did the driver do with the request? */
+		MEM_BlockRead(PhysMake(dos.dcp,0),&s,sizeof(s));
+
+		/* programming experience suggests that DOS doesn't give a damn about the status word of INIT,
+		 * but if you want to fail loading, set end_ptr == 0. If DOS did give a crap, my old SBSYS device
+		 * driver experiment from 1995 would have failed to run at all--I just realized today there's a bug
+		 * in the code that sets the error bit in status word only because AL != 0 having come from playing
+		 * audio directly to the SB DSP chip (usually 0x80)
+		 *
+		 * Some device drivers indicate failure by setting end_ptr to the first byte of their device driver,
+		 * instead of NULL, because doing so effectively means leaving behind zero bytes of memory. */
+
+		/* did the driver zero the end ptr or set it too far back? */
+		uint32_t newend_seg = s.end_ptr >> 16;
+		uint32_t newend_ofs = s.end_ptr & 0xFFFFu;
+		LOG(LOG_MISC,LOG_DEBUG)("Device driver returned new end_ptr %x:%x",newend_seg,newend_ofs);
+
+		/* normalize the pointer to determine how many blocks to keep */
+		newend_seg += newend_ofs >> 4u;
+		newend_ofs &= 0xFu;
+		LOG(LOG_MISC,LOG_DEBUG)("Device driver returned new end_ptr (normalized) %x:%x",newend_seg,newend_ofs);
+
+		if (newend_ofs) {
+			newend_seg++;
+			newend_ofs = 0;
+		}
+		LOG(LOG_MISC,LOG_DEBUG)("Device driver returned new end_ptr (as segment) %x",newend_seg);
+
+		if (newend_seg == 0 || PhysMake(newend_seg,newend_ofs) == PhysMake(devseg,0)) { /* normal error out */
+			/* don't need to say anything, the driver will normally say it failed and probably why */
+			LOG(LOG_MISC,LOG_DEBUG)("Device driver indicates normal error out by setting the end_ptr to effectively remove itself from memory");
+			if (adj_mcb_base) MEM_BlockWrite(PhysMake(devseg,0),devseg_mcb,16); /* put the MCB back */
+			return false;
+		}
+		else if (
+			PhysMake(newend_seg,newend_ofs) < PhysMake(devseg,32)/*oh come on, keep at least 32 bytes of yourself around!*/ ||
+			PhysMake(newend_seg,newend_ofs) > PhysMake(devseg+blocks,0)/*you cannot make your driver bigger than the original size!*/) {
+			LOG(LOG_MISC,LOG_DEBUG)("Device driver indicates error with invalid end_ptr");
+			if (adj_mcb_base) MEM_BlockWrite(PhysMake(devseg,0),devseg_mcb,16); /* put the MCB back */
+			return false;
+		}
+
+		assert(newend_seg > devseg);
+		uint32_t drvszseg = newend_seg - devseg;
+
+		LOG(LOG_MISC,LOG_DEBUG)("Device driver will occupy %x paragraphs (%u bytes)",drvszseg,drvszseg * 16u);
+
+		if (adj_mcb_base) {
+			uint16_t nseg = devseg + drvszseg;
+			uint16_t xseg = devseg + blocks;
+
+			/* put the MCB in the new location and update the size */
+			MEM_BlockWrite(PhysMake(nseg,0),devseg_mcb,16);
+			LOG(LOG_MISC,LOG_DEBUG)("Moving MCB chain base from %x to %x",dos_infoblock.GetFirstMCB(),nseg);
+
+			DOS_MCB mcb(nseg);
+			assert(xseg >= nseg);
+			mcb.SetSize(xseg - nseg);
+			dos_infoblock.SetFirstMCB(dos.firstMCB=nseg);
+		}
+		else {
+			blocks = drvszseg;
+			if (!DOS_ResizeMemory(devseg,&blocks))
+				return false;
+		}
+
+		if (s.bpb_ptr && s.bpb_ptr != bpb_ptr_initial && !(attr & DEVATTR_ISCHAR)/*block device*/) {
+			/* the init str ptr is changed in block devices to a pointer to BPB structures. */
+			/* The MS-DOS source code provides documentation on the device driver interface,
+			 * but the unclear way it is written implies that this is a pointer to an array of BPB structures.
+			 * In reality, it's an array of BPB structure pointers (the offset field only) that point to BPB
+			 * structures. Old Microsoft shit documentation, as usual.
+			 *
+			 * But at least in the MS-DOS 4.0 source code, this is much clearer from the ASM files that make up RAMDRIVE.SYS.
+			 *
+			 * The BPB structures provided by the driver follow the exact same structure as the BPB on disk. */
+			LOG(LOG_MISC,LOG_DEBUG)("Device driver set BPB array pointer to %04x:%04x and returned %u units",
+				s.bpb_ptr >> 16,s.bpb_ptr & 0xFFFFu,s.num_of_units);
+
+			/* adjust nextdrive by the number of units reported */
+			device_nextdrive = s.drive_num + s.num_of_units;
+
+			/* FIXME: I need a block device driver to test that provides multiple units from one driver */
+			if (s.num_of_units > 1) LOG(LOG_MISC,LOG_DEBUG)("FIXME: Multiple units from one device driver not yet supported");
+
+			/* Make a drive letter for each unit */
+			for (unsigned int i=0;i < s.num_of_units && i < 1/*<--remove this when multiple units supported*/;i++) {
+				uint16_t offset = real_readw(s.bpb_ptr>>16,(s.bpb_ptr&0xFFFFu)+(i*2));
+				if (offset == 0xFFFF) break; /* RAMDRIVE.SYS seems to fill entries past num_of_units with 0xFFFF */
+
+				uint8_t newdrv = s.drive_num + i;
+				if (newdrv < DOS_DRIVES && Drives[newdrv]) {
+					LOG(LOG_MISC,LOG_DEBUG)("Drive %c is already taken",newdrv+'A');
+					while (newdrv < DOS_DRIVES && Drives[newdrv]) newdrv++;
+
+					if (newdrv < DOS_DRIVES) {
+						LOG(LOG_MISC,LOG_DEBUG)("Attaching block device to drive %c instead",newdrv+'A');
+					}
+					else {
+						LOG(LOG_MISC,LOG_DEBUG)("There is no available drive letter for the block device");
+						continue;
+					}
+				}
+
+				/* assume the largest possible structure.
+				 * I don't have yet a device driver that uses the full structure or
+				 * that provides a disk larger than 32MB (RAMDRIVE.SYS limits itself to 32MB or less).
+				 * doing this also allows possible FAT32 support if a block device can actually support that.
+				 *
+				 * Maybe when Microsoft first defined this interface they should have designed it so the
+				 * device driver can indicate how many bytes the BPB structure occupies. */
+				FAT_BootSector::bpb_union_t bpb;
+				unsigned int bpb_sz = 13;/*assume structure according to MS-DOS 2.0 documentation that ends afer "FAT sector count"*/
+
+				LOG(LOG_MISC,LOG_DEBUG)("Reading BPB from driver at %04x:%04x (assuming up to %u bytes)",devseg,offset,(unsigned int)sizeof(bpb));
+				MEM_BlockRead(PhysMake(devseg,offset),&bpb,sizeof(bpb));
+
+				/* FIXME: MS-DOS 2.0 driver specification only mentions fields up to "number of sectors occupied by FAT".
+				 *
+				 *        RAMDRIVE.SYS fills out the BPB only up to the first 16 bits of the 32-bit "hidden sectors" field.
+				 *        In any case, anything beyond the media descriptor byte is not necessarily valid data. The BPB
+				 *        pointer it returns points directly into the in-memory image of the boot sector of the RAM disk.
+				 *
+				 *        If Microsoft had only thought while writing MS-DOS 2.0 to put a 16-bit or even 8-bit "size of struct"
+				 *        field at the beginning of the BPB struct in memory, it would be much easier to know whether structure members
+				 *        are actually there.
+				 *
+				 *        What exactly does MS-DOS expect for a BPB struct if the device driver allows >= 32MB drives?
+				 *        How does Windows 95/98/ME extend this crappy interface so block devices can handle FAT32? */
+
+				if (bpb.is_fat32() && (attr & DEVATTRBLK_EXTENDED)/*supports >=32MB*/)
+					bpb_sz = 29;/*FIXME: Assume that a FAT32 BPB in memory probably ends after the "32-bit FAT sector count" field*/
+				else if (bpb.v.BPB_TotSec16 == 0 && bpb.v.BPB_TotSec32 != 0 && (attr & DEVATTRBLK_EXTENDED)/*supports >=32MB*/)
+					bpb_sz = 25;/*FIXME: Assume that TotSec32 is valid and therefore the BPB struct ends after that field*/
+
+				/* zero out anything in the BPB past the assumed size, because it's probably structures or data specific to the device driver anyway */
+				if (bpb_sz < sizeof(bpb)) {
+					const unsigned int rem = sizeof(bpb) - bpb_sz;
+					assert((rem+bpb_sz) == sizeof(bpb));
+					memset(((char*)(&bpb))+bpb_sz,0,rem);
+				}
+
+				LOG(LOG_MISC,LOG_DEBUG)("BPB: assumed-size=%u bytes/sec=%u sec/clus=%u rsvdsec=%u numfat=%u rootent=%u totsec16=%u mtb=%02xh fatsz16=%u",
+					bpb_sz,
+					bpb.v.BPB_BytsPerSec,
+					bpb.v.BPB_SecPerClus,
+					bpb.v.BPB_RsvdSecCnt,
+					bpb.v.BPB_NumFATs,
+					bpb.v.BPB_RootEntCnt,
+					bpb.v.BPB_TotSec16,
+					bpb.v.BPB_Media,
+					bpb.v.BPB_FATSz16);
+
+				if (bpb.v.BPB_BytsPerSec >= 128 && bpb.v.BPB_BytsPerSec <= SECTOR_SIZE_MAX) {
+					imageDiskMSDOSBlockDevice *bd = new imageDiskMSDOSBlockDevice();
+					bd->attr = attr;
+					bd->unit_code = i;
+					bd->devseg = devseg;
+					bd->devhdr = PhysMake(devseg,0);
+					bd->bpbptr = PhysMake(devseg,offset);
+					bd->media_dpb = bpb.v.BPB_Media;
+					bd->sector_size = bpb.v.BPB_BytsPerSec;
+					if (bpb.v.BPB_TotSec16 == 0)
+						bd->image_length = (uint64_t)bd->sector_size * (uint64_t)bpb.v.BPB_TotSec32;
+					else
+						bd->image_length = (uint64_t)bd->sector_size * (uint64_t)bpb.v.BPB_TotSec16;
+
+					bd->diskSizeK = (bd->image_length + 1023) / 1024;
+
+					InitBdevBuf();
+					if (bd->image_length != 0) {
+						std::vector<std::string> opt;
+						DOS_Drive* nd = new fatDrive(bd,opt);
+						if ((dynamic_cast<fatDrive*>(nd))->created_successfully) {
+							DriveManager::AppendDisk(newdrv, nd);
+							DriveManager::InitializeDrive(newdrv);
+						}
+						else {
+							LOG(LOG_MISC,LOG_DEBUG)("Drive creation failed");
+							delete nd; /* releases and deletes bd */
+						}
+					}
+					else {
+						LOG(LOG_MISC,LOG_DEBUG)("Block device image length == 0, removed");
+						delete bd;
+					}
+				}
+			}
+		}
+	}
+
+	if (!adj_mcb_base) {
+		/* Success. Change ownership of the device driver MCB so it remains in memory when CONFIG exits */
+		DOS_MCB dev_mcb((uint16_t)(devseg-1));
+		dev_mcb.SetPSPSeg(0x0008/*MS-DOS*/);
+		{
+			/* use the in-memory device name to name the MCB */
+			char tmp[9];
+			MEM_BlockRead(PhysMake(devseg,0xA),tmp,8);
+			tmp[8] = 0;
+			dev_mcb.SetFileName(tmp);
+			LOG(LOG_MISC,LOG_DEBUG)("Device driver added to device chain as '%s'",tmp);
+		}
+	}
+
+	/* attach the driver to the device chain */
+	{
+		unsigned int patience = 1024;
+		uint32_t start = dos_infoblock.GetDeviceChain();
+		uint16_t segm  = (uint16_t)(start>>16ul);
+		uint16_t offm  = (uint16_t)(start&0xFFFFu);
+		while(start != 0xFFFFFFFFul) {
+			segm  = (uint16_t)(start>>16u);
+			offm  = (uint16_t)(start&0xFFFFu);
+			start = real_readd(segm,offm);
+			if (--patience == 0) E_Exit("Device driver chain corrupt");
+		}
+		real_writed(segm,offm,(unsigned int)devseg<<16u);
+	}
+
+	return true;
+}
+#endif
+
+#if !defined(OSFREE)
+std::string config_run_var_device;
+std::string config_run_var_devparm;
+#endif
+
+#if !defined(OSFREE)
 void CONFIG::Run(void) {
 	static const char* const params[] = {
 		"-r", "-wcp", "-wcd", "-wc", "-writeconf", "-wcpboot", "-wcdboot", "-wcboot", "-writeconfboot", "-bootconf", "-bc",
@@ -1292,7 +1922,9 @@ void CONFIG::Run(void) {
 		"-startmapper",
 		"-get", "-set", "-setf",
 		"-writelang", "-wl", "-langname", "-ln",
-		"-securemode", "-setup", "-all", "-mod", "-norem", "-errtest", "-gui", NULL };
+		"-securemode", "-setup", "-all", "-mod", "-norem", "-errtest", "-gui",
+		"-device","-devparm",
+		NULL };
 /* HACK: P_ALL is in linux/wait.h */
 #if defined(P_ALL)
 #define __P_ALL P_ALL
@@ -1310,22 +1942,54 @@ void CONFIG::Run(void) {
 		P_START_MAPPER,
 		P_GETPROP, P_SETPROP, P_SETFORCE,
 		P_WRITELANG, P_WRITELANG2, P_LANGNAME, P_LANGNAME2,
-		P_SECURE, P_SETUP, P_ALL, P_MOD, P_NOREM, P_ERRTEST, P_GUI
+		P_SECURE, P_SETUP, P_ALL, P_MOD, P_NOREM, P_ERRTEST, P_GUI,
+		P_DEVICE, P_DEVPARM
 	} presult = P_NOMATCH;
 
+	std::string device,devparm;
 	Section_prop * section=static_cast<Section_prop *>(control->GetSection("dosbox"));
 	int all = section->Get_bool("show advanced options")?1:-1;
 	bool first = true, norem = false;
 	std::vector<std::string> pvars;
+	const char *rawcmd = cmd->GetRawCmdline().c_str();
+
+	/* direct path for config shell to trigger device driver load */
+	if (first_shell && first_shell->config_shell) {
+		while (*rawcmd == ' ') rawcmd++;
+		if (!strcmp(rawcmd,"\xff\xaa\xff")/*User is unlikely to type this into their dosbox.conf*/) {
+			/* read from global vars */
+			device = config_run_var_device;
+			devparm = config_run_var_devparm;
+			if (device.empty()) return;
+			DeviceLoad(device,devparm);
+			return;
+		}
+	}
+
 	if (cmd->FindExist("-setup", true)) all = 2;
 	else if (cmd->FindExist("-all", true)) all = 1;
-    else if (cmd->FindExist("-mod", true)) all = 0;
-    if (cmd->FindExist("-norem", true)) norem = true;
+	else if (cmd->FindExist("-mod", true)) all = 0;
+	if (cmd->FindExist("-norem", true)) norem = true;
 	// Loop through the passed parameters
 	while(presult != P_NOPARAMS) {
 		presult = (enum prs)cmd->GetParameterFromList(params, pvars);
 		switch(presult) {
-	
+
+		case P_DEVPARM:
+			for (const auto &p : pvars) {
+				if (!devparm.empty()) devparm += " ";
+				devparm += p;
+			}
+			break;
+
+		case P_DEVICE:
+			if (pvars.size() < 1) {
+				WriteOut("-device requires path\n");
+				return;
+			} else
+				device=pvars[0];
+			break;
+
 		case P_SETUP:
 			all = 2;
 			break;
@@ -1364,13 +2028,13 @@ void CONFIG::Run(void) {
 			return;
 
 		case P_RESTART:
-            WriteOut("-restart is no longer supported\n");
+			WriteOut("-restart is no longer supported\n");
 			return;
 		
 		case P_LISTCONF: {
 			Bitu size = (Bitu)control->configfiles.size();
 			std::string config_path;
-			Cross::GetPlatformConfigDir(config_path);
+			config_path = Cross::GetPlatformConfigDir();
 			WriteOut(MSG_Get("PROGRAM_CONFIG_CONFDIR"), VERSION,config_path.c_str());
 			char cwd[512] = {0};
 			char *res = getcwd(cwd,sizeof(cwd)-1);
@@ -1413,7 +2077,7 @@ void CONFIG::Run(void) {
 			if (securemode_check()) return;
 			if (pvars.size() > 0) return;
 			std::string confname;
-			Cross::GetPlatformConfigName(confname);
+			confname = Cross::GetPlatformConfigName();
 			writeconf(confname, true, all, norem);
 			if (presult==P_WRITECONF_DEFAULT_REBOOT) RebootConfig(confname);
 			break;
@@ -1440,7 +2104,7 @@ void CONFIG::Run(void) {
 				Bitu size = (Bitu)control->configfiles.size();
 				if (size==0) RebootConfig("dosbox-x.conf");
 				else RebootConfig(control->configfiles.front().c_str());
-            }
+			}
 			break;
 		case P_NOPARAMS:
 			if (!first) break;
@@ -1524,7 +2188,7 @@ void CONFIG::Run(void) {
 					// list the properties
 					Property* p = psec->Get_prop((int)(i++));
 					if (p==NULL) break;
-                    if (!(all>0 || (all==-1 && (p->basic() || p->modified())) || (!all && ((p->propname == "rem" && (!strcmp(pvars[0].c_str(), "4dos") || !strcmp(pvars[0].c_str(), "config"))) || p->modified())))) continue;
+					if (!(all>0 || (all==-1 && (p->basic() || p->modified())) || (!all && ((p->propname == "rem" && (!strcmp(pvars[0].c_str(), "4dos") || !strcmp(pvars[0].c_str(), "config"))) || p->modified())))) continue;
 					WriteOut("%s\n", p->propname.c_str());
 				}
 				if (!strcasecmp(pvars[0].c_str(), "config"))
@@ -1653,7 +2317,7 @@ void CONFIG::Run(void) {
 						// list the properties
 						Property* p = psec->Get_prop(i++);
 						if (p==NULL) break;
-                        if (!(all>0 || (all==-1 && (p->basic() || p->modified())) || (!all && ((p->propname == "rem" && (!strcmp(pvars[0].c_str(), "4dos") || !strcmp(pvars[0].c_str(), "config"))) || p->modified())))) continue;
+						if (!(all>0 || (all==-1 && (p->basic() || p->modified())) || (!all && ((p->propname == "rem" && (!strcmp(pvars[0].c_str(), "4dos") || !strcmp(pvars[0].c_str(), "config"))) || p->modified())))) continue;
 						WriteOut("%s=%s\n", p->propname.c_str(),
 							p->GetValue().ToString().c_str());
 					}
@@ -1695,162 +2359,162 @@ void CONFIG::Run(void) {
 						sec = control->GetSectionFromProperty(pvars[0].c_str());
 					}
 					if (!sec) {
-                        unsigned int maxWidth, maxHeight;
-                        void GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight), GetDrawWidthHeight(unsigned int *pdrawWidth, unsigned int *pdrawHeight);
-                        if (!strcasecmp(pvars[0].c_str(), "screenwidth")) {
-                            GetMaxWidthHeight(&maxWidth, &maxHeight);
-                            WriteOut("%d\n",maxWidth);
-                            first_shell->SetEnv("CONFIG",std::to_string(maxWidth).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "screenheight")) {
-                            GetMaxWidthHeight(&maxWidth, &maxHeight);
-                            WriteOut("%d\n",maxHeight);
-                            first_shell->SetEnv("CONFIG",std::to_string(maxHeight).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "drawwidth")) {
-                            GetDrawWidthHeight(&maxWidth, &maxHeight);
-                            WriteOut("%d\n",maxWidth);
-                            first_shell->SetEnv("CONFIG",std::to_string(maxWidth).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "drawheight")) {
-                            GetDrawWidthHeight(&maxWidth, &maxHeight);
-                            WriteOut("%d\n",maxHeight);
-                            first_shell->SetEnv("CONFIG",std::to_string(maxHeight).c_str());
+						unsigned int maxWidth, maxHeight;
+						void GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight), GetDrawWidthHeight(unsigned int *pdrawWidth, unsigned int *pdrawHeight);
+						if (!strcasecmp(pvars[0].c_str(), "screenwidth")) {
+							GetMaxWidthHeight(&maxWidth, &maxHeight);
+							WriteOut("%d\n",maxWidth);
+							first_shell->SetEnv("CONFIG",std::to_string(maxWidth).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "screenheight")) {
+							GetMaxWidthHeight(&maxWidth, &maxHeight);
+							WriteOut("%d\n",maxHeight);
+							first_shell->SetEnv("CONFIG",std::to_string(maxHeight).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "drawwidth")) {
+							GetDrawWidthHeight(&maxWidth, &maxHeight);
+							WriteOut("%d\n",maxWidth);
+							first_shell->SetEnv("CONFIG",std::to_string(maxWidth).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "drawheight")) {
+							GetDrawWidthHeight(&maxWidth, &maxHeight);
+							WriteOut("%d\n",maxHeight);
+							first_shell->SetEnv("CONFIG",std::to_string(maxHeight).c_str());
 #if defined(C_SDL2)
-                        } else if (!strcasecmp(pvars[0].c_str(), "clientwidth")) {
-                            int w = 640,h = 480;
-                            SDL_Window* GFX_GetSDLWindow(void);
-                            SDL_GetWindowSize(GFX_GetSDLWindow(), &w, &h);
-                            WriteOut("%d\n",w);
-                            first_shell->SetEnv("CONFIG",std::to_string(w).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "clientheight")) {
-                            int w = 640,h = 480;
-                            SDL_Window* GFX_GetSDLWindow(void);
-                            SDL_GetWindowSize(GFX_GetSDLWindow(), &w, &h);
-                            WriteOut("%d\n",h);
-                            first_shell->SetEnv("CONFIG",std::to_string(h).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "clientwidth")) {
+							int w = 640,h = 480;
+							SDL_Window* GFX_GetSDLWindow(void);
+							SDL_GetWindowSize(GFX_GetSDLWindow(), &w, &h);
+							WriteOut("%d\n",w);
+							first_shell->SetEnv("CONFIG",std::to_string(w).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "clientheight")) {
+							int w = 640,h = 480;
+							SDL_Window* GFX_GetSDLWindow(void);
+							SDL_GetWindowSize(GFX_GetSDLWindow(), &w, &h);
+							WriteOut("%d\n",h);
+							first_shell->SetEnv("CONFIG",std::to_string(h).c_str());
 #elif defined(WIN32)
-                        } else if (!strcasecmp(pvars[0].c_str(), "clientwidth")) {
-                            RECT rect;
-                            GetClientRect(GetHWND(), &rect);
-                            WriteOut("%d\n",rect.right-rect.left);
-                            first_shell->SetEnv("CONFIG",std::to_string(rect.right-rect.left).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "clientheight")) {
-                            RECT rect;
-                            GetClientRect(GetHWND(), &rect);
-                            WriteOut("%d\n",rect.bottom-rect.top);
-                            first_shell->SetEnv("CONFIG",std::to_string(rect.bottom-rect.top).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "clientwidth")) {
+							RECT rect;
+							GetClientRect(GetHWND(), &rect);
+							WriteOut("%d\n",rect.right-rect.left);
+							first_shell->SetEnv("CONFIG",std::to_string(rect.right-rect.left).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "clientheight")) {
+							RECT rect;
+							GetClientRect(GetHWND(), &rect);
+							WriteOut("%d\n",rect.bottom-rect.top);
+							first_shell->SetEnv("CONFIG",std::to_string(rect.bottom-rect.top).c_str());
 #endif
 #if defined(WIN32)
-                        } else if (!strcasecmp(pvars[0].c_str(), "windowwidth")) {
-                            RECT rect;
-                            GetWindowRect(GetHWND(), &rect);
-                            WriteOut("%d\n",rect.right-rect.left);
-                            first_shell->SetEnv("CONFIG",std::to_string(rect.right-rect.left).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "windowheight")) {
-                            RECT rect;
-                            GetWindowRect(GetHWND(), &rect);
-                            WriteOut("%d\n",rect.bottom-rect.top);
-                            first_shell->SetEnv("CONFIG",std::to_string(rect.bottom-rect.top).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "windowwidth")) {
+							RECT rect;
+							GetWindowRect(GetHWND(), &rect);
+							WriteOut("%d\n",rect.right-rect.left);
+							first_shell->SetEnv("CONFIG",std::to_string(rect.right-rect.left).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "windowheight")) {
+							RECT rect;
+							GetWindowRect(GetHWND(), &rect);
+							WriteOut("%d\n",rect.bottom-rect.top);
+							first_shell->SetEnv("CONFIG",std::to_string(rect.bottom-rect.top).c_str());
 #endif
-                        } else if (!strcasecmp(pvars[0].c_str(), "system")) {
-                            WriteOut("%s\n",PACKAGE);
-                            first_shell->SetEnv("CONFIG",PACKAGE);
-                        } else if (!strcasecmp(pvars[0].c_str(), "version")) {
-                            WriteOut("%s\n",VERSION);
-                            first_shell->SetEnv("CONFIG",VERSION);
-                        } else if (!strcasecmp(pvars[0].c_str(), "hostos")) {
-                            if (securemode_check()) return;
-                            const char *hostos =
+						} else if (!strcasecmp(pvars[0].c_str(), "system")) {
+							WriteOut("%s\n",PACKAGE);
+							first_shell->SetEnv("CONFIG",PACKAGE);
+						} else if (!strcasecmp(pvars[0].c_str(), "version")) {
+							WriteOut("%s\n",VERSION);
+							first_shell->SetEnv("CONFIG",VERSION);
+						} else if (!strcasecmp(pvars[0].c_str(), "hostos")) {
+							if (securemode_check()) return;
+							const char *hostos =
 #if defined(HX_DOS)
-                            "DOS"
+								"DOS"
 #elif defined(WIN32)
-                            "Windows"
+								"Windows"
 #elif defined(LINUX)
-                            "Linux"
+								"Linux"
 #elif defined(MACOSX)
-                            "macOS"
+								"macOS"
 #elif defined(OS2)
-                            "OS/2"
+								"OS/2"
 #else
-                            "Other"
+								"Other"
 #endif
-                            ;
-                            WriteOut("%s\n",hostos);
-                            first_shell->SetEnv("CONFIG",hostos);
-                        } else if (!strcasecmp(pvars[0].c_str(), "workdir")) {
-                            if (securemode_check()) return;
-                            char cwd[512] = {0};
-                            char *res = getcwd(cwd,sizeof(cwd)-1);
-                            WriteOut("%s\n",res==NULL?"":cwd);
-                            first_shell->SetEnv("CONFIG",res==NULL?"":cwd);
-                        } else if (!strcasecmp(pvars[0].c_str(), "programdir")) {
-                            if (securemode_check()) return;
-                            std::string GetDOSBoxXPath(bool withexe=false), exepath=GetDOSBoxXPath();
-                            WriteOut("%s\n",exepath.c_str());
-                            first_shell->SetEnv("CONFIG",exepath.c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "userconfigdir")) {
-                            if (securemode_check()) return;
-                            std::string config_path;
-                            Cross::GetPlatformConfigDir(config_path);
-                            WriteOut("%s\n",config_path.c_str());
-                            first_shell->SetEnv("CONFIG",config_path.c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "configdir")) {
-                            if (securemode_check()) return;
-                            std::string configdir=control->configfiles.size()?control->configfiles[control->configfiles.size()-1]:"";
-                            if (configdir.size()) {
-                                std::string::size_type pos = configdir.rfind(CROSS_FILESPLIT);
-                                if(pos == std::string::npos) pos = 0;
-                                configdir.erase(pos);
-                            }
-                            WriteOut("%s\n",configdir.c_str());
-                            first_shell->SetEnv("CONFIG",configdir.c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "cd")) {
-                            uint8_t drive = DOS_GetDefaultDrive()+'A';
-                            char dir[DOS_PATHLENGTH];
-                            DOS_GetCurrentDir(0,dir,true);
-                            WriteOut("%c:\\",drive);
-                            WriteOut_NoParsing(dir, true);
-                            WriteOut("\n");
-                            first_shell->SetEnv("CONFIG",(std::string(1, drive)+":\\"+std::string(dir)).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "date")) {
-                            uint32_t ticks=mem_readd(BIOS_TIMER);
-                            uint8_t add=mem_readb(BIOS_24_HOURS_FLAG);
-                            mem_writeb(BIOS_24_HOURS_FLAG,0); // reset the "flag"
-                            if (add) DOS_AddDays(add);
-                            const char *date = FormatDate(dos.date.year, dos.date.month, dos.date.day);
-                            WriteOut("%s\n",date);
-                            first_shell->SetEnv("CONFIG",date);
-                        } else if (!strcasecmp(pvars[0].c_str(), "errorlevel")) {
-                            WriteOut("%d\n",dos.return_code);
-                            first_shell->SetEnv("CONFIG",std::to_string(dos.return_code).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "random")) {
-                            initRand();
-                            int random = rand()%32768;
-                            WriteOut("%s\n",std::to_string(random).c_str());
-                            first_shell->SetEnv("CONFIG",std::to_string(random).c_str());
-                        } else if (!strcasecmp(pvars[0].c_str(), "time")) {
-                            uint32_t hour, min, sec;
-                            char c=dos.tables.country[13];
-                            uint32_t ticks=mem_readd(BIOS_TIMER);
-                            uint8_t add=mem_readb(BIOS_24_HOURS_FLAG);
-                            mem_writeb(BIOS_24_HOURS_FLAG,0); // reset the "flag"
-                            uint16_t cx=(uint16_t)(ticks >> 16u), dx=(uint16_t)(ticks & 0xffff);
-                            if (add) DOS_AddDays(add);
-                            ticks=((Bitu)cx<<16)|dx;
-                            Bitu time=(Bitu)((100.0/((double)PIT_TICK_RATE/65536.0)) * (double)ticks);
-                            time/=100;
-                            sec=(uint8_t)((Bitu)time % 60); // seconds
-                            time/=60;
-                            min=(uint8_t)((Bitu)time % 60); // minutes
-                            time/=60;
-                            hour=(uint8_t)((Bitu)time % 24); // hours
-                            char format[11];
-                            sprintf(format,"%u%c%02u%c%02u",hour,c,min,c,sec);
-                            WriteOut("%s\n",format);
-                            first_shell->SetEnv("CONFIG",format);
-                        } else if (!strcasecmp(pvars[0].c_str(), "lastmount")) {
-                            if (lastmount) WriteOut("%c:\n",lastmount);
-                            first_shell->SetEnv("CONFIG",lastmount?(std::string(1, lastmount) + ":").c_str():"");
-                        } else
-                            WriteOut(MSG_Get("PROGRAM_CONFIG_PROPERTY_ERROR"));
+								;
+							WriteOut("%s\n",hostos);
+							first_shell->SetEnv("CONFIG",hostos);
+						} else if (!strcasecmp(pvars[0].c_str(), "workdir")) {
+							if (securemode_check()) return;
+							char cwd[512] = {0};
+							char *res = getcwd(cwd,sizeof(cwd)-1);
+							WriteOut("%s\n",res==NULL?"":cwd);
+							first_shell->SetEnv("CONFIG",res==NULL?"":cwd);
+						} else if (!strcasecmp(pvars[0].c_str(), "programdir")) {
+							if (securemode_check()) return;
+							std::string GetDOSBoxXPath(bool withexe=false), exepath=GetDOSBoxXPath();
+							WriteOut("%s\n",exepath.c_str());
+							first_shell->SetEnv("CONFIG",exepath.c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "userconfigdir")) {
+							if (securemode_check()) return;
+							std::string config_path;
+							config_path = Cross::GetPlatformConfigDir();
+							WriteOut("%s\n",config_path.c_str());
+							first_shell->SetEnv("CONFIG",config_path.c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "configdir")) {
+							if (securemode_check()) return;
+							std::string configdir=control->configfiles.size()?control->configfiles[control->configfiles.size()-1]:"";
+							if (configdir.size()) {
+								std::string::size_type pos = configdir.rfind(CROSS_FILESPLIT);
+								if(pos == std::string::npos) pos = 0;
+								configdir.erase(pos);
+							}
+							WriteOut("%s\n",configdir.c_str());
+							first_shell->SetEnv("CONFIG",configdir.c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "cd")) {
+							uint8_t drive = DOS_GetDefaultDrive()+'A';
+							char dir[DOS_PATHLENGTH];
+							DOS_GetCurrentDir(0,dir,true);
+							WriteOut("%c:\\",drive);
+							WriteOut_NoParsing(dir, true);
+							WriteOut("\n");
+							first_shell->SetEnv("CONFIG",(std::string(1, drive)+":\\"+std::string(dir)).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "date")) {
+							uint32_t ticks=mem_readd(BIOS_TIMER);
+							uint8_t add=mem_readb(BIOS_24_HOURS_FLAG);
+							mem_writeb(BIOS_24_HOURS_FLAG,0); // reset the "flag"
+							if (add) DOS_AddDays(add);
+							const char *date = FormatDate(dos.date.year, dos.date.month, dos.date.day);
+							WriteOut("%s\n",date);
+							first_shell->SetEnv("CONFIG",date);
+						} else if (!strcasecmp(pvars[0].c_str(), "errorlevel")) {
+							WriteOut("%d\n",dos.return_code);
+							first_shell->SetEnv("CONFIG",std::to_string((unsigned int)dos.return_code).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "random")) {
+							initRand();
+							int random = rand()%32768;
+							WriteOut("%s\n",std::to_string(random).c_str());
+							first_shell->SetEnv("CONFIG",std::to_string(random).c_str());
+						} else if (!strcasecmp(pvars[0].c_str(), "time")) {
+							uint32_t hour, min, sec;
+							char c=dos.tables.country[13];
+							uint32_t ticks=mem_readd(BIOS_TIMER);
+							uint8_t add=mem_readb(BIOS_24_HOURS_FLAG);
+							mem_writeb(BIOS_24_HOURS_FLAG,0); // reset the "flag"
+							uint16_t cx=(uint16_t)(ticks >> 16u), dx=(uint16_t)(ticks & 0xffff);
+							if (add) DOS_AddDays(add);
+							ticks=((Bitu)cx<<16)|dx;
+							Bitu time=(Bitu)((100.0/((double)PIT_TICK_RATE/65536.0)) * (double)ticks);
+							time/=100;
+							sec=(uint8_t)((Bitu)time % 60); // seconds
+							time/=60;
+							min=(uint8_t)((Bitu)time % 60); // minutes
+							time/=60;
+							hour=(uint8_t)((Bitu)time % 24); // hours
+							char format[11];
+							sprintf(format,"%u%c%02u%c%02u",hour,c,min,c,sec);
+							WriteOut("%s\n",format);
+							first_shell->SetEnv("CONFIG",format);
+						} else if (!strcasecmp(pvars[0].c_str(), "lastmount")) {
+							if (lastmount) WriteOut("%c:\n",lastmount);
+							first_shell->SetEnv("CONFIG",lastmount?(std::string(1, lastmount) + ":").c_str():"");
+						} else
+							WriteOut(MSG_Get("PROGRAM_CONFIG_PROPERTY_ERROR"));
 						return;
 					}
 					// it's a property name
@@ -1859,52 +2523,52 @@ void CONFIG::Run(void) {
 					first_shell->SetEnv("CONFIG",val.c_str());
 				}
 				break;
-			}
-			case 2: {
-				// section + property
-				sec = control->GetSection(pvars[0].c_str());
-				if (!sec) {
-					WriteOut(MSG_Get("PROGRAM_CONFIG_SECTION_ERROR"), pvars[0].c_str());
-					return;
 				}
-				std::string val = sec->GetPropValue(pvars[1].c_str());
-				if (val == NO_SUCH_PROPERTY) {
-					if (!strcasecmp(pvars[0].c_str(), "config") && (!strcasecmp(pvars[1].c_str(), "set") || !strcasecmp(pvars[1].c_str(), "device") || !strcasecmp(pvars[1].c_str(), "devicehigh") || !strcasecmp(pvars[1].c_str(), "install") || !strcasecmp(pvars[1].c_str(), "installhigh"))) {
-						Section_prop* psec = dynamic_cast <Section_prop*>(sec);
-						const char * extra = psec->data.c_str();
-						if (extra&&strlen(extra)) {
-							std::istringstream in(extra);
-							char linestr[CROSS_LEN+1], cmdstr[CROSS_LEN], valstr[CROSS_LEN];
-							char *cmd=cmdstr, *val=valstr, /**lin=linestr,*/ *p;
-							if (in)	for (std::string line; std::getline(in, line); ) {
-								if (line.length()>CROSS_LEN) {
-									strncpy(linestr, line.c_str(), CROSS_LEN);
-									linestr[CROSS_LEN]=0;
-								} else
-									strcpy(linestr, line.c_str());
-								p=strchr(linestr, '=');
-								if (p!=NULL) {
-									*p=0;
-									strcpy(cmd, linestr);
-									cmd=trim(cmd);
-									strcpy(val, p+1);
-									val=trim(val);
-									lowcase(cmd);
-									if (!strncasecmp(cmd, "set ", 4)&&!strcasecmp(pvars[1].c_str(), "set"))
-										WriteOut("%s=%s\n", trim(cmd+4), val);
-									else if(!strcasecmp(cmd, pvars[1].c_str()))
-										WriteOut("%s\n", val);
+			case 2: {
+					// section + property
+					sec = control->GetSection(pvars[0].c_str());
+					if (!sec) {
+						WriteOut(MSG_Get("PROGRAM_CONFIG_SECTION_ERROR"), pvars[0].c_str());
+						return;
+					}
+					std::string val = sec->GetPropValue(pvars[1].c_str());
+					if (val == NO_SUCH_PROPERTY) {
+						if (!strcasecmp(pvars[0].c_str(), "config") && (!strcasecmp(pvars[1].c_str(), "set") || !strcasecmp(pvars[1].c_str(), "device") || !strcasecmp(pvars[1].c_str(), "devicehigh") || !strcasecmp(pvars[1].c_str(), "install") || !strcasecmp(pvars[1].c_str(), "installhigh"))) {
+							Section_prop* psec = dynamic_cast <Section_prop*>(sec);
+							const char * extra = psec->data.c_str();
+							if (extra&&strlen(extra)) {
+								std::istringstream in(extra);
+								char linestr[CROSS_LEN+1], cmdstr[CROSS_LEN], valstr[CROSS_LEN];
+								char *cmd=cmdstr, *val=valstr, /**lin=linestr,*/ *p;
+								if (in)	for (std::string line; std::getline(in, line); ) {
+									if (line.length()>CROSS_LEN) {
+										strncpy(linestr, line.c_str(), CROSS_LEN);
+										linestr[CROSS_LEN]=0;
+									} else
+										strcpy(linestr, line.c_str());
+									p=strchr(linestr, '=');
+									if (p!=NULL) {
+										*p=0;
+										strcpy(cmd, linestr);
+										cmd=trim(cmd);
+										strcpy(val, p+1);
+										val=trim(val);
+										lowcase(cmd);
+										if (!strncasecmp(cmd, "set ", 4)&&!strcasecmp(pvars[1].c_str(), "set"))
+											WriteOut("%s=%s\n", trim(cmd+4), val);
+										else if(!strcasecmp(cmd, pvars[1].c_str()))
+											WriteOut("%s\n", val);
+									}
 								}
 							}
-						}
-					} else
-						WriteOut(MSG_Get("PROGRAM_CONFIG_NO_PROPERTY"), pvars[1].c_str(),pvars[0].c_str());   
-					return;
+						} else
+							WriteOut(MSG_Get("PROGRAM_CONFIG_NO_PROPERTY"), pvars[1].c_str(),pvars[0].c_str());   
+						return;
+					}
+					WriteOut("%s\n",val.c_str());
+					first_shell->SetEnv("CONFIG",val.c_str());
+					break;
 				}
-				WriteOut("%s\n",val.c_str());
-                first_shell->SetEnv("CONFIG",val.c_str());
-                break;
-			}
 			default:
 				WriteOut(MSG_Get("PROGRAM_CONFIG_GET_SYNTAX"));
 				return;
@@ -1941,13 +2605,13 @@ void CONFIG::Run(void) {
 				spcpos=pvars[0].find_first_of(' ', spcpos+1);
 
 			std::string::size_type equpos = pvars[0].find_first_of('=');
-            if (equpos != std::string::npos) {
-                std::string p = pvars[0];
-                p.erase(equpos);
-                sec = control->GetSectionFromProperty(p.c_str());
-            }
+			if (equpos != std::string::npos) {
+				std::string p = pvars[0];
+				p.erase(equpos);
+				sec = control->GetSectionFromProperty(p.c_str());
+			}
 
-            uselangcp = false;
+			uselangcp = false;
 			if ((equpos != std::string::npos) && 
 				((spcpos == std::string::npos) || (equpos < spcpos) || sec)) {
 				// If we have a '=' possibly before a ' ' split on the =
@@ -2026,53 +2690,53 @@ void CONFIG::Run(void) {
 				uselangcp = false;
 				return;
 			}
-            bool applynew=false;
+			bool applynew=false;
 			Property *p = static_cast<Section_prop *>(sec2)->Get_prop(pvars[1]);
 			if ((p==NULL||p->getChange()==Property::Changeable::OnlyAtStart)&&presult!=P_SETFORCE) {
 				WriteOut(MSG_Get("PROGRAM_CONFIG_HLP_NOCHANGE"));
 first_1:
 				WriteOut(MSG_Get("PROGRAM_CONFIG_APPLY_RESTART"));
 first_2:
-                uint8_t c;uint16_t n=1;
-                DOS_ReadFile (STDIN,&c,&n);
-                do switch (c) {
-                    case 'n':			case 'N':
-                    {
-                        DOS_WriteFile (STDOUT,&c, &n);
-                        DOS_ReadFile (STDIN,&c,&n);
-                        do switch (c) {
-                            case 0xD: WriteOut("\n");goto next;
-                            case 0x03: goto next;
-                            case 0x08: WriteOut("\b \b"); goto first_2;
-                        } while (DOS_ReadFile (STDIN,&c,&n));
-                    }
-                    case 'y':			case 'Y':
-                    {
-                        DOS_WriteFile (STDOUT,&c, &n);
-                        DOS_ReadFile (STDIN,&c,&n);
-                        do switch (c) {
-                            case 0xD: WriteOut("\n"); applynew = true; goto next;
-                            case 0x03: goto next;
-                            case 0x08: WriteOut("\b \b"); goto first_2;
-                        } while (DOS_ReadFile (STDIN,&c,&n));
-                    }
-                    case 0xD: WriteOut("\n"); goto first_1;
-                    case 0x03: goto next;
-                    case '\t':
-                    case 0x08:
-                        goto first_2;
-                    default:
-                    {
-                        DOS_WriteFile (STDOUT,&c, &n);
-                        DOS_ReadFile (STDIN,&c,&n);
-                        do switch (c) {
-                            case 0xD: WriteOut("\n"); goto first_1;
-                            case 0x03: goto next;
-                            case 0x08: WriteOut("\b \b"); goto first_2;
-                        } while (DOS_ReadFile (STDIN,&c,&n));
-                        goto first_2;
-                    }
-                } while (DOS_ReadFile (STDIN,&c,&n));
+				uint8_t c;uint16_t n=1;
+				DOS_ReadFile (STDIN,&c,&n);
+				do switch (c) {
+					case 'n':			case 'N':
+						{
+							DOS_WriteFile (STDOUT,&c, &n);
+							DOS_ReadFile (STDIN,&c,&n);
+							do switch (c) {
+								case 0xD: WriteOut("\n");goto next;
+								case 0x03: goto next;
+								case 0x08: WriteOut("\b \b"); goto first_2;
+							} while (DOS_ReadFile (STDIN,&c,&n));
+						}
+					case 'y':			case 'Y':
+						{
+							DOS_WriteFile (STDOUT,&c, &n);
+							DOS_ReadFile (STDIN,&c,&n);
+							do switch (c) {
+								case 0xD: WriteOut("\n"); applynew = true; goto next;
+								case 0x03: goto next;
+								case 0x08: WriteOut("\b \b"); goto first_2;
+							} while (DOS_ReadFile (STDIN,&c,&n));
+						}
+					case 0xD: WriteOut("\n"); goto first_1;
+					case 0x03: goto next;
+					case '\t':
+					case 0x08:
+						   goto first_2;
+					default:
+						   {
+							   DOS_WriteFile (STDOUT,&c, &n);
+							   DOS_ReadFile (STDIN,&c,&n);
+							   do switch (c) {
+								   case 0xD: WriteOut("\n"); goto first_1;
+								   case 0x03: goto next;
+								   case 0x08: WriteOut("\b \b"); goto first_2;
+							   } while (DOS_ReadFile (STDIN,&c,&n));
+							   goto first_2;
+						   }
+				} while (DOS_ReadFile (STDIN,&c,&n));
 			}
 next:
 			// Input has been parsed (pvar[0]=section, [1]=property, [2]=value)
@@ -2124,12 +2788,20 @@ next:
 		}
 		first = false;
 	}
+
+	if (!device.empty()) {
+		DeviceLoad(device,devparm);
+	}
+
 	return;
 }
+#endif
 
+#if !defined(OSFREE)
 void CONFIG_ProgramStart(Program * * make) {
 	*make=new CONFIG;
 }
+#endif
 
 void PROGRAMS_DOS_Boot(Section *) {
 }

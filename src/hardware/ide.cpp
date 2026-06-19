@@ -86,6 +86,7 @@ private:
 extern int bootdrive;
 extern bool bootguest, bootvm, use_quick_reboot;
 static unsigned char init_ide = 0;
+extern bool int13_enable_48bitLBA;
 
 static const unsigned char IDE_default_IRQs[4] = {
     14, /* primary */
@@ -239,12 +240,14 @@ public:
     virtual void io_completion();
     virtual bool increment_current_address(Bitu count=1);
 public:
-    Bitu multiple_sector_max,multiple_sector_count;
-    Bitu heads,sects,cyls,headshr,progress_count;
-    Bitu phys_heads,phys_sects,phys_cyls;
+    uint64_t multiple_sector_max,multiple_sector_count;
+    uint64_t heads,sects,cyls,progress_count;
+    uint64_t phys_heads,phys_sects,phys_cyls; /* CHS value of IDE  */
+    uint64_t LBA;
     unsigned char sector[512 * 128] = {};
-    Bitu sector_i,sector_total;
+    uint64_t sector_i,sector_total;
     bool geo_translate;
+
 };
 
 enum {
@@ -258,7 +261,7 @@ enum {
 
 class IDEATAPICDROMDevice:public IDEDevice {
 public:
-    IDEATAPICDROMDevice(IDEController *c,unsigned char drive_index,bool _slave);
+    IDEATAPICDROMDevice(IDEController *c,unsigned char drive_index,bool _slave,CDROM_Interface *cdrom);
     ~IDEATAPICDROMDevice();
     void writecommand(uint8_t cmd) override;
 public:
@@ -267,6 +270,7 @@ public:
     std::string id_model;
     unsigned char drive_index;
     Bitu sector_transfer_limit = 16;
+    CDROM_Interface *cdrom = NULL;
     CDROM_Interface *getMSCDEXDrive();
     void update_from_cdrom();
     Bitu data_read(Bitu iolen) override; /* read from 1F0h data port from IDE device */
@@ -886,6 +890,8 @@ static unsigned char dec2bcd(unsigned char c) {
 }
 #endif
 
+void IDE_Eject_unmount(char drive);
+
 void IDEATAPICDROMDevice::read_toc() {
     /* NTS: The SCSI MMC standards say we're allowed to indicate the return data
      *      is longer than it's allocation length. But here's the thing: some MS-DOS
@@ -1044,6 +1050,7 @@ void IDEATAPICDROMDevice::on_atapi_busy_time() {
         switch (atapi_cmd[0]) {
             case 0x00: /* TEST UNIT READY */
             case 0x03: /* REQUEST SENSE */
+            case 0x12: /* INQUIRY */
                 allow_writing = true;
                 break; /* do not delay */
             default:
@@ -1056,6 +1063,7 @@ void IDEATAPICDROMDevice::on_atapi_busy_time() {
         switch (atapi_cmd[0]) {
             case 0x00: /* TEST UNIT READY */
             case 0x03: /* REQUEST SENSE */
+            case 0x12: /* INQUIRY */
                 allow_writing = true;
                 break; /* do not delay */
             default:
@@ -1088,6 +1096,41 @@ void IDEATAPICDROMDevice::on_atapi_busy_time() {
             raise_irq();
             allow_writing = true;
             break;
+        case 0x1B: /* START/STOP UNIT */
+            count = 0x03;
+            feature = 0x00;
+            sector_total = 0x00;
+            state = IDE_DEV_DATA_READ;
+            status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRIVE_SEEK_COMPLETE;
+
+            {
+                    bool START = !!(atapi_cmd[4] & 0x01);
+                    bool LOEJ = !!(atapi_cmd[4] & 0x02);
+                    // TODO: IMMED, POWER_CONDITION, etc.
+
+                    if (LOEJ) {
+                            LOG(LOG_MISC,LOG_DEBUG)("ATAPI CD-ROM drive is being asked to %s the media",
+                                START ? "LOAD" : "EJECT");
+                    }
+                    else {
+                            LOG(LOG_MISC,LOG_DEBUG)("ATAPI CD-ROM drive is being asked to %s the media",
+                                START ? "START" : "STOP");
+                    }
+
+                    // Treat the EJECT command as a command to swap to an "empty" CD-ROM image
+                    if (LOEJ && !START) {
+                            LOG(LOG_MISC,LOG_DEBUG)("Interpreting EJECT as a command to unmount the drive (replace with empty image)");
+                            IDE_Eject_unmount(drive_index+'A');
+                    }
+            }
+
+            /* ATAPI protocol also says we write back into LBA 23:8 what we're going to transfer in the block */
+            lba[2] = sector_total >> 8;
+            lba[1] = sector_total;
+
+            raise_irq();
+            allow_writing = true;
+            break;
         case 0x1E: /* PREVENT ALLOW MEDIUM REMOVAL */
             count = 0x03;
             feature = 0x00;
@@ -1095,7 +1138,12 @@ void IDEATAPICDROMDevice::on_atapi_busy_time() {
             state = IDE_DEV_DATA_READ;
             status = IDE_STATUS_DRIVE_READY|IDE_STATUS_DRIVE_SEEK_COMPLETE;
 
-            /* Don't care. Do nothing. */
+            {
+                uint8_t PREVENT = atapi_cmd[4] & 3;
+                bool lock = (PREVENT == 1 || PREVENT == 3);
+
+                LOG(LOG_MISC,LOG_DEBUG)("ATAPI CD-ROM PREVENT/ALLOW MEDIA REMOVAL: prevent=%u locked=%u",PREVENT,lock);
+            }
 
             /* ATAPI protocol also says we write back into LBA 23:8 what we're going to transfer in the block */
             lba[2] = sector_total >> 8;
@@ -1470,7 +1518,7 @@ void IDEATAPICDROMDevice::set_sense(unsigned char SK,unsigned char ASC,unsigned 
     sense[13] = ASCQ;
 }
 
-IDEATAPICDROMDevice::IDEATAPICDROMDevice(IDEController *c,unsigned char drive_index,bool _slave) : IDEDevice(c,_slave) {
+IDEATAPICDROMDevice::IDEATAPICDROMDevice(IDEController *c,unsigned char drive_index,bool _slave,CDROM_Interface *n_cdrom) : IDEDevice(c,_slave) {
     this->drive_index = drive_index;
     sector_i = sector_total = 0;
     atapi_to_host = false;
@@ -1483,6 +1531,8 @@ IDEATAPICDROMDevice::IDEATAPICDROMDevice(IDEController *c,unsigned char drive_in
     atapi_cmd_i = 0;
     atapi_cmd_total = 0;
     memset(sector, 0, sizeof(sector));
+
+    if (n_cdrom) (cdrom = n_cdrom)->Addref();
 
     memset(sense,0,sizeof(sense));
     IDEATAPICDROMDevice::set_sense(/*SK=*/0);
@@ -1531,6 +1581,10 @@ IDEATAPICDROMDevice::IDEATAPICDROMDevice(IDEController *c,unsigned char drive_in
 }
 
 IDEATAPICDROMDevice::~IDEATAPICDROMDevice() {
+    if (cdrom) {
+        cdrom->Release();
+        cdrom = NULL;
+    }
 }
 
 void IDEATAPICDROMDevice::on_mode_select_io_complete() {
@@ -1961,6 +2015,13 @@ void IDEATAPICDROMDevice::atapi_cmd_completion() {
             allow_writing = true;
             break;
         case 0x03: /* REQUEST SENSE */
+            count = 0x02;
+            state = IDE_DEV_ATAPI_BUSY;
+            status = IDE_STATUS_BUSY;
+            PIC_RemoveSpecificEvents(IDE_DelayedCommand,pk);
+            PIC_AddEvent(IDE_DelayedCommand,(faked_command ? 0.000001 : 1)/*ms*/,pk);
+            break;
+        case 0x1B: /* START/STOP UNIT */
             count = 0x02;
             state = IDE_DEV_ATAPI_BUSY;
             status = IDE_STATUS_BUSY;
@@ -2540,6 +2601,9 @@ void IDEATADevice::generate_identify_device() {
     /* total disk capacity in sectors */
     total = sects * cyls * heads;
     ptotal = phys_sects * phys_cyls * phys_heads;
+    uint32_t lba28 = LBA > 0x0FFFFFFF ? 0x0FFFFFFF : (uint32_t)LBA;
+    //uint32_t lba28 = (uint32_t)LBA;
+
 
     host_writew(sector+(0*2),0x0040);   /* bit 6: 1=fixed disk */
     host_writew(sector+(1*2),phys_cyls);
@@ -2590,7 +2654,7 @@ void IDEATADevice::generate_identify_device() {
         host_writew(sector+(59*2),0x0100|multiple_sector_count); /* :8  multiple sector setting is valid */
                         /* 7:0 current setting for number of log. sectors per DRQ of READ/WRITE MULTIPLE */
 
-    host_writed(sector+(60*2),ptotal);  /* total user addressable sectors (LBA) */
+    host_writed(sector+(60*2),lba28);  /* total user addressable sectors (LBA) */
     host_writew(sector+(62*2),0x0000);  /* FIXME: ??? */
     host_writew(sector+(63*2),0x0000);  /* :10 0=Multiword DMA mode 2 not selected */
                         /* TODO: Basically, we don't do DMA. Fill out this comment */
@@ -2602,13 +2666,15 @@ void IDEATADevice::generate_identify_device() {
     host_writew(sector+(80*2),0x007E);  /* major version number. Here we say we support ATA-1 through ATA-8 */
     host_writew(sector+(81*2),0x0022);  /* minor version */
     host_writew(sector+(82*2),0x4208);  /* command set: NOP, DEVICE RESET[XXXXX], POWER MANAGEMENT */
-    host_writew(sector+(83*2),0x4000);  /* command set: LBA48[XXXX] */
+    host_writew(sector+(83*2),int13_enable_48bitLBA?0xC400:0x4000);  /* command set: bit15: valid, bit14: NOP, bit 10: enable 48bit LBA */
     host_writew(sector+(84*2),0x4000);  /* FIXME: ??? */
     host_writew(sector+(85*2),0x4208);  /* commands in 82 enabled */
-    host_writew(sector+(86*2),0x4000);  /* commands in 83 enabled */
+    host_writew(sector+(86*2),int13_enable_48bitLBA?0xC400:0x4000);  /* commands in 83 enabled bit15: valid, bit14: NOP, bit10: enable 48bit LBA*/
     host_writew(sector+(87*2),0x4000);  /* FIXME: ??? */
     host_writew(sector+(88*2),0x0000);  /* FIXME: ??? */
-    host_writew(sector+(93*3),0x0000);  /* FIXME: ??? */
+    host_writew(sector+(93*2),0x0000);  /* FIXME: ??? */
+    host_writed(sector+(100*2), int13_enable_48bitLBA ? (uint32_t)(LBA & 0xFFFFFFFF):0); // 48bit LBA lower 32 bits
+    host_writed(sector+(102*2), int13_enable_48bitLBA ? (uint32_t)(LBA >> 32):0);        // 48bit LBA upper 32 bits 
 
     /* ATA-8 integrity checksum */
     sector[510] = 0xA5;
@@ -2620,7 +2686,6 @@ IDEATADevice::IDEATADevice(IDEController *c,unsigned char disk_index,bool _slave
     : IDEDevice(c,_slave), id_serial("8086"), id_firmware_rev("8086"), id_model("DOSBox-X IDE disk"), bios_disk_index(disk_index) {
     sector_i = sector_total = 0;
 
-    headshr = 0;
     type = IDE_TYPE_HDD;
     multiple_sector_max = sizeof(sector) / 512;
     multiple_sector_count = 1;
@@ -2643,11 +2708,6 @@ imageDisk *IDEATADevice::getBIOSdisk() {
 }
 
 CDROM_Interface *IDEATAPICDROMDevice::getMSCDEXDrive() {
-    CDROM_Interface *cdrom=NULL;
-
-    if (!GetMSCDEXDrive(drive_index,&cdrom))
-        return NULL;
-
     return cdrom;
 }
 
@@ -2660,67 +2720,68 @@ void IDEATAPICDROMDevice::update_from_cdrom() {
 }
 
 void IDEATADevice::update_from_biosdisk() {
-    imageDisk *dsk = getBIOSdisk();
-    if (dsk == NULL) {
-        LOG_MSG("WARNING: IDE update from BIOS disk failed, disk not available\n");
-        return;
-    }
+	imageDisk *dsk = getBIOSdisk();
+	if (dsk == NULL) {
+		LOG_MSG("WARNING: IDE update from BIOS disk failed, disk not available\n");
+		return;
+	}
 
-    headshr = 0;
-    geo_translate = false;
-    cyls = dsk->cylinders;
-    heads = dsk->heads;
-    sects = dsk->sectors;
+	geo_translate = false;
+	cyls = dsk->cylinders;
+	heads = dsk->heads;
+	sects = dsk->sectors;
+    LBA = dsk->getLBA();
 
-    /* One additional correction: The disk image is probably using BIOS-style geometry
-       translation (such as C/H/S 1024/64/63) which is impossible given that the IDE
-       standard only allows up to 16 heads. So we have to translate the geometry. */
-    while (heads > 16 && (heads & 1) == 0) {
-        cyls <<= 1U;
-        heads >>= 1U;
-        headshr++;
-    }
+	if (heads > 16) {
+		geo_translate = true;
 
-    /* If we can't divide the heads down, then pick a LBA-like mapping that is good enough.
-     * Note that if what we pick does not evenly map to the INT 13h geometry, and the partition
-     * contained within is not an LBA type FAT16/FAT32 partition, then Windows 95's IDE driver
-     * will ignore this device and fall back to using INT 13h. For user convenience we will
-     * print a warning to reminder the user of exactly that. */
-    if (heads > 16) {
-        unsigned long tmp;
+		/* One additional correction: The disk image is probably using BIOS-style geometry
+		   translation (such as C/H/S 1024/64/63) which is impossible given that the IDE
+		   standard only allows up to 16 heads. So we have to translate the geometry. */
 
-        geo_translate = true;
+		/* If we can't divide the heads down, then pick a LBA-like mapping that is good enough.
+		 * Note that if what we pick does not evenly map to the INT 13h geometry, and the partition
+		 * contained within is not an LBA type FAT16/FAT32 partition, then Windows 95's IDE driver
+		 * will ignore this device and fall back to using INT 13h. For user convenience we will
+		 * print a warning to reminder the user of exactly that. */
+        if(LBA <= 17ULL * 1024ULL * 4ULL) {
+            sects = 17;
+            heads = 4;
+        }
+        else if(LBA <= 17ULL * 1024ULL * 8ULL) {
+            sects = 17;
+            heads = 8;
+        }
+        else if(LBA <= 32ULL * 1024ULL * 16ULL) {
+            sects = 32;
+            heads = 16;
+        }
+        else if(LBA > 63ULL * 1024ULL * 255ULL && LBA > 65535ULL * 16ULL * 63ULL) { // Over 8.4GB, use max CHS values
+            sects = 255;
+            heads = 16;
+        }
+        else {
+            sects = 63;  // Up to 8.4GB
+            heads = 16;
+        }
 
-        tmp = heads * cyls * sects;
-        sects = 63;
-        heads = 16;
-        cyls = (tmp + ((63 * 16) - 1)) / (63 * 16);
-        LOG_MSG("WARNING: Unable to reduce heads to 16 and below\n");
-        LOG_MSG("If at all possible, please consider using INT 13h geometry with a head\n");
-        LOG_MSG("count that is easier to map to the BIOS, like 240 heads or 128 heads/track.\n");
-        LOG_MSG("Some OSes, such as Windows 95, will not enable their 32-bit IDE driver if\n");
-        LOG_MSG("a clean mapping does not exist between IDE and BIOS geometry.\n");
-        LOG_MSG("Mapping BIOS DISK C/H/S %u/%u/%u as IDE %u/%u/%u (non-straightforward mapping)\n",
-            (unsigned int)dsk->cylinders,
-            (unsigned int)dsk->heads,
-            (unsigned int)dsk->sectors,
-            (unsigned int)cyls,
-            (unsigned int)heads,
-            (unsigned int)sects);
-    }
-    else {
-        LOG_MSG("Mapping BIOS DISK C/H/S %u/%u/%u as IDE %u/%u/%u\n",
-            (unsigned int)dsk->cylinders,
-            (unsigned int)dsk->heads,
-            (unsigned int)dsk->sectors,
-            (unsigned int)cyls,
-            (unsigned int)heads,
-            (unsigned int)sects);
-    }
 
-    phys_heads = heads;
-    phys_sects = sects;
-    phys_cyls = cyls;
+    	cyls = (uint32_t)(LBA / (sects * heads));
+        if(cyls >= 65535UL) cyls = 65535; // max cyls for IDE CHS is 65535
+
+	}
+    LOG_MSG("IDE: Disk size: %gMB, BIOS C/H/S: %u/%u/%u, IDE: %u/%u/%u\n",
+        (double)LBA * 512.0 / (1024.0 * 1024.0),
+        (unsigned int)dsk->cylinders,
+        (unsigned int)dsk->heads,
+        (unsigned int)dsk->sectors,
+        (unsigned int)cyls,
+        (unsigned int)heads,
+        (unsigned int)sects);
+
+	phys_heads = heads;
+	phys_sects = sects;
+	phys_cyls = cyls;
 }
 
 void IDE_Auto(signed char &index,bool &slave) {
@@ -2755,28 +2816,52 @@ bool IDE_controller_occupied(signed char index, bool slave) { // Return true if 
 }
 
 /* drive_index = drive letter 0...A to 25...Z */
-void IDE_ATAPI_MediaChangeNotify(unsigned char drive_index) {
-    for (unsigned int ide=0;ide < MAX_IDE_CONTROLLERS;ide++) {
-        IDEController *c = idecontroller[ide];
-        if (c == NULL) continue;
-        for (unsigned int ms=0;ms < 2;ms++) {
-            const unsigned int pk = IDEEventPack(c->interface_index,ms).get();
-            IDEDevice *dev = c->device[ms];
-            if (dev == NULL) continue;
-            if (dev->type == IDE_TYPE_CDROM) {
-                IDEATAPICDROMDevice *atapi = (IDEATAPICDROMDevice*)dev;
-                if (drive_index == atapi->drive_index) {
-                    LOG_MSG("IDE ATAPI acknowledge media change for drive %c\n",drive_index+'A');
-                    atapi->has_changed = true;
-                    atapi->loading_mode = LOAD_INSERT_CD;
-                    PIC_RemoveSpecificEvents(IDE_ATAPI_SpinDown,pk);
-                    PIC_RemoveSpecificEvents(IDE_ATAPI_SpinUpComplete,pk);
-                    PIC_RemoveSpecificEvents(IDE_ATAPI_CDInsertion,pk);
-                    PIC_AddEvent(IDE_ATAPI_CDInsertion,atapi->cd_insertion_time/*ms*/,pk);
-                }
-            }
-        }
-    }
+void IDE_ATAPI_MediaChangeNotify(unsigned char drive_index,bool immediate) {
+	for (unsigned int ide=0;ide < MAX_IDE_CONTROLLERS;ide++) {
+		IDEController *c = idecontroller[ide];
+		if (c == NULL) continue;
+		for (unsigned int ms=0;ms < 2;ms++) {
+			const unsigned int pk = IDEEventPack(c->interface_index,ms).get();
+			IDEDevice *dev = c->device[ms];
+			if (dev == NULL) continue;
+			if (dev->type == IDE_TYPE_CDROM) {
+				IDEATAPICDROMDevice *atapi = (IDEATAPICDROMDevice*)dev;
+				if (drive_index == atapi->drive_index) {
+					LOG_MSG("IDE ATAPI acknowledge media change for drive %c\n",drive_index+'A');
+					if (immediate) LOG_MSG("--media change is immediate");
+
+					CDROM_Interface *cdrom = NULL;
+					if (GetMSCDEXDrive(drive_index,&cdrom)) {
+						if (atapi->cdrom) atapi->cdrom->Release();
+						(atapi->cdrom = cdrom)->Addref();
+					}
+
+					bool empty = false;
+
+					if (atapi->cdrom->class_id == CDROM_Interface::ID_FAKE) {
+						CDROM_Interface_Fake *fake = (CDROM_Interface_Fake*)(atapi->cdrom);
+						if (fake->isEmpty) empty = true;
+					}
+
+					/* if asked to change immediately, or the new image is the fake "empty" drive, change right away */
+					if (immediate || empty) {
+						atapi->loading_mode = LOAD_READY;
+						PIC_RemoveSpecificEvents(IDE_ATAPI_SpinDown,pk);
+						PIC_RemoveSpecificEvents(IDE_ATAPI_SpinUpComplete,pk);
+						PIC_RemoveSpecificEvents(IDE_ATAPI_CDInsertion,pk);
+					}
+					else {
+						atapi->has_changed = true;
+						atapi->loading_mode = LOAD_INSERT_CD;
+						PIC_RemoveSpecificEvents(IDE_ATAPI_SpinDown,pk);
+						PIC_RemoveSpecificEvents(IDE_ATAPI_SpinUpComplete,pk);
+						PIC_RemoveSpecificEvents(IDE_ATAPI_CDInsertion,pk);
+						PIC_AddEvent(IDE_ATAPI_CDInsertion,atapi->cd_insertion_time/*ms*/,pk);
+					}
+				}
+			}
+		}
+	}
 }
 
 /* drive_index = drive letter 0...A to 25...Z */
@@ -2797,16 +2882,19 @@ void IDE_CDROM_Attach(signed char index,bool slave,unsigned char drive_index) {
         return;
     }
 
-    if (!GetMSCDEXDrive(drive_index,NULL)) {
+    CDROM_Interface *cdrom = NULL;
+
+    if (!GetMSCDEXDrive(drive_index,&cdrom)) {
         LOG_MSG("IDE: Asked to attach CD-ROM that does not exist\n");
         return;
     }
 
-    dev = new IDEATAPICDROMDevice(c,drive_index,slave);
+    dev = new IDEATAPICDROMDevice(c,drive_index,slave,cdrom);
     if(dev == NULL) {
         LOG_MSG("IMGMOUNT: Failed to allocate CD-ROM drive %c to IDE %s %s", drive_index + 'A', ideslot[index], master_slave[slave ? 1 : 0]);
         return;
     }
+    cdrom->Release();
     dev->update_from_cdrom();
     c->device[slave?1:0] = (IDEDevice*)dev;
     LOG_MSG("IMGMOUNT: CD-ROM image mounted to drive %c (IDE %s %s)", drive_index + 'A', ideslot[index], master_slave[slave ? 1 : 0]);
@@ -2989,7 +3077,7 @@ static void IDE_SelfIO_Out(IDEController *ide,Bitu port,Bitu val,Bitu len) {
 }
 
 /* Get physical (not logical INT 13h) geometry */
-bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32_t &sect,uint32_t &size) {
+bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32_t &sect,uint32_t &size, uint64_t &LBA) {
     IDEController *ide;
     IDEDevice *dev;
     Bitu idx,ms;
@@ -3009,6 +3097,7 @@ bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32
                     heads = ata->phys_heads;
                     sect = ata->phys_sects;
                     cyl = ata->phys_cyls;
+                    LBA = ata->LBA;
                     size = 512;
                     return true;
                 }
@@ -3223,7 +3312,7 @@ void IDE_EmuINT13DiskReadByBIOS(unsigned char disk,unsigned int cyl,unsigned int
                     }
 
                     /* translate BIOS INT 13h geometry to IDE geometry */
-                    if (ata->headshr != 0 || ata->geo_translate) {
+                    if (ata->geo_translate) {
                         unsigned long lba;
 
                         if (dsk == NULL) return;

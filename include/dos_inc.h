@@ -82,6 +82,7 @@ struct CommandTail{
 
 extern bool dos_kernel_disabled;
 
+#if !defined(OSFREE)
 #define IS_DOS_JAPANESE (!dos_kernel_disabled && mem_readb(Real2Phys(dos.tables.dbcs) + 0x02) == 0x81 && mem_readb(Real2Phys(dos.tables.dbcs) + 0x03) == 0x9F)
 #define IS_DOS_CJK (!dos_kernel_disabled && ((mem_readb(Real2Phys(dos.tables.dbcs) + 0x02) == 0x81 || mem_readb(Real2Phys(dos.tables.dbcs) + 0x02) == 0xA1) && (mem_readb(Real2Phys(dos.tables.dbcs) + 0x03) == 0x9F || mem_readb(Real2Phys(dos.tables.dbcs) + 0x03) == 0xFE)))
 #define IS_DOSV (dos.set_jdosv_enabled || dos.set_kdosv_enabled || dos.set_pdosv_enabled || dos.set_tdosv_enabled)
@@ -90,8 +91,17 @@ extern bool dos_kernel_disabled;
 #define IS_PDOSV (dos.set_pdosv_enabled)
 #define IS_TDOSV (dos.set_tdosv_enabled)
 #define IS_J3100 (dos.set_j3100_enabled)
-
-#define	EXT_DEVICE_BIT				0x0200
+#else
+/* OSFREE: You don't get any of this! */
+#define IS_DOS_JAPANESE (0)
+#define IS_DOS_CJK (0)
+#define IS_DOSV (0)
+#define IS_JDOSV (0)
+#define IS_KDOSV (0)
+#define IS_PDOSV (0)
+#define IS_TDOSV (0)
+#define IS_J3100 (0)
+#endif
 
 extern uint16_t first_umb_seg;
 extern uint16_t first_umb_size;
@@ -230,6 +240,7 @@ namespace DeviceInfoFlags
 	constexpr uint16_t Binary           = 1<<5;
 	constexpr uint16_t EofOnInput       = 1<<6;
 	constexpr uint16_t Device           = 1<<7;
+	constexpr uint16_t ExternalDevice   = 1<<9;
 	constexpr uint16_t OpenCloseSupport = 1<<11;
 	constexpr uint16_t OutputUntilBusy  = 1<<13;
 	constexpr uint16_t IoctlSupport     = 1<<14;
@@ -270,6 +281,7 @@ bool DOS_SetFileDate(uint16_t entry, uint16_t ntime, uint16_t ndate);
 
 /* Routines for Drive Class */
 bool DOS_OpenFile(char const * name,uint8_t flags,uint16_t * entry,bool fcb = false);
+bool DOS_OpenExistingSFTEntry(uint16_t jft_handle,int sft_handle);
 bool DOS_OpenFileExtended(char const * name, uint16_t flags, uint16_t createAttr, uint16_t action, uint16_t *entry, uint16_t* status);
 bool DOS_CreateFile(char const * name,uint16_t attributes,uint16_t * entry, bool fcb = false);
 bool DOS_UnlinkFile(char const * const name);
@@ -281,7 +293,7 @@ bool DOS_CreateTempFile(char * const name,uint16_t * entry);
 bool DOS_FileExists(char const * const name);
 
 /* Helper Functions */
-bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive,bool isVolume = false);
+bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive);
 /* Drive Handing Routines */
 uint8_t DOS_GetDefaultDrive(void);
 void DOS_SetDefaultDrive(uint8_t drive);
@@ -313,7 +325,8 @@ uint32_t DOS_CheckExtDevice(const char *name, bool already_flag);
 /* Execute and new process creation */
 bool DOS_NewPSP(uint16_t segment,uint16_t size);
 bool DOS_ChildPSP(uint16_t segment,uint16_t size);
-bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags);
+bool DOS_Execute(const char* name, PhysPt block_pt, uint16_t flags);
+#define DOSEXEC_DEVICEDRIVER 0x0100 /* special flags param for DOS_Execute() that DOS programs cannot pass through INT 21h, block_pt becomes direct segment */
 void DOS_Terminate(uint16_t pspseg,bool tsr,uint8_t exitcode);
 
 /* Memory Handling Routines */
@@ -367,7 +380,8 @@ enum {
 	KEYB_FILENOTFOUND,
 	KEYB_INVALIDFILE,
 	KEYB_LAYOUTNOTFOUND,
-	KEYB_INVALIDCPFILE
+	KEYB_INVALIDCPFILE,
+	KEYB_LOADERROR
 };
 
 
@@ -500,6 +514,7 @@ public:
 	void    RestoreCommandTail  (void);
 	bool	SetNumFiles			(uint16_t fileNum);
 	uint16_t	FindEntryByHandle	(uint8_t handle);
+	uint16_t	GetSegment		(void) const			{ return seg; }
 			
 private:
 	#ifdef _MSC_VER
@@ -573,8 +588,9 @@ class DOS_InfoBlock:public MemStruct {
 public:
     DOS_InfoBlock() {};
 	void SetLocation(uint16_t  segment);
-    void SetFirstDPB(uint32_t _first_dpb);
+	void SetFirstDPB(uint32_t _first_dpb);
 	void SetFirstMCB(uint16_t _firstmcb);
+	uint16_t GetFirstMCB(void);
 	void SetBuffers(uint16_t x,uint16_t y);
 	void SetCurDirStruct(uint32_t _curdirstruct);
 	void SetFCBTable(uint32_t _fcbtable);
@@ -587,6 +603,7 @@ public:
 	uint8_t	GetUMBChainState(void);
 	RealPt	GetPointer(void);
 	uint32_t GetDeviceChain(void);
+	uint32_t GetStartOfDeviceChain(void);/*this one includes the NUL driver at the very start*/
 
 	void SetBootDrive(uint8_t drv) { sSave(sDIB,bootDrive,drv); }
 	uint8_t GetBootDrive(void) { return sGet(sDIB,bootDrive); }
@@ -657,7 +674,7 @@ public:
 
     int GetFindData(int fmt,char * finddata,int *c);
 	
-	void SetupSearch(uint8_t _sdrive,uint8_t _sattr,char * pattern);
+	void SetupSearch(uint8_t _sdrive,uint8_t _sattr,const char * pattern);
 	void SetResult(const char * _name,const char * _lname,uint32_t _size,uint32_t _hsize,uint16_t _date,uint16_t _time,uint8_t _attr);
 	
 	uint8_t GetSearchDrive(void);
@@ -821,6 +838,126 @@ private:
 	#pragma pack()
 	#endif
 };
+
+static constexpr uint32_t NONEXTDEV = 0xFFFFFFFFul;
+
+static constexpr uint16_t DEVATTR_ISCHAR = 1u << 15u;/*which determines which of the following flags apply*/
+
+static constexpr uint16_t DEVATTRCHR_IOCTL_CTLSTRINGS = 1u << 14u;/*MS-DOS 4.0: 1 IF THE DEVICE UNDERSTANDS IOCTL CONTROL STRINGS*/
+static constexpr uint16_t DEVATTRCHR_IOCTL_OUTPUT_UNTIL_BUSY = 1u << 13u;/*MS-DOS 4.0: 1 IF THE DEVICE SUPPORTS OUTPUT-UNTIL-BUSY*/
+static constexpr uint16_t DEVATTRCHR_OPENCLOSE = 1u << 11u;/*MS-DOS 4.0: 1 IF THE DEVICE UNDERSTANDS OPEN/CLOSE*/
+static constexpr uint16_t DEVATTRCHR_INT29 = 1u << 4u;/*MS-DOS 4.0: 1 IF DEVICE IS RECIPIENT OF INT 29H*/
+static constexpr uint16_t DEVATTRCHR_CLOCK = 1u << 3u;/*MS-DOS 4.0: 1 IF DEVICE IS CLOCK DEVICE*/
+static constexpr uint16_t DEVATTRCHR_NULL = 1u << 2u;/*MS-DOS 4.0: 1 IF DEVICE IS NULL DEVICE*/
+static constexpr uint16_t DEVATTRCHR_CONOUT = 1u << 1u;/*MS-DOS 4.0: 1 IF DEVICE IS CONSOLE OUTPUT*/
+static constexpr uint16_t DEVATTRCHR_CONIN = 1u << 0u;/*MS-DOS 4.0: 1 IF DEVICE IS CONSOLE INPUT*/
+
+static constexpr uint16_t DEVATTRBLK_IOCTL_CTLSTRINGS = 1u << 14u;/*MS-DOS 4.0: 1 IF THE DEVICE UNDERSTANDS IOCTL CONTROL STRINGS*/
+static constexpr uint16_t DEVATTRBLK_IOCTL_MEDIA_FAT_BYTE = 1u << 13u;/*MS-DOS 4.0: 1 IF THE DEVICE DETERMINES MEDIA BY EXAMINING THE FAT ID BYTE*/
+static constexpr uint16_t DEVATTRBLK_OPENCLOSEREMOVABLE = 1u << 11u;/*MS-DOS 4.0: 1 IF THE DEVICE UNDERSTANDS OPEN/CLOSE/REMOVABLE MEDIA*/
+static constexpr uint16_t DEVATTRBLK_IBM_DRIVE_SHARED = 1u << 9u;/*MS-DOS 4.0: ... IS CURRENTLY USED ON IBM SYSTEMS TO INDICATE "DRIVE IS SHARED" ... THIS USE IS NOT DOCUMENTED ... used by utilities like FORMAT which are supposed to fail on shared drives on server machines */
+static constexpr uint16_t DEVATTRBLK_IOCTL_GEN = 1u << 6u;/*MS-DOS 4.0: IF DEVICE HAS SUPPORT FOR GETMAP/SETMAP OF LOGICAL DRIVES / UNDERSTANDS GENERIC IOCTL FUNCTION CALLS*/
+static constexpr uint16_t DEVATTRBLK_EXTENDED = 1u << 1u;/*MS-DOS 4.0: Extended block device (>=32MB) aka EXTDRVR*/
+
+enum DEVFUNC {
+	DEVFUNC_INIT=0,
+	DEVFUNC_MEDIACHECK=1,
+	DEVFUNC_GETPBP=2,
+	DEVFUNC_IOCTL_READ=3,
+	DEVFUNC_READ=4,
+	DEVFUNC_NDREAD=5,/*non destructive read*/
+	DEVFUNC_INPUT_STATUS=6,
+	DEVFUNC_INPUT_FLUSH=7,
+	DEVFUNC_WRITE=8,
+	DEVFUNC_WRITEVERIFY=9,
+	DEVFUNC_OUTPUT_STATUS=10,
+	DEVFUNC_OUTPUT_FLUSH=11,
+	DEVFUNC_IOCTL_WRITE=12,
+	DEVFUNC_OPEN=13,
+	DEVFUNC_CLOSE=14,
+	DEVFUNC_REMOVABLE_MEDIA=15,
+	DEVFUNC_OUTPUT_UNTIL_BUSY=16,/*MS-DOS 4.0*/
+	DEVFUNC_GENERAL_IOCTL=19,
+	DEVFUNC_GET_OWNER=23,/*MS-DOS 4.0*/
+	DEVFUNC_SET_OWNER=24/*MS-DOS 4.0*/
+};
+
+enum DOSDEVERR {
+	DOSDEVERR_WRITEPROTECT=0,
+	DOSDEVERR_UNKNOWNUNIT=1,
+	DOSDEVERR_DRIVENOTREADY=2,
+	DOSDEVERR_UNKNOWNCOMMAND=3,
+	DOSDEVERR_CRC=4,
+	DOSDEVERR_BADDRIVEREQUEST=5,
+	DOSDEVERR_SEEKERR=6,
+	DOSDEVERR_UNKNOWNMEDIA=7,
+	DOSDEVERR_SECTORNOTFOUND=8,
+	DOSDEVERR_PRINTEROUTOFPAPER=9,
+	DOSDEVERR_WRITEFAULT=10,
+	DOSDEVERR_READFAULT=11,
+	DOSDEVERR_GENERALFAILURE=12
+};
+
+class DOS_DEVHDR : public MemStruct{/*device driver header*/
+public:
+	DOS_DEVHDR(uint16_t seg) { SetPt(seg); }
+	uint32_t GetNextDriver(void) { return (uint32_t)sGet(hdr,nextdev); }; /* NONEXTDEV if end of list */
+	void SetNextDriver(const uint32_t p) { sSave(hdr,nextdev,p); };
+	uint16_t GetAttributes(void) { return (uint16_t)sGet(hdr,attributes); };
+	uint16_t GetStrategyOffset(void) { return (uint16_t)sGet(hdr,strategy_entry); };
+	uint16_t GetInterruptOffset(void) { return (uint16_t)sGet(hdr,interrupt_entry); };
+	void GetName(char * const _name) { MEM_BlockRead(pt+offsetof(hdr,name),_name,8);_name[8]=0;}
+
+	#ifdef _MSC_VER
+	#pragma pack (1)
+	#endif
+	struct hdr {
+		uint32_t nextdev; /* pointer to next device or FFFF:FFFF */
+		uint16_t attributes;
+		uint16_t strategy_entry;
+		uint16_t interrupt_entry;
+		uint8_t name[8];
+	} GCC_ATTRIBUTE(packed);/*=18 bytes*/
+
+	/* structure used in passing requests to device driver, head structure: "Static Request Header" */
+	struct streqhdr {
+		uint8_t record_length; /* length of the driver request */
+		uint8_t unit_code;
+		uint8_t cmd_code;
+		uint16_t status; /* status word: 15=ERR 9=BUSY 8=DONE 7..0=ERR CODE */
+		uint32_t reserved[2]; /* reserved for internal DOS use, queue links */
+	} GCC_ATTRIBUTE(packed);/*=13 bytes*/
+
+	/* init request */
+	struct req_init {
+		struct streqhdr hdr; /* static request header (13 bytes) DEVFUNC_INIT */
+		uint8_t num_of_units; /* number of units */
+		uint32_t end_ptr; /* ending address of driver, filled in by INIT */
+		uint32_t bpb_ptr; /* in: init arguments  out: BPB array */
+		/* MS-DOS 2.0 ends here == 22 bytes */
+		uint8_t drive_num; /* driver number */
+		uint16_t config_err; /* config.sys error flag */
+	} GCC_ATTRIBUTE(packed);/*=25 bytes*/
+
+	/* read/write request */
+	struct req_rwio {
+		struct streqhdr hdr; /* static request header (13 bytes) DEVFUNC_READ/DEVFUNC_WRITE/DEVFUNC_WRITEVERIFY */
+		uint8_t media_dpb; /* from DPB */
+		uint32_t xfer_addr; /* transfer address (16:16) */
+		uint16_t count; /* byte or sector count */
+		uint16_t start_sector; /* starting sector (if block device) */
+		/* block device with 16-bit sector stops here (prior to MS-DOS 3.3) == 22 bytes */
+		/* the following applies if EXTDRVR */
+		uint32_t ptr_volid; /* pointer to volume ID (R/W according to MS-DOS 4.0 source code) */
+		uint32_t start_sector32; /* starting sector (if block device) */
+		/* EXTDRVR stops here == 30 bytes */
+	} GCC_ATTRIBUTE(packed);/*=30 bytes*/
+
+	#ifdef _MSC_VER
+	#pragma pack ()
+	#endif
+};
+
 extern DOS_InfoBlock dos_infoblock;
 
 struct DOS_Block {
@@ -854,13 +991,22 @@ struct DOS_Block {
         uint16_t mediaid_offset = 0x17; // media ID offset in DPB (MS-DOS 4.x-6.x case)
     } tables;
     uint16_t loaded_codepage = 0;
+#if !defined(OSFREE)
     bool set_jdosv_enabled = false;
     bool set_kdosv_enabled = false;
     bool set_pdosv_enabled = false;
     bool set_tdosv_enabled = false;
     bool set_j3100_enabled = false;
+#else
+    static constexpr bool set_jdosv_enabled = false;
+    static constexpr bool set_kdosv_enabled = false;
+    static constexpr bool set_pdosv_enabled = false;
+    static constexpr bool set_tdosv_enabled = false;
+    static constexpr bool set_j3100_enabled = false;
+#endif
     bool im_enable_flag;
     uint16_t dcp;	// Device command packet
+    static constexpr uint16_t dcp_size_seg = 3;//allocated size of DCP buffer
 };
 
 extern DOS_Block dos;
@@ -1078,5 +1224,14 @@ const std::map<std::string, int> country_code_map {
 };
 
 void DOS_FlushSTDIN(void);
+
+
+extern unsigned char exepack_handling;
+
+enum {
+	EXEPACK_NONE,
+	EXEPACK_A20OFF,
+	EXEPACK_UNPACK
+};
 
 #endif

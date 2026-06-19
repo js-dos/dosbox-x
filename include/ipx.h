@@ -60,6 +60,13 @@
 #define COMP_UNDELIVERABLE    0xfe
 #define COMP_HARDWAREERROR    0xff
 
+enum {
+	IPX_NONE=0,
+	IPX_OLD,
+	IPX_OLD_LLC,
+	IPX_8137
+};
+
 #ifdef _MSC_VER
 #pragma pack(1)
 #endif
@@ -100,7 +107,11 @@ __inline__ Uint32 SDLNet_Read32(const void *areap) {
 }  // namespace
 #else
 // For Uint8 type
+#if defined(C_SDL2_NET)  && C_SDL2_NET
+#include <SDL2/SDL_net.h>
+#else
 #include "SDL_net.h"
+#endif
 #endif
 
 #ifndef SDLNet_GetError
@@ -191,12 +202,5 @@ void PackIP(IPaddress ipAddr, PackedIP *ipPack);
 #ifdef _MSC_VER
 #pragma pack()
 #endif
-
-enum {
-	IPX_NONE=0,
-	IPX_OLD,
-	IPX_OLD_LLC,
-	IPX_8137
-};
 
 #endif

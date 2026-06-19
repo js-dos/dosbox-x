@@ -15,6 +15,7 @@ extern "C" {
 #include "dosbox.h"
 #include "logging.h"
 #include "menudef.h"
+#include "../ints/int10.h"
 #include <output/output_opengl.h>
 #include <output/output_tools.h>
 #include <output/output_tools_xbrz.h>
@@ -101,7 +102,6 @@ extern bool SDLDrawGenFontTextureInit;
 extern int aspect_ratio_x, aspect_ratio_y;
 extern int initgl, lastcp;
 extern bool font_16_init;
-extern uint8_t int10_font_16[256 * 16], int10_font_16_init[256 * 16];
 
 SDL_OpenGL sdl_opengl = {0};
 
@@ -342,7 +342,12 @@ void OUTPUT_OPENGL_Select( GLKind kind )
     sdl_opengl.use_shader = false;
     initgl=0;
 #if defined(C_SDL2)
-    SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "opengl");
+#if defined(MACOSX)
+    SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "opengl");// setting this to "1" caused crashes on macOS
+#else
+    SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "1"); // setting this to "opengl" caused crashes in certain situations (#3661). can still be overridden via environment variable
+#endif
+
     void GFX_SetResizeable(bool enable);
     GFX_SetResizeable(true);
     sdl.window = GFX_SetSDLWindowMode(640,400, SCREEN_OPENGL);
@@ -353,6 +358,8 @@ void OUTPUT_OPENGL_Select( GLKind kind )
         }
         sdl_opengl.context = SDL_GL_CreateContext(sdl.window);
         sdl.surface = SDL_GetWindowSurface(sdl.window);
+
+        LOG_MSG( "OpenGL Version : %s", glGetString( GL_VERSION ));
     }
     if (!sdl.window || !sdl_opengl.context || sdl.surface == NULL) {
 #else
@@ -764,7 +771,9 @@ Bitu OUTPUT_OPENGL_SetSize()
     }
     else
     {
-        sdl_opengl.framebuf = calloc(adjTexWidth*adjTexHeight, 4); //32 bit color
+        /* NTS: Allocate an additional 4K on top because modern MesaGL / libgallium likes to use SSE/AVX
+	 *      instructions to memcpy on texture update and that can EASILY read a little bit past the buffer. */
+        sdl_opengl.framebuf = calloc((adjTexWidth*adjTexHeight) + (4096/4), 4); //32 bit color
     }
     sdl_opengl.pitch = adjTexWidth * 4;
 
@@ -779,7 +788,7 @@ Bitu OUTPUT_OPENGL_SetSize()
     }
 #endif
 
-    if (sdl.desktop.fullscreen&&sdl_opengl.use_shader)
+    if (sdl_opengl.use_shader)
         glViewport((sdl.surface->w-sdl.clip.w)/2,(sdl.surface->h-sdl.clip.h)/2,sdl.clip.w,sdl.clip.h);
     else
         glViewport(0, 0, sdl.surface->w, sdl.surface->h);
@@ -941,17 +950,17 @@ bool OUTPUT_OPENGL_StartUpdate(uint8_t* &pixels, Bitu &pitch)
     return true;
 }
 
-void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
-{
-    if (!(sdl.must_redraw_all && changedLines == NULL)) 
-    {
+static void CheckClearing(void) {
         if (sdl_opengl.clear_countdown > 0)
         {
-            sdl_opengl.clear_countdown--;
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
+            if (sdl_opengl.menudraw_countdown == 0)
+                sdl_opengl.menudraw_countdown++;
         }
+}
 
+static void CheckMenuDrawing(void) {
         if (sdl_opengl.menudraw_countdown > 0) 
         {
             sdl_opengl.menudraw_countdown--;
@@ -960,7 +969,17 @@ void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
             GFX_DrawSDLMenu(mainMenu, mainMenu.display_list);
 #endif
         }
+}
 
+static void CheckManagement(void) {
+	CheckClearing();
+	CheckMenuDrawing();
+}
+
+void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
+{
+    if (!(sdl.must_redraw_all && changedLines == NULL)) 
+    {
 #if C_XBRZ
         if (sdl_xbrz.enable && sdl_xbrz.scale_on)
         {
@@ -1017,6 +1036,7 @@ void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
 #endif
                     (uint8_t *)sdl_opengl.framebuf);
             }
+            CheckManagement();
             glCallList(sdl_opengl.displaylist);
             SDL_GL_SwapBuffers();
         }
@@ -1060,6 +1080,17 @@ void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
                 {
                     uint8_t *pixels = (uint8_t *)sdl_opengl.framebuf + y * sdl_opengl.pitch;
                     Bitu height = changedLines[index];
+
+                    // FIXME: This is causing libgallium crashes by sometimes getting y+height > sdl.draw.height.
+                    //        It seems to happen on VGA mode changes.
+                    //        Figure out what is causing that.
+                    //        I have to see any crash from y >= sdl.draw.height though.
+                    if ((y+height) > sdl.draw.height) {
+                        LOG(LOG_MISC,LOG_WARN)("OpenGL: Changed lines extend past texture (y=%u h=%u drawheight=%u y+h=%u y+h>drawheight)",
+                            (unsigned int)y,(unsigned int)height,(unsigned int)(y+height),(unsigned int)sdl.draw.height);
+                        height = sdl.draw.height - y;
+                    }
+
                     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (int)y,
                         (int)sdl.draw.width, (int)height, GL_BGRA_EXT,
 #if defined (MACOSX) && !defined(C_SDL2)
@@ -1076,6 +1107,8 @@ void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
             }
         } else
             return;
+
+        CheckManagement();
         if (sdl_opengl.program_object) {
             glUniform1i(sdl_opengl.ruby.frame_count, sdl_opengl.actual_frame_count++);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1083,37 +1116,37 @@ void OUTPUT_OPENGL_EndUpdate(const uint16_t *changedLines)
             glCallList(sdl_opengl.displaylist);
 
 #if 0 /* DEBUG Prove to me that you're drawing the damn texture */
-            glBindTexture(GL_TEXTURE_2D, SDLDrawGenFontTexture);
+        glBindTexture(GL_TEXTURE_2D, SDLDrawGenFontTexture);
 
-            glPushMatrix();
+	glPushMatrix();
 
-            glMatrixMode(GL_TEXTURE);
-            glLoadIdentity();
-            glScaled(1.0 / SDLDrawGenFontTextureWidth, 1.0 / SDLDrawGenFontTextureHeight, 1.0);
+	glMatrixMode(GL_TEXTURE);
+	glLoadIdentity();
+	glScaled(1.0 / SDLDrawGenFontTextureWidth, 1.0 / SDLDrawGenFontTextureHeight, 1.0);
 
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glEnable(GL_ALPHA_TEST);
-            glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_ALPHA_TEST);
+	glEnable(GL_BLEND);
 
-            glBegin(GL_QUADS);
+	glBegin(GL_QUADS);
 
-            glTexCoord2i(0, 0); glVertex2i(0, 0); // lower left
-            glTexCoord2i(SDLDrawGenFontTextureWidth, 0); glVertex2i(SDLDrawGenFontTextureWidth, 0); // lower right
-            glTexCoord2i(SDLDrawGenFontTextureWidth, SDLDrawGenFontTextureHeight); glVertex2i(SDLDrawGenFontTextureWidth, SDLDrawGenFontTextureHeight); // upper right
-            glTexCoord2i(0, SDLDrawGenFontTextureHeight); glVertex2i(0, SDLDrawGenFontTextureHeight); // upper left
+	glTexCoord2i(0, 0); glVertex2i(0, 0); // lower left
+	glTexCoord2i(SDLDrawGenFontTextureWidth, 0); glVertex2i(SDLDrawGenFontTextureWidth, 0); // lower right
+	glTexCoord2i(SDLDrawGenFontTextureWidth, SDLDrawGenFontTextureHeight); glVertex2i(SDLDrawGenFontTextureWidth, SDLDrawGenFontTextureHeight); // upper right
+	glTexCoord2i(0, SDLDrawGenFontTextureHeight); glVertex2i(0, SDLDrawGenFontTextureHeight); // upper left
 
-            glEnd();
+	glEnd();
 
-            glBlendFunc(GL_ONE, GL_ZERO);
-            glDisable(GL_ALPHA_TEST);
-            glEnable(GL_TEXTURE_2D);
+	glBlendFunc(GL_ONE, GL_ZERO);
+	glDisable(GL_ALPHA_TEST);
+	glEnable(GL_TEXTURE_2D);
 
-            glPopMatrix();
+	glPopMatrix();
 
-            glBindTexture(GL_TEXTURE_2D, sdl_opengl.texture);
+	glBindTexture(GL_TEXTURE_2D, sdl_opengl.texture);
 #endif
 
-            SDL_GL_SwapBuffers();
+	SDL_GL_SwapBuffers();
 
         if (!menu.hidecycles && !sdl.desktop.fullscreen) frames++;
     }

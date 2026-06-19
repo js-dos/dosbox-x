@@ -1,3 +1,593 @@
+2026.06.02
+  - DOS file search bugfix: Prevent undefined stat_block usage on failed
+    ht_stat() calls. Use a separate variable for special file attribute
+    checks to avoid reusing stat_block when it contains garbage values.
+    This fixes issues on latest Darwin kernels. (cimarronm)
+  - Added function to config to load MS-DOS device drivers. The command is
+    config -device <device driver path> -devparm <parameters>. For example,
+    to load OAKCDROM.SYS into memory, you could type:
+
+    config -device C:\DOS\OAKCDROM.SYS -devparm "/D:CD001"
+
+    which is equivalent to the DEVICE line in CONFIG.SYS:
+
+    DEVICE=C:\DOS\OAKCDROM.SYS /D:CD001
+
+    The goal is that DOSBox-X would fully support, through INT 21h and
+    other interfaces, real device drivers instead of hard coding specific
+    driver emulation. INT 21h would use the actual device chain instead
+    of a built-in list. Built-in device emulation could appear properly
+    in the device chain instead of fake entries.
+
+    There seems to be interest on the DOSBox-X discussion and issue trackers
+    of getting DOSBox-X to provide or emulate the MS-DOS/Windows 95 IFS
+    driver to get Windows 95 to boot from a disk image in the native DOSBox-X
+    environment, perhaps this would help enable that.
+
+    At this time (in development), only INIT is called. (joncampbell123)
+  - External DOS device driver read/write: Optimize I/O by using larger
+    read/write transfers (currently 16 based on how much memory is allocated
+    for device driver I/O request and data). Until this change, the code
+    used an extremely inefficient 1-byte read/write method to transfer
+    to or from the device driver. (joncampbell123)
+  - DOS execute bugfix: While ownership was properly listed in the MCB for
+    the PSP segment, the environment block associated with the program was
+    always listed in the MCB as belonging to the parent process. This has
+    been addressed (joncampbell123)
+  - Fix INT 21h AH=3Fh/40h READ/WRITE processing, when talking to an external
+    MS-DOS device driver, so that the bytes actually processed by the driver
+    are returned in AX to the DOS program, instead of giving the DOS program
+    the impression that all were processed when they may not have been. (joncampbell123)
+  - CD Audio: Fix track not advancing at end of playback (maron2000)
+  - Fix geometry detection of qcow2 images (maron2000)
+  - Fixed advanced scaler rendering artifacts when machine type is MDA,
+    Hercules, CGA, EGA, Tandy, or PCjr, or when SVGA 15/16bpp SVGA modes
+    are active. CGA/EGA with Advanced MAME 2x/3x and HQ2X scalers should
+    render correctly now. (joncampbell123)
+  - Added dosbox.conf [devices] section, which functions much like the
+    DEVICE= lines in CONFIG.SYS to load MS-DOS device drivers at startup.
+    Added support for RUN= lines to run commands like IMGMOUNT to help
+    set up drive mounts and CD-ROM devices, or any other diagnostic
+    purpose. While RUN= works just like the command shell, it is not
+    intended to be a general command shell for running DOS games or
+    applications that are unrelated to system startup. Added debugging
+    options like ECHO which echo the command about to be run, and
+    DEBUGBREAK which breaks into the debugger when starting the program
+    or device driver. (joncampbell123)
+  - Added code to device driver loading which will, where possible,
+    attempt to load the device driver as low as possible and pack it into
+    the DOS kernel below the start of the MCB chain to resemble how
+    device drivers are loaded in MS-DOS. (joncampbell123)
+  - Added debugger command "DOS DEVS" to list and enumerate the device
+    drivers in the DOS kernel. Added code to BOOT --boothax msdos to
+    track the location of the device driver list in the guest MS-DOS
+    kernel so "DOS DEVS" can work there as well. (joncampbell123)
+  - DOSBox-X shell will now free any memory it allocated and close files
+    that were opened on shutdown. This is important so that the CONFIG
+    shell (used for loading device drivers) does not leave behind
+    any memory it allocated when transferring control to the main
+    command shell. However, do NOT release memory and do NOT close files
+    on shell shutdown if the reason for the shutdown is the BOOT command.
+    By the time normal shutdown occurs, the BOOT command has already
+    overwritten low memory (and the MCB chain) with the guest OS's boot
+    code, therefore freeing shell memory in that cause would only cause
+    a complaint about a corrupted MCB chain and emulator E_Exit() shutdown.
+    (joncampbell123)
+  - Fixed VHD, qcow2 image geometry calculation (maron2000)
+  - Fix CONFIG vs DOS shell to ensure the welcome screen is printed first
+    before anything else on the console during startup. This is to help
+    keep any output from programs and device drivers on screen where
+    the user can see it (joncampbell123)
+  - Add basic support for MS-DOS block device drivers. If a block device
+    driver succeeds, set up a disk image object and attach it to the
+    FAT filesystem driver, and then a drive letter. At this time, this
+    is enough for Microsoft RAMDRIVE.SYS to load and appear as a working
+    drive letter in DOSBox-X (joncampbell123)
+  - CD-ROM device emulation is no longer strictly tied to MSCDEX emulation.
+    While devices are still initialized through MSCDEX emulation, it is now
+    possible for other parts of emulation to own a reference to it without
+    MSCDEX. This means it is now possible for CD-ROM emulation to work
+    after booting a guest OS without reaching back through MSCDEX emulation,
+    and MSCDEX emulation can now unload properly with the rest of the DOS
+    kernel. (joncampbell123)
+  - Fix bug where El Torito no emulation boot failed to notify the DOS
+    kernel that the MCB chain is no longer valid, causing MCB chain corruption
+    crashes. (joncampbell123)
+  - Added checks to sector I/O code to fix potential buffer overrun issues.
+    (orbisai0security)
+  - Fixed logging of 'Packed file is corrupt' message detection (maron2000)
+  - Fixed upper 32-bit of LBA was always cleared (maron2000)
+  - Fix and revise MSCDEX and CD-ROM emulation to disentangle the two,
+    so that MSCDEX no longer needs to remain in the background when BOOTed
+    into a guest OS for IDE emulation to work. (joncampbell123)
+  - CD-ROM emulation updated to use reference counting to improve sharing
+    of the image between IDE, MSCDEX, and general CD-ROM emulation.
+    IDE emulation can hold on to a reference instead of constantly asking
+    MSCDEX for it. (joncampbell123)
+  - Fix bug where mounting an invalid CUE file with no tracks caused DOSBox-X
+    to crash. (joncampbell123)
+  - MSCDEX and CD-ROM emulation: Cleanup and centralize creation of CD-ROM
+    interface objects, including the creation of the fake "empty" special
+    interface used to emulate an empty CD-ROM drive. (joncampbell123)
+  - Revise MSCDEX emulation to separate the CD-ROM subunit and drive tracking
+    from MSCDEX itself so that state can persist properly for a guest OS
+    even when MSCDEX is shutdown during BOOT. (joncampbell123)
+  - Add -replace option to IMGMOUNT to allow changing the ISO image assigned
+    to a CD-ROM drive without changing or altering the drive letter already
+    assigned. -replace is strictly limited to CD-ROM drives where the drive
+    letter is already assigned to that drive letter. (joncampbell123)
+  - Clean up the Drives menu for any drive letter assigned to a CD-ROM drive.
+    Enable the "Mount a disk or CD image file" and "Mount multiple disk/CD images"
+    even if the drive letter already has a CD-ROM drive attached, in which case
+    the menu item just replaces it. Allow these menu items to work even when
+    running a guest OS so that Windows 95 users can load any ISO image they
+    want at any time, instead of having to pre-load all images they will need
+    on a swap chain before BOOT. (joncampbell123)
+  - Replace ISO mounting code from the menu item to call more directly into
+    IMGMOUNT to avoid making a commad shell object which would probably interfere
+    with the guest OS. (joncampbell123)
+  - Enable the "Unmount drive" menu option under Drives for any drive attached
+    to a CD-ROM drive while running a guest OS like Windows 95. When used in
+    that scenario, it does not remove the drive letter, but instead acts like
+    a command to eject the CD from the CD-ROM drive (swaps in the "empty"
+    CD-ROM image). In the DOSBox-X environment "Unmount drive" will still
+    unmount the drive and remove the drive letter as expected. (joncampbell123)
+  - "Swap disk" menu item under "Drives" is now enabled even while running a
+    guest OS like Windows 95, if the drive is associated with a CD-ROM drive.
+    Using the command rotates through the CD-ROM drive swap chain only for
+    that specific drive, instead of all drives as the Swap CD mapper shortcut
+    would do. (joncampbell123)
+  - IDE emulation: Skip the CD-ROM eject / unload / load delay if media change
+    is swapping to the "empty" CD-ROM image object. (joncampbell123)
+  - Program object (base class of built-in commands) will no longer attempt to
+    do anything with PSP segments or command line strings in memory if invoked
+    while DOS kernel is disabled (running a guest OS). (joncampbell123)
+  - IDE ATAPI CD-ROM emulation: If the guest issues the START/STOP command
+    to eject the CD-ROM drive, replace the CD-ROM image with the "empty" object
+    to emulate a now-empty CD-ROM drive. (joncampbell123)
+  - Enable "Swap disk" menu command for floppy drives even while running a
+    guest OS, as long as a floppy drive was already mounted there. (joncampbell123)
+  - BOOT: Fixed a regression of floppy image detection (maron2000)
+  - Sound Blaster DSP command 0x10 (Direct DAC) and Disney Sound Source emulation
+    will hold the last sample received from the guest application to avoid popping
+    noises if games like In Extremis use those devices to play sound effects
+    that have a DC bias way off center. (joncampbell123)
+  - Added DC bias correction to the audio mixing code so that, if games like
+    In Extremis finish a sound effect with the last held sample way off center,
+    it doesn't cause all other audio to clip and distort, and it does not
+    potentially cause all audio on the user's operating system (as modern OSes
+    mix all audio across applications) to clip and distort, such as playing
+    In Extremis while listening to a YouTube video. (joncampbell123)
+  - Fixed bug in MMX instruction EMMS emulation that correctly marked all FPU
+    registers as empty but also reset the FPU status and control words. This
+    fixes the distorted 3D cube when running the Microsoft DirectX diagnostics
+    program (dxdiag.exe) with software rendering. (joncampbell123)
+  - FPU instructions now correctly throw exception 7 (Coprocessor not present)
+    if the EM (emulation) and TS (task switch) bits in CR0 are set, as documented
+    by Intel. Many OSes, including Microsoft Windows, require this fix in order
+    to properly maintain FPU state while multitasking. Without this fix, the FPU
+    state is never switched and all applications (and kernel drivers in Windows 98)
+    end up corrupting each other's FPU state. This fixes glitching artifacts in
+    "Attack of the Saucerman!" by Psygnosis when emulating a CPU type that supports
+    MMX instructions. It also appears to fix the random 3D rendering errors
+    (verticies spiking off into the distance at random) when running "The Sims" for
+    Windows 95 by Maxis, although the game still seems to exit at random after
+    a while and the opening FMV video locks up at some random point. As part of the
+    same fix, MMX instructions will also trigger the exception given the same
+    condition.
+    This fix is only applicable to normal core (core=normal) (joncampbell123)
+  - Option to disable TTF winperc limit (emendelson)
+  - Fixed screenshot crash (and others) in protected-mode games with output=ttf
+    (AleWin32)
+  - Debugger: Add missing debugger commands in documentation (AleWin32)
+  - Debugger: MEMFIND/MEMS fixes (most important: protected mode addressing)
+    (AleWin32)
+  - IMGMOUNT: Attach CD-ROM to IDE controller (maron2000)
+  - Bump mt32emu to ver 2.8.0 (maron2000)
+  - IMGMOUNT: Ensure not to attach a new drive to the IDE Controller when running
+    a booted guest OS. (maron2000)
+  - Fixed savestate load producing scrambled graphics (AleWin32)
+  - Feature: Add detailed info when loading savestate mismatch (AleWin32)
+  - output_ttf: Don't reset colors when already in TTF output mode (maron2000)
+
+2026.05.02
+  - DOSBox-X will now check both the current directory and the .config
+    directory in your home directory for DOSBox-X logo PNG files.
+    It is now possible to configure one set of PNG files as a default
+    for all uses of DOSBox-X from your user account. (joncampbell123).
+  - src/gui/render.cpp: Added missing ifdef conditional on C_METAL to enable
+    building on macOS platforms without Metal support. (herrnst)
+  - Fixed Metal support detection: add framework linker flags to configure
+    check (maron2000)
+  - Fixed window position not centered even when windowposition option is set
+    to do so. (maron2000)
+  - Fixed MSCDEX device name padding for short names (maron2000)
+  - When DOS games use the Adlib FM chip to do "digitized speech", DOSBox-X
+    does emulate that correctly, and it also correctly emulates how low
+    the volume is on the sound card output. However to make it more
+    audible, a new option "adlib pcm boost" has been added. If set,
+    and the Adlib emulation detects that the guest application is
+    playing PCM audio through it, the audio levels of the FM output
+    will be amplified to make the digitized speech much more audible.
+    (joncampbell123)
+  - Fixed mapping of TTF to match with guest codepage when launched with
+    output=ttf. (maron2000)
+  - Limit window size of TTF output to 2/3rd of the screen in both
+    dimensions so that the window is not TOO large on the user's screen.
+    (joncampbell123)
+  - Fix segfault in TTF output code caused by codepage mapping when the
+    TTF output is not active. (joncampbell123)
+  - Fixed clip_paste_bios option change was not reflected. Also, default is
+    changed to "true" for Windows due to some characters fails to paste when
+    set otherwise. (maron2000)
+  - Replaced some deprecated functions in dosbox.h. (maron2000)
+  - Fixed colors in the screenshot of macOS SDL1 build were wrong.(maron2000)
+  - Fix savestate restore crash in POD_Load_DOS_Files during live file slot 
+    teardown (catbalony)
+  - Fixed mouse cursor display in DOS/V Japanese mode (nanshiki)
+  - INT 13h AH=48h: Fixed LBA detection (maron2000)
+  - Fixed read/write errors on last sectors of disk image (maron2000)
+  - Int 13h: Added option to enable/disable 48-bit LBA support (maron2000)
+  - Fix VHD file geometry detection (maron2000)
+  - Fixed crash when printing out multipages to printer (Windows) (maron2000)
+  - printer.cpp: Fix occasional missing page break after line wrap (maron2000)
+
+2026.03.29
+  - Add dosbox.conf option to control the duration of the beep when
+    DOS CON and INT 10h are given the BEL character. (joncampbell123).
+  - DOS CON device BEL (beep) handling: For IBM PC modes, call on
+    INT 10h to make the beep, rather than duplicate code. Fix the
+    DOS CON device so that it can also properly beep in PC-98 mode.
+    (joncampbell123).
+  - Fix bug where the "zero memory on DOS allocation" option was
+    stuck on. Some games, like "Bad Cat" rely on memory contents
+    peristing across DOS EXEC and memory allocation. (joncampbell123).
+  - Fix Hercules palette selection related to herc blend. (joncampbell123).
+  - DOS kernel: When executing an EXE file, the loader can now detect
+    EXE files that were compressed using EXEPACK. Based on the new
+    exepack dosbox.conf setting, it can decompress the EXE by itself,
+    switch off the A20 gate, or do nothing. The purpose of this
+    setting is to avoid EXEPACK "Packed File is Corrupt" errors that
+    happen if the A20 gate is enabled and the EXE was loaded too low
+    in memory. (joncampbell123).
+  - Linux SDL1: Use XDG_SESSION_TYPE environment variable to detect
+    whether or not the user is running DOSBox-X under X11 or Wayland,
+    and if so, prevent the fbcon and svga drivers from initializing.
+    There seems to be a problem where, if run under Wayland and the
+    XWayland compatibility layer if not present, SDL1 uses the fbcon
+    driver to take over the screen using vtcon switching and the classic
+    fbdev driver interface. Don't do that! (joncampbell123).
+  - INT 21h AH=4Ah resize memory: If memory resize fails because there
+    is not enough room for the requested amount of memory, do not
+    set ownership of the block to the program. This fixes memory
+    allocation error in California Games II. The game at one point
+    seems to miscalculate and ask for an excessively large amount
+    of memory on resize, and then fail, which doesn't seem to affect
+    the game. HOWEVER, prior to the bugfix, the memory block that
+    was available was assigned ownership to the game anyway. Later
+    on after helicopter takeoff, the game would attempt to allocate
+    more memory, which would fail because of the erroneous assignment
+    of ownership to free memory. (joncampbell123).
+  - Add debug logging to not only indicate DOS kernel memory alloc,
+    free, and resize, but also log when the memory operation fails.
+    Perhaps someday I'll figure out what the memory management in
+    California Games II is doing wrong that makes the helicopter part
+    fail in DOSBox-X. (joncampbell123).
+  - Code development now occurs across two primary branches: master
+    for fully functional emulation, and main-osfree for versions of
+    DOSBox-X where built-in MS-DOS OS emulation is disabled. The osfree
+    branch can only boot a guest OS. main-osfree is for use in jurisdictions
+    that enforce or wish to enforce OS level age verification, and
+    therefore, may consider the MS-DOS emulation an OS that is subject
+    to those laws. (joncampbell123).
+  - El Torito CD-ROM floppy disk boot emulation is no longer as slow
+    as an actual floppy drive. Your bootable CDs will boot much faster
+    now. (joncampbell123).
+  - DOSBox-X shell: If a DOS error happened while trying to execute a
+    DOS program, read the error code and print an appropriate message
+    on the console. So far only "Access Denied" has any specific error
+    message there. (joncampbell123).
+  - Skip all keyboard code page and layout loading if running in PC-98
+    mode. PC-98 systems store the entire font in ROM with only very
+    limited room for custom fonts, therefore, it makes no sense to load
+    code pages in PC-98 mode. (joncampbell123).
+  - Keyboard code page layout: Fix bug where an out of range start_pos
+    can cause DOSBox-X to segfault. Range check and print an error
+    message instead. (joncampbell123).
+  - Keyboard code page layout: The UPX unpacker checks the stack pointer
+    (like a COM program would) to determine if there is enough memory
+    to decompress. If there is not, it executes INT 20h to exit to DOS.
+    Problem is, the code page execution never makes a proper PSP segment
+    for that to work, so, during execution, intercept INT 20h and safely
+    redirect execution to exit properly when called. Set an error flag
+    so the code can know if that happened and say so. (joncampbell123).
+  - Keyboard code page layout: If executing the CPI/CPX file because UPX
+    decompression is detected, allocate memory based on the size of the
+    file plus reasonable stack space rather than assume about 128KB of
+    RAM following a DOS allocation of less, which for lower memsizes,
+    only causes a crash on startup. (joncampbell123).
+  - Debug print to log what code page file is being loaded at startup (joncampbell123).
+  - CPU Idle callback is now strictly limited to processing IRQs and one
+    CPU instruction, instead of however many CPU instructions can run
+    until the next scheduled emulator event. This fixes a bug where
+    system calls that use the Idle callback (INT 21h, etc) can sometimes
+    vary their delay time by emulator events, and if "scanline render on
+    demand is enabled", can cause the Idle call to take a full 1ms interval
+    of time. This fixes an issue where "scanline render on demand" caused
+    some DOS games like Xargon to take 5 to 10 times longer to transition
+    between title, main menu, gameplay, etc. (joncampbell123).
+  - Debugger LOGL command now includes the PIC_FullIndex() emulator time
+    in millseconds so that it can be used to determine time as well as
+    CPU state for debugging (joncampbell123).
+  - Add dosbox.conf option to control whether VBE emulation provides the
+    protected mode interface or not (joncampbell123).
+  - Add dosbox.conf option vbememsize and vbememsizekb to control how much
+    video memory is reported through the VESA BIOS, which can be less than
+    actual video memory (but must be at least 256KB). This option can help
+    with some DOS programs that have problems with "too much" video memory
+    in the system (joncampbell123).
+  - Add INT 10h mode flag _REQUIRE_LFB. When set, INT 10h calls to set
+    VESA BIOS modes will fail unless requesting to set the linear framebuffer
+    version of the mode (joncampbell123).
+  - S3 emulation will mark any more large enough to exceed bank switching
+    limits in S3 hardware as _REQUIRE_LFB (joncampbell123).
+  - I'm not sure why Adlib emulation defaults to 48KHz in most versions of
+    DOSBox, but the hardware rate is 49716 and that should be the default
+    (joncampbell123).
+  - Fixed crash on starting debugger on MinGW builds (maron2000)
+  - Adjusted the ChinaSea/Big5-2003 extended code point ranges for CP951 to
+    0x9140–0xA3FE and 0xC6A1–0xFEFE (1abcd)
+  - Replaced deprecated symbols to enable launching on old macOSs (maron2000)
+  - Converted all bash-dependent shell files to POSIX-shell compliant
+    (pandasoli)
+  - Removed 7 duplicate Chinese character mappings from CP951 (Big5-UAO) (1abcd)
+  - Added SoundBlaster microphone input support (Windows WASAPI)
+    (meldro364-glitch)
+  - Fixed segfault on launch of macOS builds (maron2000)
+  - Added OS/2 support for tinyfiledialogs, browser and external programs and
+    some more fixes. (josch1710)
+  - Fixed savestate load "Memory size mismatch" error on MSVC build (rebb)
+  - Fixed savestate loading crash related to dynamically allocated TempLine in
+    VGA system (rebb)
+  - Added Direct3D11 and Metal support (Experimental, SDL2 only) (maron2000) 
+  - When leaving fullscreen, only force rebuilding the window for OpenGL mode.
+    (rebb)
+  - Clear modifier keys before savestate gets saved. (rebb)
+  - Re-enabled WinMM joystick support (Windows SDL1) (maron2000)
+  - Fixed colors option fails at launch on TTF mode (maron2000)
+  - Optional switch to disable post exit delay in DX-CAPTURE (villesundell)
+  - Fixed Emscripten builds for Dosbox x v2026.01.02 (grootpot)
+  - Fixed long freeze during startup on linux (SmileTheory)
+  - Fixed windowposition option at launch (maron2000)
+  - Fixed detection of EXEPACK failures (maron2000)
+  - Added OS/2 dimension handling to UpdateWindowDimensions (josch1710)
+  - Fixed handling of volume label searches (Allofich)
+  - Microphone input: Make Hands-Free profile (HFP) optional (maron2000)
+  - macOS: Fixed build script typo that made loading freetype library fail
+    (maron2000) 
+  - Fixed FPU FILD emulation (asemarafa)
+  - Removed range check in INT10_GetCursorPos causing text glitches (maron2000)
+  - Added experimental VS2026 CI builds. Can be downloaded as 64-bit Visual
+    Studio nightly builds. (maron2000)
+  - macOS: Fixed garbled message when opening image file(s) from dropdown menu.
+    (maron2000)
+  - Fixed XCOPY argument parsing to correctly handle switches appended directly
+    to file paths without whitespace. (maron2000)
+  - Fixed some Yes/No character was remained hardcoded as Y/N for some languages
+    specifiying other characters (e.g. German). (maron2000)
+    
+2026.01.02
+  - VESA BIOS will remove 8-bit bank switching limit if the video memory
+    is large enough to need more than 256 banks. Memory size will always
+    be limited to no more than 64 banks (128 if smaller than 64KB
+    granularity) only if S3 emulation is active. DOSBox Integrated Graphics
+    machine type is exempt from bank switching limit, so, if you are running
+    legacy code or Demoscene stuff against it that never clears the upper
+    8 bits properly, it's not going to work unless you use smaller memsize
+    settings. (joncampbell123).
+  - Update BOOT command to support multiple disk images with swapping (maron2000).
+  - Render scaler system has been modified so that render and frame caches
+    are now dynamically allocated, instead of fixed buffers. Not only does
+    this reduce memory wasted by over-large buffers, it also removes
+    limitations on guest video mode resolution that previously capped the
+    video mode to 1920x1440 or lower, and the advanced scalers (HQ2X,
+    Advanced MAME, etc) to 800x600 or lower. (joncampbell123).
+  - VGA output will now automatically disable doublescan mode whenever an
+    advanced scaler, such as the "XBRZ" or the Advanced MAME scalers, are
+    selected, so that the scalers can do their job properly on the low
+    resolution graphics mode automatically. The user no longer has to
+    manaully turn off doublescan mode for those scalers to work. (joncampbell123).
+  - Added TV, Scanline, and RGB scaler variants appropriate for VGA
+    200-line modes with doublescan enabled (renders to 400 lines). In fact
+    supporting those scalers with 400-line VGA is arguably more visually
+    accurate than applying them to 200 lines of graphics, because it
+    better reflects the actual 400-line raster as it would be displayed
+    on a VGA monitor. (joncampbell123).
+  - Apparently at random, VGA render will call RENDER_DrawLine too much,
+    causing buffer overruns at random, so, instead of directly assigning
+    the scaler line handler, assign a function that checks the rendered
+    line count and ensures that rendering stops at the correct line
+    count. This should fix some random crashes or corruptions, especially
+    on Linux with the OpenGL output which likes to allocate EXACTLY the
+    amount of memory required for the frame. (joncampbell123).
+  - A patch was submitted to DOSLIB DSXMENU to incorporate non-selectable
+    informational lines of text. Incorporate the updated DSXMENU binaries
+    into DOSBox-X (joncampbell123).
+  - Wrote IPS patching tools IPSMAKE and IPSPATCH in DOSLIB, then incorporated
+    them as builtin executables on drive Z: under Z:\PATCHING. You can
+    now use IPS patch files to "ROM hack" your MS-DOS games. (joncampbell123)
+  - Add map13/map14 CGA/HGC like interleaved rendering support for VGA
+    256-color mode. There is a game engine in development that is willing to
+    use such oddball modes. (joncampbell123)
+  - Added SDL2_net to source tree (maron2000)
+  - Fixed regression of FIFA96 CD label detection (maron2000)
+  - Log OpenGL context version (rebb)
+  - Force SDL window regeneration when exiting fullscreen (rebb)
+  - Fixed file handle leak prevents save state file removal (srcdabada)
+
+
+2025.12.01
+  - Video debug overlay: For Tandy and PCjr emulation, add information on
+    the screen that shows the line mask, display and cpu memory banks and
+    the corresponding segment values, which may aid in debugging issues
+    with games and reveal any remapping or page flipping (joncampbell123).
+  - Tandy emulation: Add the string "Tandy" somewhere in the DOS kernel
+    at startup if machine=tandy. The game "The Train: Escape to Normandy"
+    scans from FFFF:0000 for the string "Tandy" which of course wraps
+    around to the first 64KB of memory where the DOS kernel resides. If
+    it does not see this string, it does not think it is running on a Tandy.
+    Such a detection routine will obviously break if you're on a 286 based
+    Tandy with HMA enabled, or you're running normal MS-DOS on a Tandy
+    system. This change allows the game to run (joncampbell123).
+  - Tseng ET4000 emulation: Mode 0x24 is unusual in that it is a 130x28
+    text mode with a 13-pixel high character cell. The ET4000 VGA BIOS
+    apparently has a specific font for that mode, so, incorporate that
+    font into DOSBox-X and use it for mode 0x24 (joncampbell123).
+  - Tseng ET4000 emulation: Fix modes 0x22/0x23/0x24 to match how the
+    actual VGA BIOS programs them. This fixes problems where the 132x25
+    mode was rendered only on the upper half of the screen (joncampbell123).
+  - Fix Tseng ET3000/ET4000 emulation bug where CGA graphics modes
+    were garbled. The main VGA emulation no longer uses M_CGA2/M_CGA4
+    and the ET4000 emulation needs to behave the same to fix the
+    graphics modes. Apply fix to ET3000 emulation as well. (joncampbell123).
+  - Some extra code in shell processing was preventing drive change commands
+    if the last character was a backslash i.e. "a:\" instead of "a:".
+    Fixed. (joncampbell123).
+  - INT 21h AH=4Bh EXEC: Real MS-DOS returns a nonzero value like 0x3E01.
+    A buggy version of Magic Pockets fails to call INT 21 AH=4Dh to read
+    the INTRO.EXE exit code and expects AL to just be nonzero to continue
+    to the game. So to make it work properly (kind of), return a nonzero
+    value. (joncampbell123).
+  - Tandy machine type: Many registers are WRITE ONLY according to SX
+    documentation, yet "Troubadours" likes to read/modify/write those
+    registers in what appears to be hand-rolled manual modesetting code
+    to set up 320x200 16-color mode, so, add code to respond to reads
+    from those ports with zeros and print a debug message to the log
+    about how DOS games are not supposed to read those registers. Make
+    the hand-rolled modesetting work by returning 0x00, rather than 0xFF.
+    The code will not set up the mode correctly if 0xFF is returned, but
+    will if 0x00 is returned. A side effect of this is that, since one
+    of the registers controls the RAM address used as video memory, this
+    moves it down to 512KB from base memory as well, which of course
+    easily corrupts the very end of the MCB chain unless you enable more
+    than 640KB of RAM and ask DOSBox-X to emulate the full Tandy 768KB
+    of conventional memory. Though the game still crashes very easily,
+    and in the exact same manner in both DOSBox-X and DOSBox SVN, this
+    fix does solve the problem where the game was only able to draw
+    2 out of 4 scanlines on the screen. (joncampbell123).
+  - Fix: Load GetDiskFreeSpaceExA at runtime to restore compatibility with
+    Win95RTM (emxd)
+  - Support for musl libc under Linux (repzilon)
+  - Utilize SDL2's keyboard capture logic to inhibit window manager shortcuts
+    (BenAckerley)
+  - Fix OpenGL resize / crash issue related to SDL and the internal GUI (rebb)
+  - Fix: missing floppy drive after harddisk boot (merubird)
+  - Fix crash on launch in MinGW and UCRT 64-bit builds (maron2000)
+  - Fix file open dialog encoding (maron2000)
+  - Allow controlling K-CG via BIOS interrupt (OPNA2608)
+  - Add debug feature memory find (Enmet)
+  - Fix turbo to allow burst mode and toggle mode (jez9999)
+  - Linters - fixup freedesktop metainfo and flatpak (rderooy)
+
+2025.10.07
+  - INT 21h AH=4Ah resize memory: Compact free blocks only at or after the
+    segment being resized, as MS-DOS is documented to do (joncampbell123).
+  - INT 21h AH=4Ah resize memory: Fix bug where, if asked to resize a previously
+    freed memory block and the block is not the last block in the MCB chain,
+    and the next block in the MCB chain is also free, the MCB management code
+    would correctly compact free blocks but then allocate according to the
+    old size of the freed MCB block, causing truncation of the MCB chain.
+    Fix for MCB chain truncation caused by California Games II DOS memory
+    management when running in Tandy graphics mode. (joncampbell123).
+  - Add dosbox.conf option, disabled by default, where if the MCB memory
+    chain is corrupted anywhere past the running program's memory block,
+    and it does anything to cause allocation, a new free memory block is
+    created to satisfy allocations instead of halting emulation. Some DOS
+    programs are a bit sloppy in a way that can corrupt the MCB chain.
+    When enabled, this behavior matches apparent MS-DOS behavior (joncampbell123).
+  - Debugger: DOS MCBS command now also prints the segment immediately
+    following the last MCB block (joncampbell123).
+  - Tseng ET3000/ET4000: Update Status register 3DAh behavior when emulating
+    Tseng chipsets to reflect Tseng datasheet, and VGAKIT SVGA detection code
+    expectations. Bit 7 is expected, as documented by Tseng, to be the inverse
+    of bit 3 (vertical retrace). Extended Start Register CRTC 33h must not
+    allow setting the upper 4 bits because Tseng only documents the bottom
+    four, and because VGAKIT requires it for Tseng detection (joncampbell123).
+  - Fix bug that, for machine=hercules, prevented Hercules palette shortcut
+    from changing colors when in graphics mode (joncampbell123).
+  - Remove mixer and VGA capture test modes from integration device. Update
+    integration device version number. Convert hardcoded magic constants used
+    in IG into constants in iglib.h which is now shared explicitly with the
+    iglib.h in DOSLIB. Add integration device interface to allow the guest
+    to read and set the CPU cycle count of the emulator. (joncampbell123).
+  - Fix INT 10h AH=0Eh bug where printing BEL triggered screen scroll up if
+    cursor beyond the last line. Fix for the Elder Scrolls Arena installer.
+    (joncampbell123).
+  - FAT filesystem driver (for disk images): If Elder Scrolls Arena calls
+    INT 21h to find files named *.65 (such as STATES.65) with an attribute mask
+    of 0xA (VOLUME LABEL | HIDDEN), ignore the VOLUME LABEL bit and scan
+    normally. The 0xA value is leftover from a divide operation used to make
+    the file name and is technically a bug in the game, though that happens
+    to work on real MS-DOS and the DOSBox/DOSBox-X local folder support code
+    anyway. This fix allows Elder Scrolls Arena to run from a mounted disk
+    image. (joncampbell123).
+  - FAT filesystem driver (for disk images): If Elder Scrolls Arena calls
+    INT 21h to find SAVEGAME.00 (yes, a specific name for some reason) with
+    an attribute mask of 0x7C (which represents... um... what?), ignore the
+    VOLUME LABEL bit so that players can load their saved games from the
+    menu instead of being told that the saved game that is clearly there on
+    the screen does not exist. What other weird random values of CX attribute
+    mask does this game use? (joncampbell123).
+  - PCI bus improvements : Allow device to see full size access (smunaut)
+  - Fix build error of SDL1 version on ArchLinux (possibly gcc-15) (maron2000)
+  - Enable building DOSBox-X on older macOS versions and add instructions
+    (maron2000)
+  - Add code page 951 in dialog box (1abcd)
+  - Fix failure of create/opening a temporary file for piping (maron2000)
+  - Create/open a temporary file to device_TMP for piping on Z: drive.
+    (maron2000)
+  - Convert message to UTF16 before calling messagebox function (Windows)
+    (maron2000)
+  - Added some new members to the MMX_reg union for big-endian platforms.
+    (alarixnia)
+  - Create directory if not exist before writing conf file. (maron2000)
+  - Fixed language files were still locked after loading is completed.
+    (maron2000)
+  - Fixed freeze when codepage switched to 3846, 3848. (maron2000)
+  - Fixed build error when internal debugger is disabled (maron2000)
+  - Show loaded conf file in log in full path (maron2000)
+  - Print syntax error if pipe has no command to pass output (maron2000)
+  - Add permanent option for initial DOSBox-X shell (maron2000)
+  - Fix errors when initializing fluidsynth (maron2000)
+  - PC-98: Redraw the function keys after updating them (bobsayshilol)
+  - Do not carriage return with a single LF('\n') (maron2000)
+  - Fix mapper not rendering anything on SDL2/Windows (aybe)
+  - Scale mapper according display resolution (aybe)
+  - Added applicable changes from SVN. (Allofich)
+    r4485: Enable writing to all planes when drawing pixels in EGA modes.
+    r4487: Correct panning of VESA text modes.
+    r4488: Correct comment about odd/even bit.
+    r4490: Set MCB ownership when *blocks==total at end of DOS_ResizeMemory.
+    r4492: Don't clear message queues of MPU-401 and compatibles on reset.
+    r4493: Handle EOF character in batch files as actual end of file.
+    r4494: Use 4-byte partial page mapping data.
+  - Replaced deprecated functions to enable building with FFmpeg 8 (maron2000)
+  - Fixed screen blanked when restoring minimized window in TTF mode (Windows
+    SDL1) (maron2000) 
+  - PC-98: Save Kanji CG access mode setting, restrict output accordingly
+    (OPNA2608)
+  - Added missing language options to Windows installers (maron2000)
+  - Debugger: IV must not truncate addresses to 16-bit (cmsautter)
+  - Debugger: Warn single-stepping may not work as expected with Dynamic core
+    (maron2000)
+  - MIDI: Show loaded Soundfont/ROM path only when required to. (maron2000)
+  - SDL2: Updated SDL2 library to version 2.32.10 (maron2000) 
+  - Apply aspect/scaling/clipping when using OpenGL shaders in windowed-mode
+    (rebb)
+  - Fixed file locking problem on Linux port (loops)
+  - Fixed typo in Linux man page (-date-host-forced option) (maron2000)
+  - Mention OPL in MIDI/OPL configuration dialog menu (maron2000)  
+
 2025.05.03
   - Show TURBO status in title bar. (maron2000)
   - Fixed MinGW32 builds failed using gcc15, due to a conflict in __inline__ 

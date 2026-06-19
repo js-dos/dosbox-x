@@ -57,6 +57,8 @@ extern int lfn_filefind_handle;
 extern bool ctrlbrk, gbk, rtl, dbcs_sbcs;
 extern bool DOS_BreakFlag, DOS_BreakConioFlag;
 extern uint16_t cmd_line_seg;
+extern char char_yes, char_no; // YES NO CHARS in lower case
+
 uint8_t prompt_col; // Column position after prompt is displayed
 void WriteChar(uint16_t col, uint16_t row, uint8_t page, uint16_t chr, uint8_t attr, bool useattr);
 
@@ -1459,8 +1461,8 @@ std::string full_arguments = "";
 bool dos_a20_disable_on_exec=false;
 extern bool packerr, mountwarning, nowarn;
 bool DOS_Shell::Execute(char* name, const char* args) {
-/* return true  => don't check for hardware changes in do_command 
- * return false =>       check for hardware changes in do_command */
+	/* return true  => don't check for hardware changes in do_command 
+	 * return false =>       check for hardware changes in do_command */
 	char fullname[DOS_PATHLENGTH+4]; //stores results from Which
 	const char* p_fullname;
 	char line[CMD_MAXLINE];
@@ -1485,10 +1487,12 @@ bool DOS_Shell::Execute(char* name, const char* args) {
 #ifdef WIN32
 		uint8_t c;uint16_t n;
 #endif
-		if (strrchr_dbcs(name,'\\')) { WriteOut(MSG_Get("SHELL_EXECUTE_ILLEGAL_COMMAND"),name); return true; }
-		if (!DOS_SetDrive(toupper(name[0])-'A')) {
+        if (!DOS_SetDrive(toupper(name[0])-'A')) {
 #ifdef WIN32
-			if(!sec->Get_bool("automount")) { WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"),toupper(name[0])); return true; }
+ #if !defined(OSFREE)
+            char char_no_upper = toupper(char_no);
+            char char_yes_upper = toupper(char_yes);
+            if(!sec->Get_bool("automount")) { WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"),toupper(name[0])); return true; }
 			// automount: attempt direct letter to drive map.
 			int type=GetDriveType(name);
 			if(!mountwarning && type!=DRIVE_NO_ROOT_DIR) goto continue_1;
@@ -1502,44 +1506,42 @@ first_1:
 			else { WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"),toupper(name[0])); return true; }
 
 first_2:
-		n=1;
-		DOS_ReadFile (STDIN,&c,&n);
-		do switch (c) {
-			case 'n':			case 'N':
-			{
-				DOS_WriteFile (STDOUT,&c, &n);
-				DOS_ReadFile (STDIN,&c,&n);
-				do switch (c) {
-					case 0xD: WriteOut("\n\n"); WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"),toupper(name[0])); return true;
-					case 0x3: return true;
-					case 0x8: WriteOut("\b \b"); goto first_2;
-				} while (DOS_ReadFile (STDIN,&c,&n));
-			}
-			case 'y':			case 'Y':
-			{
-				DOS_WriteFile (STDOUT,&c, &n);
-				DOS_ReadFile (STDIN,&c,&n);
-				do switch (c) {
-					case 0xD: WriteOut("\n"); goto continue_1;
-					case 0x3: return true;
-					case 0x8: WriteOut("\b \b"); goto first_2;
-				} while (DOS_ReadFile (STDIN,&c,&n));
-			}
-			case 0x3: return true;
-			case 0xD: WriteOut("\n"); goto first_1;
-			case '\t': case 0x08: goto first_2;
-			default:
-			{
-				DOS_WriteFile (STDOUT,&c, &n);
-				DOS_ReadFile (STDIN,&c,&n);
-				do switch (c) {
-					case 0xD: WriteOut("\n");goto first_1;
-					case 0x3: return true;
-					case 0x8: WriteOut("\b \b"); goto first_2;
-				} while (DOS_ReadFile (STDIN,&c,&n));
-				goto first_2;
-			}
-		} while (DOS_ReadFile (STDIN,&c,&n));
+			n=1;
+			DOS_ReadFile (STDIN,&c,&n);
+
+            do {
+                if(c == char_no || c == char_no_upper) {
+                    DOS_WriteFile(STDOUT, &c, &n);
+                    DOS_ReadFile(STDIN, &c, &n);
+                    do switch(c) {
+                        case 0xD: WriteOut("\n\n"); WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"), toupper(name[0])); return true;
+                        case 0x3: return true;
+                        case 0x8: WriteOut("\b \b"); goto first_2;
+                    } while(DOS_ReadFile(STDIN, &c, &n));
+                }
+				else if(c == char_yes || c == char_yes_upper) {
+					DOS_WriteFile (STDOUT,&c, &n);
+					DOS_ReadFile (STDIN,&c,&n);
+					do switch (c) {
+						case 0xD: WriteOut("\n"); goto continue_1;
+						case 0x3: return true;
+						case 0x8: WriteOut("\b \b"); goto first_2;
+					} while (DOS_ReadFile (STDIN,&c,&n));
+				}
+                else if (c == 0x3) return true;
+                else if (c == 0xD) { WriteOut("\n"); goto first_1; }
+				else if (c == '\t' || c == 0x08) goto first_2;
+				else {
+					DOS_WriteFile (STDOUT,&c, &n);
+					DOS_ReadFile (STDIN,&c,&n);
+					do switch (c) {
+						case 0xD: WriteOut("\n");goto first_1;
+						case 0x3: return true;
+						case 0x8: WriteOut("\b \b"); goto first_2;
+					} while (DOS_ReadFile (STDIN,&c,&n));
+					goto first_2;
+			    }
+			} while (DOS_ReadFile (STDIN,&c,&n));
 
 continue_1:
 
@@ -1553,9 +1555,10 @@ continue_1:
 //			if(GetDriveType(name)==5) strcat(mountstring," -ioctl");
 			nowarn=true;
 			this->ParseLine(mountstring);
-            nowarn=false;
-//failed:
+			nowarn=false;
+			//failed:
 			if (!DOS_SetDrive(toupper(name[0])-'A'))
+ #endif
 #endif
 			WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"),toupper(name[0]));
 		}
@@ -1565,13 +1568,13 @@ continue_1:
 	p_fullname = Which(name);
 	if (!p_fullname) return false;
 	strcpy(fullname,p_fullname);
-    std::string assoc = hasAssociation(fullname);
-    if (assoc.size()) {
-        noassoc=true;
-        DoCommand((char *)(assoc+" "+fullname).c_str());
-        noassoc=false;
-        return true;
-    }
+	std::string assoc = hasAssociation(fullname);
+	if (assoc.size()) {
+		noassoc=true;
+		DoCommand((char *)(assoc+" "+fullname).c_str());
+		noassoc=false;
+		return true;
+	}
 	const char* extension = strrchr(fullname,'.');
 
 	/*always disallow files without extension from being executed. */
@@ -1579,10 +1582,10 @@ continue_1:
 	if (!extension) {
 		//Check if the result will fit in the parameters. Else abort
 		if(strlen(fullname) >( DOS_PATHLENGTH - 1) ) return false;
-        char temp_name[DOS_PATHLENGTH + 4];
-        const char* temp_fullname;
+		char temp_name[DOS_PATHLENGTH + 4];
+		const char* temp_fullname;
 		//try to add .com, .exe and .bat extensions to filename
-		
+
 		strcpy(temp_name,fullname);
 		strcat(temp_name,".COM");
 		temp_fullname=Which(temp_name);
@@ -1593,24 +1596,24 @@ continue_1:
 			strcpy(temp_name,fullname);
 			strcat(temp_name,".EXE");
 			temp_fullname=Which(temp_name);
-		 	if (temp_fullname) { extension=".exe";strcpy(fullname,temp_fullname);}
+			if (temp_fullname) { extension=".exe";strcpy(fullname,temp_fullname);}
 
 			else 
 			{
 				strcpy(temp_name,fullname);
 				strcat(temp_name,".BAT");
 				temp_fullname=Which(temp_name);
-		 		if (temp_fullname) { extension=".bat";strcpy(fullname,temp_fullname);}
+				if (temp_fullname) { extension=".bat";strcpy(fullname,temp_fullname);}
 
 				else  
 				{
-		 			return false;
+					return false;
 				}
-			
+
 			}	
 		}
 	}
-	
+
 	if (strcasecmp(extension, ".bat") == 0) 
 	{	/* Run the .bat file */
 		/* delete old batch file if call is not active*/
@@ -1641,17 +1644,17 @@ continue_1:
 		/* Fill the command line */
 		CommandTail cmdtail;
 		cmdtail.count = 0;
-        memset(&cmdtail.buffer,0,CTBUF); //Else some part of the string is uninitialized (valgrind)
-        if (strlen(line)>=CTBUF) line[CTBUF-1]=0;
+		memset(&cmdtail.buffer,0,CTBUF); //Else some part of the string is uninitialized (valgrind)
+		if (strlen(line)>=CTBUF) line[CTBUF-1]=0;
 		cmdtail.count=(uint8_t)strlen(line);
 		memcpy(cmdtail.buffer,line,strlen(line));
 		cmdtail.buffer[strlen(line)]=0xd;
 		/* Copy command line in stack block too */
 		MEM_BlockWrite(SegPhys(ss)+reg_sp+0x100,&cmdtail,CTBUF+1);
-		
+
 		/* Split input line up into parameters, using a few special rules, most notable the one for /AAA => A\0AA
 		 * Qbix: It is extremely messy, but this was the only way I could get things like /:aa and :/aa to work correctly */
-		
+
 		//Prepare string first
 		char parseline[258] = { 0 };
 		for(char *pl = line,*q = parseline; *pl ;pl++,q++) {
@@ -1679,7 +1682,7 @@ continue_1:
 		while(skip < 256 && parseline[skip] == 0) skip++;
 		FCB_Parsename(dos.psp(),0x5C,0x01,parseline + skip,&add);
 		skip += add;
-		
+
 		//Move to next argument if it exists
 		while(parseline[skip] != 0) skip++;  //This is safe as there is always a 0 in parseline at the end.
 		while(skip < 256 && parseline[skip] == 0) skip++; //Which is higher than 256
@@ -1690,6 +1693,10 @@ continue_1:
 		/* Set the command line in the block and save it */
 		block.exec.cmdtail=RealMakeSeg(ss,reg_sp+0x100);
 		block.SaveData();
+
+		/* clear DOS error to detect errors */
+		dos.errorcode = 0;
+
 #if 0
 		/* Save CS:IP to some point where i can return them from */
 		uint32_t oldeip=reg_eip;
@@ -1715,6 +1722,16 @@ continue_1:
 		reg_eip=oldeip;
 		SegSet16(cs,oldcs);
 #endif
+
+		if (dos.errorcode != 0) {
+			if (dos.errorcode == DOSERR_ACCESS_DENIED) {
+				WriteOut(MSG_Get("SHELL_CMD_FILE_ACCESS_DENIED"), name);
+			}
+			else {
+				WriteOut("Unable to run program (errcode=%u)\n", dos.errorcode);
+			}
+		}
+
 		if (packerr&&infix<0&&sec->Get_bool("autoa20fix")) {
 			LOG(LOG_DOSMISC,LOG_DEBUG)("Attempting autoa20fix workaround for EXEPACK error");
 			if (autofixwarn==1||autofixwarn==3) WriteOut("\r\n\033[41;1m\033[1;37;1mDOSBox-X\033[0m Failed to load the executable\r\n\033[41;1m\033[37;1mDOSBox-X\033[0m Now try again with A20 fix...\r\n");
@@ -1731,18 +1748,18 @@ continue_1:
 				if (segment < 0x1000) {
 					uint16_t needed = 0x1000 - segment;
 					DOS_ResizeMemory(segment,&needed);
-                }
-                mcb.SetPSPSeg(0x40); /* FIXME: Wouldn't 0x08, a magic value used to show ownership by MS-DOS, be more appropriate here? */
-                LOG(LOG_DOSMISC,LOG_DEBUG)("Attempting autoloadfix workaround for EXEPACK error");
-                if (autofixwarn==2||autofixwarn==3) WriteOut("\r\n\033[41;1m\033[1;37;1mDOSBox-X\033[0m Failed to load the executable\r\n\033[41;1m\033[37;1mDOSBox-X\033[0m Now try again with LOADFIX...\r\n");
-                infix=1;
-                Execute(name, args);
-                infix=-1;
+				}
+				mcb.SetPSPSeg(0x40); /* FIXME: Wouldn't 0x08, a magic value used to show ownership by MS-DOS, be more appropriate here? */
+				LOG(LOG_DOSMISC,LOG_DEBUG)("Attempting autoloadfix workaround for EXEPACK error");
+				if (autofixwarn==2||autofixwarn==3) WriteOut("\r\n\033[41;1m\033[1;37;1mDOSBox-X\033[0m Failed to load the executable\r\n\033[41;1m\033[37;1mDOSBox-X\033[0m Now try again with LOADFIX...\r\n");
+				infix=1;
+				Execute(name, args);
+				infix=-1;
 				DOS_FreeMemory(segment);
 			}
 		} else if (packerr&&infix<2&&!autofixwarn) {
-            WriteOut("Packed file is corrupt");
-        }
+			WriteOut("Packed file is corrupt");
+		}
 		packerr=false;
 	}
 	return true; //Executable started

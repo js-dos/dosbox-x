@@ -41,11 +41,19 @@
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 #endif
 
+#if defined(__linux__) && !defined(__GLIBC__)
+// musl libc does not need 64 suffix to work with files > 2 GiB
+#define fopen64 fopen
+#define fseeko64 fseeko
+#define ftello64 ftello
+#endif
+
 extern unsigned long freec;
 extern const uint8_t freedos_mbr[];
 extern int bootdrive, tryconvertcp;
 extern bool int13_disk_change_detect_enable, skipintprog, rsize;
 extern bool int13_extensions_enable, bootguest, bootvm, use_quick_reboot;
+extern bool int13_enable_48bitLBA;
 bool isDBCSCP(), isKanji1_gbk(uint8_t chr), shiftjis_lead_byte(int c), CheckDBCSCP(int32_t codepage);
 extern bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/);
 
@@ -1125,6 +1133,7 @@ diskGeo DiskGeometryList[] = {
 
 Bitu call_int13 = 0;
 Bitu diskparm0 = 0, diskparm1 = 0;
+PhysPt floppyparm0 = 0;/* this is a physical memory address! */
 static uint8_t last_status;
 static uint8_t last_drive;
 uint16_t imgDTASeg;
@@ -1191,6 +1200,83 @@ void updateDPT(void) {
         phys_writeb(dpphysaddr[i] + 0xb, 0);
         phys_writew(dpphysaddr[i] + 0xc, (uint16_t)tmpcyl);
         phys_writeb(dpphysaddr[i] + 0xe, (uint8_t)tmpsect);
+    }
+}
+
+
+void updateFloppyDPT(void) {
+    if (floppyparm0) {
+        LOG(LOG_MISC,LOG_DEBUG)("Updating floppy DPT");
+        for (unsigned int fi=0;fi < 2;fi++) {
+            PhysPt tp = floppyparm0 + (fi * 11);
+
+            if (imageDiskList[fi]) {
+                uint32_t tmpheads, tmpcyl, tmpsect, tmpsize;
+                imageDiskList[fi]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
+
+                /* taken from a QEMU VM */
+                phys_writeb(tp+0,0xAF);
+                phys_writeb(tp+1,0x02);
+                phys_writeb(tp+2,0x25);
+
+                /* sector size as a power of 2 from 128 onward */
+                if (tmpsize == 128)
+                    phys_writeb(tp+3,0);
+                else if (tmpsize == 256)
+                    phys_writeb(tp+3,1);
+                else if (tmpsize == 512)
+                    phys_writeb(tp+3,2);
+                else if (tmpsize == 1024)
+                    phys_writeb(tp+3,3);
+                else if (tmpsize == 2048)
+                    phys_writeb(tp+3,4);
+                else
+                    phys_writeb(tp+3,2);
+
+                phys_writeb(tp+4,tmpsect);/*last sector on track*/
+                phys_writeb(tp+5,0x1B);/*Gap length*/
+                phys_writeb(tp+6,0xFF);/*Data transfer length max transfer when length not set*/
+                phys_writeb(tp+7,0x6C);/*Gap length for format operation*/
+                phys_writeb(tp+8,0xF6);/*Fill char for format operation*/
+                phys_writeb(tp+9,0x0F);/*Head settle time in millseconds*/
+                phys_writeb(tp+10,0x08);/*Motor on startup time in 1/8 second units*/
+            }
+            else if (fi == 0) {
+                /* Present it as a 1.44MB drive */
+                uint32_t tmpheads = 2, tmpcyl = 80, tmpsect = 18, tmpsize = 512;
+
+                /* taken from a QEMU VM */
+                phys_writeb(tp+0,0xAF);
+                phys_writeb(tp+1,0x02);
+                phys_writeb(tp+2,0x25);
+
+                /* sector size as a power of 2 from 128 onward */
+                if (tmpsize == 128)
+                    phys_writeb(tp+3,0);
+                else if (tmpsize == 256)
+                    phys_writeb(tp+3,1);
+                else if (tmpsize == 512)
+                    phys_writeb(tp+3,2);
+                else if (tmpsize == 1024)
+                    phys_writeb(tp+3,3);
+                else if (tmpsize == 2048)
+                    phys_writeb(tp+3,4);
+                else
+                    phys_writeb(tp+3,2);
+
+                phys_writeb(tp+4,tmpsect);/*last sector on track*/
+                phys_writeb(tp+5,0x1B);/*Gap length*/
+                phys_writeb(tp+6,0xFF);/*Data transfer length max transfer when length not set (GUESS)*/
+                phys_writeb(tp+7,0x6C);/*Gap length for format operation*/
+                phys_writeb(tp+8,0xF6);/*Fill char for format operation*/
+                phys_writeb(tp+9,0x0F);/*Head settle time in millseconds*/
+                phys_writeb(tp+10,0x88);/*Motor on startup time in 1/8 second units*/
+            }
+            else {
+                for (unsigned int i=0;i < 11;i++)
+                    phys_writeb(tp+i,0);
+            }
+        }
     }
 }
 
@@ -1281,7 +1367,13 @@ void swapInDrive(int drive, unsigned int position=0) {
     LOG_MSG("Diskcaching reset for drive %c.", drive+'A');
     if (Drives[drive] != NULL) {
         Drives[drive]->EmptyCache();
-        Drives[drive]->MediaChange();
+
+        isoDrive *isodrv = dynamic_cast<isoDrive*>(Drives[drive]);
+
+        if (isodrv && !dos_kernel_disabled)
+            isodrv->MediaChangeImmediate(); // for IDE, without the media change delay
+        else
+            Drives[drive]->MediaChange(); // for IDE
     }
 }
 
@@ -1314,7 +1406,13 @@ void swapInNextCD(bool pressed) {
     for(Bitu i=2;i<DOS_DRIVES;i++) { /* Swap C: D: .... Z: if it is a CD/DVD drive */
         if (Drives[i] != NULL && dynamic_cast<isoDrive*>(Drives[i]) != NULL) {
             Drives[i]->EmptyCache();
-            Drives[i]->MediaChange();
+
+            isoDrive *isodrv = dynamic_cast<isoDrive*>(Drives[i]);
+
+            if (isodrv && !dos_kernel_disabled)
+                isodrv->MediaChangeImmediate(); // for IDE, without the media change delay
+            else
+                Drives[i]->MediaChange(); // for IDE
         }
     }
 }
@@ -1427,10 +1525,13 @@ imageDisk::imageDisk(FILE* diskimg, const char* diskName, uint32_t cylinders, ui
     this->heads = heads;
     this->sectors = sectors;
     image_base = 0;
-    this->image_length = (uint64_t)cylinders * heads * sectors * sector_size;
+    if (image_length == 0) image_length = (uint64_t)cylinders * heads * sectors * sector_size;
     refcount = 0;
     this->sector_size = sector_size;
     this->diskSizeK = this->image_length / 1024;
+    LBA = image_length / sector_size;
+    if(!int13_enable_48bitLBA && (LBA > 0x0FFFFFFF))
+        LOG_MSG("Warning: Disk size (%lf GiB) exceeds 128GiB limit for 28-bit LBA. You may need to enable 48-bit LBA support.", (double)image_length / (1024.0 * 1024 * 1024));
     reserved_cylinders = 0;
     this->diskimg = diskimg;
     class_id = ID_BASE;
@@ -1453,10 +1554,10 @@ void imageDisk::UpdateFloppyType(void) {
 	}
 }
 
-imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint32_t imgSizeK, bool isHardDisk) : diskSizeK(imgSizeK), diskimg(imgFile), image_length((uint64_t)imgSizeK * 1024) {
+imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint64_t imgSize, bool isHardDisk) : diskSizeK(imgSize/1024), diskimg(imgFile), image_length(imgSize) {
     if (imgName != NULL)
         diskname = imgName;
-
+    uint64_t imgSizeK = diskSizeK;
     active = false;
     hardDrive = isHardDisk;
     if(!isHardDisk) {
@@ -1651,6 +1752,9 @@ imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint32_t imgSizeK, bool
             }
         }
 
+        LBA = imgSize / sector_size;
+        if(!int13_enable_48bitLBA && (LBA > 0x0FFFFFFF))
+            LOG_MSG("Warning: Disk size (%lf GiB) exceeds 128GiB limit for 28-bit LBA. You may need to enable 48-bit LBA support.", (double)image_length / (1024.0 * 1024 * 1024));
         if (sectors == 0 || heads == 0 || cylinders == 0)
             active = false;
     }
@@ -1713,22 +1817,65 @@ void imageDisk::Set_GeometryForHardDisk()
 }
 
 void imageDisk::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) {
-    Bitu bigdisk_shift = 0;
+
+    uint64_t total_sectors = (uint64_t)setHeads * (uint64_t)setCyl * (uint64_t)setSect;
+    sectors = 63; // Default to 63 sectors per track.
+    heads = 16;   // Default to 16 heads.
+
+    if(((setSectSize & (setSectSize - 1)) != 0)) {
+        LOG_MSG("bios_disk: Invalid sector size %u, must be a power of 2.", setSectSize);
+        active = false;
+        return;
+    }
+
+    if(total_sectors == 0) {
+        LOG_MSG("bios_disk: Invalid disk geometry C, H, S = %u, %u, %u", setCyl, setHeads, setSect);
+        active = false;
+        return;
+    }
+    else if (total_sectors > 1024ULL * 255ULL * 63ULL) {
+        LOG_MSG("bios_disk: Disk geometry C, H, S = %u, %u, %u exceeds 8.4GB disk size, setting to max limits", setCyl, setHeads, setSect);
+        cylinders = 1024;
+        heads = 255;
+        sectors = 63;
+        sector_size = setSectSize;
+        active = true;
+        return;
+    }
+
+    // Use the provided geometry, if it is valid
+    if(setCyl > 0 && setCyl <= 1024 && setHeads > 0 && setHeads <= 255 && setSect >0 && setSect <= 63) {
+        cylinders = setCyl;
+        heads = setHeads;
+        sectors = setSect;
+        sector_size = setSectSize;
+        active = true;
+        return;
+    }
 
     if (IS_PC98_ARCH) {
-        /* TODO: PC-98 has its own 4096 cylinder limit */
-    }
-    else {
-        if(setCyl > 16384) LOG_MSG("Warning: This disk image is too big.");
-        else if(setCyl > 8192) bigdisk_shift = 4;
-        else if(setCyl > 4096) bigdisk_shift = 3;
-        else if(setCyl > 2048) bigdisk_shift = 2;
-        else if(setCyl > 1024) bigdisk_shift = 1;
+        /* TODO: Some early PC-98 SCSI BIOS has its own 4096 cylinder (12-bit) limit */
     }
 
-    heads = setHeads << bigdisk_shift;
-    cylinders = setCyl >> bigdisk_shift;
-    sectors = setSect;
+    if(total_sectors < 17ULL * 1024 * 16)
+        sectors = 17;
+    else if(total_sectors < 32ULL * 1024 * 16)
+        sectors = 32;
+    else
+        sectors = 63;
+
+    while(heads < 255) {
+        uint64_t test_cyl =
+            total_sectors / ((uint64_t)heads * sectors);
+        if(test_cyl <= 1024)
+            break;
+        heads <<= 1;
+        if(heads > 255) {
+            heads = 255;
+            break;
+        }
+    }
+    cylinders = (uint32_t)(total_sectors / ((uint32_t)heads * sectors));
     sector_size = setSectSize;
     active = true;
 }
@@ -1819,13 +1966,14 @@ static void readDAP(uint16_t seg, uint16_t off) {
 
 void IDE_ResetDiskByBIOS(unsigned char disk);
 void IDE_EmuINT13DiskReadByBIOS(unsigned char disk,unsigned int cyl,unsigned int head,unsigned sect);
-bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32_t &sect,uint32_t &size);
+bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32_t &sect,uint32_t &size, uint64_t &LBA);
 void IDE_EmuINT13DiskReadByBIOS_LBA(unsigned char disk,uint64_t lba);
 
 void diskio_delay(Bits value/*bytes*/, int type = -1);
 
 /* For El Torito "No emulation" INT 13 services */
 unsigned char INT13_ElTorito_NoEmuDriveNumber = 0;
+CDROM_Interface * INT13_ElTorito_cdrom = NULL;
 signed char INT13_ElTorito_IDEInterface = -1; /* (controller * 2) + (is_slave?1:0) */
 char INT13_ElTorito_NoEmuCDROMDrive = 0;
 
@@ -1837,6 +1985,7 @@ static Bitu INT13_DiskHandler(void) {
     uint8_t sectbuf[2048/*CD-ROM support*/];
     uint8_t  drivenum;
     Bitu  i,t;
+    uint64_t LBA = 0;
     last_drive = reg_dl;
     drivenum = GetDosDriveNumber(reg_dl);
     bool any_images = false;
@@ -1954,7 +2103,9 @@ static Bitu INT13_DiskHandler(void) {
         for(i=0;i<reg_al;i++) {
             last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)((reg_cl & 63)+i), sectbuf);
 
-            if (drivenum < 2)
+            if (imageDiskList[drivenum]->class_id == imageDisk::ID_EL_TORITO_FLOPPY)
+                diskio_delay(512);
+            else if (drivenum < 2)
                 diskio_delay(512, 0); // Floppy
             else
                 diskio_delay(512);
@@ -2089,6 +2240,28 @@ static Bitu INT13_DiskHandler(void) {
         break;
     case 0x08: /* Get drive parameters */
         if(driveInactive(drivenum)) {
+            if(drivenum == 0) {
+                // if no floppy drive 0 mounted, return fixed values for 1.44MB drive
+                // This fixes a problem in some DOS applications that occurred when booting from the hard disk without a mounted floppy disk.
+                reg_ax = 0x00;
+                reg_bl = 4;
+                reg_ch = 79;
+                reg_cl = 18;
+                reg_dh = 1;
+                reg_dl = 1;
+                last_status = 0x00;
+                CALLBACK_SCF(false);
+                {/*fill in ES:DI*/
+                    /* Even though BIOSes document vectors pointed at tables,
+                     * return the address in BIOS because Windows 95 apparently
+                     * likes to replace INT 0x1E with a pointer to whatever else
+                     * it decides, and then complain that the floppy controller
+                     * isn't working without ever touching I/O ports. What a jackass. */
+                    reg_di = floppyparm0 & 0xFu;
+                    CPU_SetSegGeneral(es,floppyparm0 >> 4u);
+                }
+                return CBRET_NONE;
+            }
             last_status = 0x07;
             reg_ah = last_status;
             CALLBACK_SCF(true);
@@ -2116,11 +2289,27 @@ static Bitu INT13_DiskHandler(void) {
         reg_dh = (uint8_t)tmpheads;
         last_status = 0x00;
         if (reg_dl&0x80) {  // harddisks
+            /* do NOT fill in ES:DI for hard disks, it causes Windows 95 to crash at startup! */
             reg_dl = 0;
             for (int index = 2; index < MAX_DISK_IMAGES; index++) {
                 if (imageDiskList[index] != NULL) reg_dl++;
             }
         } else {        // floppy disks
+            {/*fill in ES:DI*/
+                /* Even though BIOSes document vectors pointed at tables,
+                 * return the address in BIOS because Windows 95 apparently
+                 * likes to replace INT 0x1E with a pointer to whatever else
+                 * it decides, and then complain that the floppy controller
+                 * isn't working without ever touching I/O ports. What a jackass. */
+                if (reg_dl < 2) {
+                    reg_di = (floppyparm0 & 0xFu) + (reg_dl * 11u);
+                    CPU_SetSegGeneral(es,floppyparm0 >> 4u);
+                }
+                else {
+                    reg_di = 0;
+                    CPU_SetSegGeneral(es,0);
+                }
+            }
             reg_dl = 0;
             if(imageDiskList[0] != NULL) reg_dl++;
             if(imageDiskList[1] != NULL) reg_dl++;
@@ -2232,12 +2421,13 @@ static Bitu INT13_DiskHandler(void) {
             return CBRET_NONE;
         }
         if (INT13_ElTorito_NoEmuDriveNumber != 0 && INT13_ElTorito_NoEmuDriveNumber == reg_dl) {
-                CDROM_Interface *src_drive = NULL;
-                if (!GetMSCDEXDrive(INT13_ElTorito_NoEmuCDROMDrive - 'A', &src_drive)) {
+		if (!INT13_ElTorito_cdrom) {
                         reg_ah = 0x01;
                         CALLBACK_SCF(true);
                         return CBRET_NONE;
                 }
+
+                CDROM_Interface *src_drive = INT13_ElTorito_cdrom;
 
                 segat = dap.seg;
                 bufptr = dap.off;
@@ -2250,6 +2440,7 @@ static Bitu INT13_DiskHandler(void) {
                                 killRead = false;
                                 reg_ah = 0x04;
                                 CALLBACK_SCF(true);
+                                src_drive->Release();
                                 return CBRET_NONE;
                         }
 
@@ -2373,16 +2564,17 @@ static Bitu INT13_DiskHandler(void) {
         else bufsz = 0x1A;
 
         tmpheads = tmpcyl = tmpsect = tmpsize = 0;
-        if (!IDE_GetPhysGeometry(drivenum,tmpheads,tmpcyl,tmpsect,tmpsize))
-                imageDiskList[drivenum]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
-
+        if(!IDE_GetPhysGeometry(drivenum, tmpheads, tmpcyl, tmpsect, tmpsize, LBA)) {
+            imageDiskList[drivenum]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
+            LBA = imageDiskList[drivenum]->getLBA();
+        }
         real_writew(segat,bufptr+0x00,bufsz);
         real_writew(segat,bufptr+0x02,0x0003);  /* C/H/S valid, DMA boundary errors handled */
         real_writed(segat,bufptr+0x04,tmpcyl);
         real_writed(segat,bufptr+0x08,tmpheads);
         real_writed(segat,bufptr+0x0C,tmpsect);
-        real_writed(segat,bufptr+0x10,tmpcyl*tmpheads*tmpsect);
-        real_writed(segat,bufptr+0x14,0);
+        real_writed(segat,bufptr+0x10, int13_enable_48bitLBA?(uint32_t)(LBA & 0xFFFFFFFF): (uint32_t)(LBA > 0x0FFFFFFF?0x0FFFFFFF:LBA)); /* LBA lower 32bit */
+        real_writed(segat,bufptr+0x14, int13_enable_48bitLBA?(uint32_t)(LBA >> 32):0); /* LBA upper 32bit */
         real_writew(segat,bufptr+0x18,512);
         if (bufsz >= 0x1E)
             real_writed(segat,bufptr+0x1A,0xFFFFFFFF); /* no EDD information available */
@@ -2490,6 +2682,9 @@ void BIOS_SetupDisks(void) {
 
     imgDTASeg = 0;
 
+    floppyparm0 = ROMBIOS_GetMemory(11*2/*two tables*/,"BIOS Floppy parameter tables",1,0);
+    RealSetVec(0x1E,RealMake(floppyparm0 >> 4u,floppyparm0 & 0xFu));
+    updateFloppyDPT();
 /* Setup the Bios Area */
     mem_writeb(BIOS_HARDDISK_COUNT,2);
 
@@ -2869,6 +3064,7 @@ imageDiskVFD::imageDiskVFD(FILE *imgFile, const char *imgName, uint32_t imgSizeK
                 active = false;
             } else {
                 incrementFDD();
+                updateFloppyDPT();
             }
         }
     }
@@ -3198,6 +3394,7 @@ imageDiskD88::imageDiskD88(FILE *imgFile, const char *imgName, uint32_t imgSizeK
             active = false;
         } else {
             incrementFDD();
+            updateFloppyDPT();
         }
     }
 }
@@ -3553,6 +3750,7 @@ imageDiskNFD::imageDiskNFD(FILE *imgFile, const char *imgName, uint32_t imgSizeK
             active = false;
         } else {
             incrementFDD();
+            updateFloppyDPT();
         }
     }
 }
@@ -3745,9 +3943,12 @@ imageDiskEmptyDrive::~imageDiskEmptyDrive() {
 
 /////
 
+#if !defined(OSFREE)
 unsigned int INT13Xfer = 0;
 size_t INT13XferSize = 4096;
+#endif
 
+#if !defined(OSFREE)
 static void imageDiskCallINT13(void) {
 	unsigned int rv = CALLBACK_RealPointer(call_int13);
 	Bitu oldIF=GETFLAG(IF);
@@ -3761,7 +3962,9 @@ static void imageDiskCallINT13(void) {
 	SegSet16(cs,oldcs);
 	SETFLAGBIT(IF,oldIF);
 }
+#endif
 
+#if !defined(OSFREE)
 uint8_t imageDiskINT13Drive::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
 	if (!enable_int13 || busy) return subdisk->Read_Sector(head,cylinder,sector,data,req_sector_size);
 
@@ -3770,7 +3973,7 @@ uint8_t imageDiskINT13Drive::Read_Sector(uint32_t head,uint32_t cylinder,uint32_
 
 	if (req_sector_size == 0) req_sector_size = sector_size;
 
-//	LOG_MSG("INT13 read C/H/S %u/%u/%u busy=%u",cylinder,head,sector,busy);
+	//LOG_MSG("INT13 read C/H/S %u/%u/%u busy=%u",cylinder,head,sector,busy);
 
 	if (!busy && sector_size == req_sector_size && sector_size <= INT13XferSize) {
 		busy = true;
@@ -3809,6 +4012,7 @@ again:
 			}
 		}
 		else {
+			ret = 0;
 			MEM_BlockRead32(INT13Xfer<<4,data,sector_size);
 			data = (void*)((char*)data + sector_size);
 			if ((++sector) >= (sectors + 1)) {
@@ -3838,13 +4042,17 @@ again:
 
 	return ret;
 }
+#endif
 
+#if !defined(OSFREE)
 uint8_t imageDiskINT13Drive::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
 	if (INT13Xfer == 0) INT13Xfer = DOS_GetMemory(INT13XferSize/16u,"INT 13 transfer buffer");
 
 	return subdisk->Write_Sector(head,cylinder,sector,data,req_sector_size);
 }
+#endif
 
+#if !defined(OSFREE)
 uint8_t imageDiskINT13Drive::Read_AbsoluteSector(uint32_t sectnum, void * data) {
 	unsigned int c,h,s;
 
@@ -3856,7 +4064,9 @@ uint8_t imageDiskINT13Drive::Read_AbsoluteSector(uint32_t sectnum, void * data) 
 	c = (sectnum / sectors / heads);
 	return Read_Sector(h,c,s,data);
 }
+#endif
 
+#if !defined(OSFREE)
 uint8_t imageDiskINT13Drive::Write_AbsoluteSector(uint32_t sectnum, const void * data) {
 	unsigned int c,h,s;
 
@@ -3868,19 +4078,27 @@ uint8_t imageDiskINT13Drive::Write_AbsoluteSector(uint32_t sectnum, const void *
 	c = (sectnum / sectors / heads);
 	return Write_Sector(h,c,s,data);
 }
+#endif
 
+#if !defined(OSFREE)
 void imageDiskINT13Drive::UpdateFloppyType(void) {
 	subdisk->UpdateFloppyType();
 }
+#endif
 
+#if !defined(OSFREE)
 void imageDiskINT13Drive::Set_Reserved_Cylinders(Bitu resCyl) {
 	subdisk->Set_Reserved_Cylinders(resCyl);
 }
+#endif
 
+#if !defined(OSFREE)
 uint32_t imageDiskINT13Drive::Get_Reserved_Cylinders() {
 	return subdisk->Get_Reserved_Cylinders();
 }
+#endif
 
+#if !defined(OSFREE)
 void imageDiskINT13Drive::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) {
 	heads = setHeads;
 	cylinders = setCyl;
@@ -3888,19 +4106,27 @@ void imageDiskINT13Drive::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint3
 	sector_size = setSectSize;
 	return subdisk->Set_Geometry(setHeads,setCyl,setSect,setSectSize);
 }
+#endif
 
+#if !defined(OSFREE)
 void imageDiskINT13Drive::Get_Geometry(uint32_t * getHeads, uint32_t *getCyl, uint32_t *getSect, uint32_t *getSectSize) {
 	return subdisk->Get_Geometry(getHeads,getCyl,getSect,getSectSize);
 }
+#endif
 
+#if !defined(OSFREE)
 uint8_t imageDiskINT13Drive::GetBiosType(void) {
 	return subdisk->GetBiosType();
 }
+#endif
 
+#if !defined(OSFREE)
 uint32_t imageDiskINT13Drive::getSectSize(void) {
 	return subdisk->getSectSize();
 }
+#endif
 
+#if !defined(OSFREE)
 bool imageDiskINT13Drive::detectDiskChange(void) {
 	if (enable_int13 && !busy) {
 		busy = true;
@@ -3943,7 +4169,9 @@ bool imageDiskINT13Drive::detectDiskChange(void) {
 
 	return imageDisk::detectDiskChange();
 }
+#endif
 
+#if !defined(OSFREE)
 imageDiskINT13Drive::imageDiskINT13Drive(imageDisk *sdisk) : imageDisk(ID_INT13) {
 	subdisk = sdisk;
 	subdisk->Addref();
@@ -3959,8 +4187,11 @@ imageDiskINT13Drive::imageDiskINT13Drive(imageDisk *sdisk) : imageDisk(ID_INT13)
 	diskSizeK      = subdisk->diskSizeK;
 	diskChangeFlag = subdisk->diskChangeFlag;
 }
+#endif
 
+#if !defined(OSFREE)
 imageDiskINT13Drive::~imageDiskINT13Drive() {
 	subdisk->Release();
 }
+#endif
 

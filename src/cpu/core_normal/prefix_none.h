@@ -934,19 +934,51 @@
 		reg_eip=Pop_16();
 		continue;
 	CASE_W(0xc4)												/* LES */
-		{	
+		{
+			GetEAaNDEF;
 			GetRMrw;
 			if (rm >= 0xc0) goto illegal_opcode;
-			GetEAa;
+#ifndef CPU_OMIT_8086
+			if (do_lds_wraparound && !TEST_PREFIX_ADDR/*8086 table is missing latter half for 32-bit!*/) {
+				/* stack underflow 64KB wraparound? [https://github.com/joncampbell123/dosbox-x/issues/5621] */
+				GetEAaN8086; /* 8086 version that also sets last_ea86_offset */
+				if (last_ea86_offset > (0x10000u-4u)) {
+					if (CPU_SetSegGeneral(es,LoadMw(eaa+2-0x10000))) RUNEXCEPTION();
+					*rmrw=LoadMw(eaa);
+					break;
+				}
+			}
+			else {
+				GetEAaN;
+			}
+#else
+			GetEAaN;
+#endif
 			if (CPU_SetSegGeneral(es,LoadMw(eaa+2))) RUNEXCEPTION();
 			*rmrw=LoadMw(eaa);
 			break;
 		}
 	CASE_W(0xc5)												/* LDS */
-		{	
+		{
+			GetEAaNDEF;
 			GetRMrw;
 			if (rm >= 0xc0) goto illegal_opcode;
-			GetEAa;
+#ifndef CPU_OMIT_8086
+			if (do_lds_wraparound && !TEST_PREFIX_ADDR/*8086 table is missing latter half for 32-bit!*/) {
+				/* stack underflow 64KB wraparound? [https://github.com/joncampbell123/dosbox-x/issues/5621] */
+				GetEAaN8086; /* 8086 version that also sets last_ea86_offset */
+				if (last_ea86_offset > (0x10000u-4u)) {
+					if (CPU_SetSegGeneral(ds,LoadMw(eaa+2-0x10000))) RUNEXCEPTION();
+					*rmrw=LoadMw(eaa);
+					break;
+				}
+			}
+			else {
+				GetEAaN;
+			}
+#else
+			GetEAaN;
+#endif
 			if (CPU_SetSegGeneral(ds,LoadMw(eaa+2))) RUNEXCEPTION();
 			*rmrw=LoadMw(eaa);
 			break;
@@ -1086,6 +1118,7 @@
 		break;
 #ifdef CPU_FPU
 	CASE_B(0xd8)												/* FPU ESC 0 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC(0);
 		}
@@ -1095,6 +1128,7 @@
 		}
 		break;
 	CASE_B(0xd9)												/* FPU ESC 1 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC_SIZE(1, !(core.opcode_index&OPCODE_SIZE));
 		}
@@ -1104,6 +1138,7 @@
 		}
 		break;
 	CASE_B(0xda)												/* FPU ESC 2 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC(2);
 		}
@@ -1113,6 +1148,7 @@
 		}
 		break;
 	CASE_B(0xdb)												/* FPU ESC 3 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC(3);
 		}
@@ -1122,6 +1158,7 @@
 		}
 		break;
 	CASE_B(0xdc)												/* FPU ESC 4 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC(4);
 		}
@@ -1131,6 +1168,7 @@
 		}
 		break;
 	CASE_B(0xdd)												/* FPU ESC 5 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC_SIZE(5, !(core.opcode_index&OPCODE_SIZE));
 		}
@@ -1140,6 +1178,7 @@
 		}
 		break;
 	CASE_B(0xde)												/* FPU ESC 6 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC(6);
 		}
@@ -1149,6 +1188,7 @@
 		}
 		break;
 	CASE_B(0xdf)												/* FPU ESC 7 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		if (enable_fpu) {
 			FPU_ESC(7);
 		}
@@ -1166,6 +1206,7 @@
 	CASE_B(0xdd)												/* FPU ESC 5 */
 	CASE_B(0xde)												/* FPU ESC 6 */
 	CASE_B(0xdf)												/* FPU ESC 7 */
+		if (FPU_CoprocessorException()) RUNEXCEPTION();
 		{
 			LOG(LOG_CPU,LOG_NORMAL)("FPU used");
 			uint8_t rm=Fetchb();

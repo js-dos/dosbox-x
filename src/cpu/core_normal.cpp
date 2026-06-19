@@ -28,6 +28,8 @@
 #include <jsdos-asyncify.h>
 #endif
 
+extern bool do_lds_wraparound;
+
 bool CPU_RDMSR();
 bool CPU_WRMSR();
 bool CPU_SYSENTER();
@@ -39,6 +41,8 @@ bool CPU_SYSEXIT();
 
 #define DoString DoString_Normal
 
+static uint16_t last_ea86_offset;
+
 extern bool ignore_opcode_63;
 
 #if C_DEBUG
@@ -48,11 +52,11 @@ extern bool ignore_opcode_63;
 #define LoadMb(off) mem_readb_inline(off)
 #define LoadMw(off) mem_readw_inline(off)
 #define LoadMd(off) mem_readd_inline(off)
-#define LoadMq(off) ((uint64_t)((uint64_t)mem_readd_inline(off+4)<<32 | (uint64_t)mem_readd_inline(off)))
+#define LoadMq(off) (((uint64_t)mem_readd_inline(off+4)<<(uint64_t)32) | (uint64_t)mem_readd_inline(off))
 #define SaveMb(off,val)	mem_writeb_inline(off,val)
 #define SaveMw(off,val)	mem_writew_inline(off,val)
 #define SaveMd(off,val)	mem_writed_inline(off,val)
-#define SaveMq(off,val) {mem_writed_inline(off,val&0xffffffff);mem_writed_inline(off+4,(val>>32)&0xffffffff);}
+#define SaveMq(off,val) {mem_writed_inline(off,((uint32_t)(val))&0xffffffff);mem_writed_inline(off+4,(((uint64_t)(val))>>((uint64_t)32))&0xffffffff);}
 
 Bitu cycle_count;
 
@@ -178,6 +182,7 @@ Bits CPU_Core_Normal_Run(void) {
 		last_prefix=MP_NONE;
 		core.opcode_index=cpu.code.big*(Bitu)0x200u;
 		core.prefixes=cpu.code.big;
+		last_ea86_offset=0;
 		core.ea_table=&EATable[cpu.code.big*256u];
 		BaseDS=SegBase(ds);
 		BaseSS=SegBase(ss);

@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
+#include <vector>
 
 #include "bitmapinfoheader.h"
 #include "dosbox.h"
@@ -58,6 +59,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
+#include <libavutil/opt.h>
 }
 
 /* This code now requires FFMPEG 4 or higher */
@@ -123,20 +125,18 @@ void ffmpeg_closeall() {
 			ffmpeg_avformat_began = false;
 		}
 		avio_close(ffmpeg_fmt_ctx->pb);
-		if (ffmpeg_vid_ctx != NULL) avcodec_close(ffmpeg_vid_ctx);
-		if (ffmpeg_aud_ctx != NULL) avcodec_close(ffmpeg_aud_ctx);
+		if (ffmpeg_vid_ctx != NULL) avcodec_free_context(&ffmpeg_vid_ctx);
+		if (ffmpeg_aud_ctx != NULL) avcodec_free_context(&ffmpeg_aud_ctx);
 		avformat_free_context(ffmpeg_fmt_ctx);
 		ffmpeg_fmt_ctx = NULL;
 		ffmpeg_vid_ctx = NULL; // NTS: avformat_free_context() freed this for us, don't free again
 		ffmpeg_aud_ctx = NULL; // NTS: avformat_free_context() freed this for us, don't free again
 	}
 	if (ffmpeg_vid_ctx != NULL) {
-		avcodec_close(ffmpeg_vid_ctx);
 		avcodec_free_context(&ffmpeg_vid_ctx);
 		ffmpeg_vid_ctx = NULL;
 	}
 	if (ffmpeg_aud_ctx != NULL) {
-		avcodec_close(ffmpeg_aud_ctx);
 		avcodec_free_context(&ffmpeg_aud_ctx);
 		ffmpeg_aud_ctx = NULL;
 	}
@@ -171,7 +171,6 @@ void ffmpeg_audio_frame_send() {
 
 	if (!pkt) E_Exit("Error: Unable to alloc packet");
 
-	ffmpeg_aud_frame->key_frame = 1;
 	ffmpeg_aud_frame->pts = (int64_t)ffmpeg_audio_sample_counter;
 	r=avcodec_send_frame(ffmpeg_aud_ctx,ffmpeg_aud_frame);
 	if (r < 0 && r != AVERROR(EAGAIN))
@@ -426,7 +425,6 @@ int ffmpeg_bpp_pick_rgb_format(int bpp) {
 
 void ffmpeg_reopen_video(double fps,const int bpp) {
 	if (ffmpeg_vid_ctx != NULL) {
-		avcodec_close(ffmpeg_vid_ctx);
 		avcodec_free_context(&ffmpeg_vid_ctx);
 		ffmpeg_vid_ctx = NULL;
 	}
@@ -811,19 +809,15 @@ static inline unsigned long math_gcd_png_uint_32(const png_uint_32 a,const png_u
 void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, uint8_t * data, uint8_t * pal) {
 #if (C_SSHOT)
 	Bitu i;
-	uint8_t doubleRow[SCALER_MAXWIDTH*4];
 	Bitu countWidth = width;
+	std::vector<uint8_t> doubleRowBuf((countWidth + 32) * 4 * ((flags & CAPTURE_FLAG_DBLW) ? 2 : 1));
+	uint8_t *doubleRow = doubleRowBuf.data();
 
 	if (flags & CAPTURE_FLAG_DBLH)
 		height *= 2;
 	if (flags & CAPTURE_FLAG_DBLW)
 		width *= 2;
 
-	if (height > SCALER_MAXHEIGHT)
-		return;
-	if (width > SCALER_MAXWIDTH)
-		return;
-	
 	if (CaptureState & CAPTURE_IMAGE) {
 		png_structp png_ptr;
 		png_infop info_ptr;
@@ -950,7 +944,22 @@ void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags,
 				rowPointer = doubleRow;
 				break;
 			case 32:
-				if (flags & CAPTURE_FLAG_DBLW) {
+#if defined(MACOSX) && !C_SDL2
+                if (flags & CAPTURE_FLAG_DBLW) {
+					for (Bitu x=0;x<countWidth;x++) {
+						doubleRow[x*6+2] = doubleRow[x*6+5] = ((uint8_t *)srcLine)[x*4+1];
+						doubleRow[x*6+1] = doubleRow[x*6+4] = ((uint8_t *)srcLine)[x*4+2];
+						doubleRow[x*6+0] = doubleRow[x*6+3] = ((uint8_t *)srcLine)[x*4+3];
+					}
+				} else {
+					for (Bitu x=0;x<countWidth;x++) {
+						doubleRow[x*3+2] = ((uint8_t *)srcLine)[x*4+1];
+						doubleRow[x*3+1] = ((uint8_t *)srcLine)[x*4+2];
+						doubleRow[x*3+0] = ((uint8_t *)srcLine)[x*4+3];
+					}
+				}
+#else
+                if (flags & CAPTURE_FLAG_DBLW) {
 					for (Bitu x=0;x<countWidth;x++) {
 						doubleRow[x*6+0] = doubleRow[x*6+3] = ((uint8_t *)srcLine)[x*4+0];
 						doubleRow[x*6+1] = doubleRow[x*6+4] = ((uint8_t *)srcLine)[x*4+1];
@@ -963,7 +972,8 @@ void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags,
 						doubleRow[x*3+2] = ((uint8_t *)srcLine)[x*4+2];
 					}
 				}
-				rowPointer = doubleRow;
+#endif
+                rowPointer = doubleRow;
 				break;
 			}
 			png_write_row(png_ptr, (png_bytep)rowPointer);
@@ -1271,7 +1281,7 @@ skip_shot:
 			ffmpeg_aud_ctx->sample_rate = (int)capture.video.audiorate;
 			ffmpeg_aud_ctx->flags = 0; // do not use global headers
 			ffmpeg_aud_ctx->bit_rate = 320000;
-			ffmpeg_aud_ctx->profile = FF_PROFILE_AAC_LOW;
+			// ffmpeg_aud_ctx->profile = FF_PROFILE_AAC_LOW;
 
 			#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(59,24,100)
 			ffmpeg_aud_ctx->channels = 2;
@@ -1531,7 +1541,7 @@ skip_shot:
 
 				// encode it
 				ffmpeg_vid_frame->pts = (int64_t)capture.video.frames; // or else libx264 complains about non-monotonic timestamps
-				ffmpeg_vid_frame->key_frame = ((capture.video.frames % 15) == 0)?1:0;
+                av_opt_set_int(ffmpeg_vid_ctx->priv_data, "g", 15, 0); // GOP size 15
 
 				r=avcodec_send_frame(ffmpeg_vid_ctx,ffmpeg_vid_frame);
 				if (r < 0 && r != AVERROR(EAGAIN))
@@ -1768,7 +1778,7 @@ skip_mt_wav:
 }
 
 #pragma pack(push,1)
-typedef struct pcap_hdr_struct_t {
+typedef struct {
 	uint32_t magic_number;   /* magic number */
 	uint16_t version_major;  /* major version number */
 	uint16_t version_minor;  /* minor version number */
@@ -1776,14 +1786,14 @@ typedef struct pcap_hdr_struct_t {
 	uint32_t sigfigs;        /* accuracy of timestamps */
 	uint32_t snaplen;        /* max length of captured packets, in octets */
 	uint32_t network;        /* data link type */
-};
+} pcap_hdr_struct_t;
 
-typedef struct pcaprec_hdr_struct_t {
+typedef struct  {
 	uint32_t ts_sec;         /* timestamp seconds */
 	uint32_t ts_usec;        /* timestamp microseconds */
 	uint32_t incl_len;       /* number of octets of packet saved in file */
 	uint32_t orig_len;       /* actual length of packet */
-};
+} pcaprec_hdr_struct_t;
 #pragma pack(pop)
 
 void Capture_WritePacket(bool /*send*/,const unsigned char *buf,size_t len) {

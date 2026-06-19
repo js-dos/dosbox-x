@@ -49,7 +49,9 @@ extern bool enable_share_exe, enable_network_redirector;
 
 extern Bitu XMS_EnableA20(bool enable);
 
+#if !defined(OSFREE)
 bool enable_a20_on_windows_init = false;
+#endif
 
 static Bitu call_int2f,call_int2a;
 
@@ -110,7 +112,9 @@ extern bool i4dos, shellrun, clipboard_dosapi, swapad;
 extern RealPt DOS_DriveDataListHead;       // INT 2Fh AX=0803h DRIVER.SYS drive data table list
 extern uint16_t seg_win_startup_info;
 void PasteClipboard(bool bPressed);
+#if !defined(OSFREE)
 RealPt Get_EMS_vm86control();
+#endif
 
 // INT 2F
 char regpath[CROSS_LEN+1]="C:\\WINDOWS\\SYSTEM.DAT";
@@ -309,6 +313,7 @@ static bool DOS_MultiplexFunctions(void) {
 			reg_ax = 0x301;
         return true;
 	case 0x1605:	/* Windows init broadcast */
+#if !defined(OSFREE)
 		if (enable_a20_on_windows_init) {
 			/* This hack exists because Windows 3.1 doesn't seem to enable A20 first during an
 			 * initial critical period where it assumes it's on, prior to checking and enabling/disabling it.
@@ -320,6 +325,7 @@ static bool DOS_MultiplexFunctions(void) {
 			LOG_MSG("Enabling A20 gate for Windows in response to INIT broadcast");
 			XMS_EnableA20(true);
 		}
+#endif
 
 		/* TODO: Maybe future parts of DOSBox-X will do something with this */
 		/* TODO: Don't show this by default. Show if the user wants it by a) setting something to "true" in dosbox-x.conf or b) running a builtin command in Z:\ */
@@ -357,6 +363,7 @@ static bool DOS_MultiplexFunctions(void) {
 			reg_bx = 0;
 		}
 
+#if !defined(OSFREE)
 		/* If EMS emulation is providing VCPI and it is enabled (the system is in vm86 mode),
 		 * provide Windows a callback function to control it */
 		{
@@ -367,6 +374,7 @@ static bool DOS_MultiplexFunctions(void) {
 				LOG_MSG("DEBUG: Providing Windows our VCPI vm86 control entry point 0x%lx",(unsigned long)p);
 			}
 		}
+#endif
 
 		return false; /* pass it on to other INT 2F handlers */
 	case 0x1606:	/* Windows exit broadcast */

@@ -120,6 +120,7 @@
 
 #include <assert.h>
 
+#include "vga.h"
 #include "dosbox.h"
 #include "logging.h"
 #include "setup.h"
@@ -131,6 +132,7 @@
 #include "support.h"
 #include "setup.h"
 #include "timer.h"
+#include "../ints/int10.h"
 #include "mem.h"
 #include "pci_bus.h"
 #include "util_units.h"
@@ -153,6 +155,13 @@
 #include <string>
 #include <stdio.h>
 
+#define DOSBOX_INCLUDE
+#include "iglib.h"
+
+void dosbox_integration_trigger_write_direct32(const uint32_t reg,const uint32_t val);
+bool dosbox_int_push_save_state(void);
+bool dosbox_int_pop_save_state(void);
+
 #if defined(_MSC_VER)
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 #endif
@@ -169,6 +178,7 @@ bool                                VGA_PITsync = false;
 
 unsigned int                        vbe_window_granularity = 0;
 unsigned int                        vbe_window_size = 0;
+bool                                vbe_window_size_literal = false;
 
 /* current dosplay page (controlled by A4h) */
 unsigned char*                      pc98_pgraph_current_display_page;
@@ -177,10 +187,13 @@ unsigned char*                      pc98_pgraph_current_cpu_page;
 
 bool                                vga_8bit_dac = false;
 bool                                enable_vga_8bit_dac = true;
+bool                                enable_vbe_pmode_if = true;
 bool                                ignore_sequencer_blanking = false;
 bool                                memio_complexity_optimization = true;
 bool                                vga_render_on_demand = false; // Render at vsync or specific changes to hardware instead of every scanline
 signed char                         vga_render_on_demand_user = -1;
+bool                                vga_render_wait_for_changes = false; // Skip rendering entirely, even at vsync, unless anything changes
+signed char                         vga_render_wait_for_changes_user = -1;
 
 bool                                pc98_crt_mode = false;      // see port 6Ah command 40h/41h.
                                                                 // this boolean is the INVERSE of the bit.
@@ -261,14 +274,20 @@ double vga_force_refresh_rate = -1;
 uint8_t CGAPal2[2] = {0,0};
 uint8_t CGAPal4[4] = {0,0,0,0};
 
+void VGA_RenderOnDemandUpTo(void);
+
 void page_flip_debug_notify() {
-	if (enable_page_flip_debugging_marker)
+	if (enable_page_flip_debugging_marker) {
+		if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
 		vga_page_flip_occurred = true;
+	}
 }
 
 void vsync_poll_debug_notify() {
-	if (enable_vretrace_poll_debugging_marker)
+	if (enable_vretrace_poll_debugging_marker) {
+		if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
 		vga_3da_polled = true;
+	}
 }
 
 void VGA_SetModeNow(VGAModes mode) {
@@ -316,8 +335,39 @@ void VGA_DetermineMode_StandardVGA(void) { /* and EGA, the extra regs are not us
 	}
 }
 
+enum VGAModes VGA_DOSBoxIG_FmtToVGA(void) {
+	switch (vga.dosboxig.vidformat) {
+		case DBIGVF_NONE:
+			return M_CGA4; // which should be ignored
+		case DBIGVF_1BPP:
+			return M_CGA2;
+		case DBIGVF_4BPP:
+			return M_PACKED4;
+		case DBIGVF_8BPP:
+			return M_LIN8;
+		case DBIGVF_15BPP:
+			return M_LIN15;
+		case DBIGVF_16BPP:
+			return M_LIN16;
+		case DBIGVF_24BPP8:
+			return M_LIN24;
+		case DBIGVF_32BPP8:
+			return M_LIN32;
+		case DBIGVF_32BPP10:
+			return M_LIN32;
+		case DBIGVF_1BPP4PLANE:
+			return M_LIN4;
+		default:
+			break;
+	}
+
+	return M_ERROR;
+}
+
 void VGA_DetermineMode(void) {
-	if (svga.determine_mode)
+	if (vga.dosboxig.svga)
+		VGA_SetMode(VGA_DOSBoxIG_FmtToVGA());
+	else if (svga.determine_mode)
 		svga.determine_mode();
 	else
 		VGA_DetermineMode_StandardVGA();
@@ -350,7 +400,7 @@ void VGA_SetCGA2Table(uint8_t val0,uint8_t val1) {
 			((Bitu)total[(i >> 0u) & 1u] << 0u  ) | ((Bitu)total[(i >> 1u) & 1u] << 8u  ) |
 			((Bitu)total[(i >> 2u) & 1u] << 16u ) | ((Bitu)total[(i >> 3u) & 1u] << 24u );
 #else 
-		((Bitu)total[(i >> 3u) & 1u] << 0u  ) | ((Bitu)total[(i >> 2u) & 1u] << 8u  ) |
+			((Bitu)total[(i >> 3u) & 1u] << 0u  ) | ((Bitu)total[(i >> 2u) & 1u] << 8u  ) |
 			((Bitu)total[(i >> 1u) & 1u] << 16u ) | ((Bitu)total[(i >> 0u) & 1u] << 24u );
 #endif
 	}
@@ -844,10 +894,12 @@ void VGA_Reset(Section*) {
 
 	vga_8bit_dac = false;
 	enable_vga_8bit_dac = section->Get_bool("enable 8-bit dac");
+	enable_vbe_pmode_if = section->Get_bool("vbe protected mode interface");
 	ignore_sequencer_blanking = section->Get_bool("ignore sequencer blanking");
 	memio_complexity_optimization = section->Get_bool("memory io optimization 1");
 
 	vga_render_on_demand = false;
+	vga_render_wait_for_changes = false;
 
 	{
 		const char *str = section->Get_string("scanline render on demand");
@@ -859,6 +911,16 @@ void VGA_Reset(Section*) {
 			vga_render_on_demand_user = -1;
 	}
 
+	{
+		const char *str = section->Get_string("skip render if nothing changed");
+		if (!strcmp(str,"true") || !strcmp(str,"1"))
+			vga_render_wait_for_changes_user = 1;
+		else if (!strcmp(str,"false") || !strcmp(str,"0"))
+			vga_render_wait_for_changes_user = 0;
+		else
+			vga_render_wait_for_changes_user = -1;
+	}
+
 	if (memio_complexity_optimization)
 		LOG_MSG("Memory I/O complexity optimization enabled aka option 'memory io optimization 1'. If the game or demo is unable to draw to the screen properly, set the option to false.");
 
@@ -866,6 +928,9 @@ void VGA_Reset(Section*) {
 		LOG_MSG("'scanline render on demand' option is enabled. If this option breaks the game or demo effects or display, set the option to false.");
 	else if (vga_render_on_demand_user < 0)
 		LOG_MSG("The 'scanline render on demand' option is available and may provide a modest boost in video render performance if set to true.");
+
+	if (vga_render_wait_for_changes_user > 0)
+		LOG_MSG("The option to skip rendering entirely if nothing changes is enabled.");
 
 	vga_memio_lfb_delay = section->Get_bool("lfb vmemdelay");
 
@@ -907,14 +972,26 @@ void VGA_Reset(Section*) {
 
 	LOG(LOG_VGA,LOG_DEBUG)("VGA memory I/O delay %uns",vga_memio_delay_ns);
 
+	vbe_window_size_literal = false;
 	vbe_window_granularity = (unsigned int)section->Get_int("vbe window granularity") << 10u; /* KB to bytes */
 	vbe_window_size = (unsigned int)section->Get_int("vbe window size") << 10u; /* KB to bytes */
 
-	if (vbe_window_granularity != 0 && !bitop::ispowerof2(vbe_window_granularity))
+	if (vbe_window_size == 0) {
+		vbe_window_size = 0x10000; // 64KB
+		vbe_window_size_literal = true;
+	}
+	if (vbe_window_granularity == 0) {
+		if (svgaCard == SVGA_ParadisePVGA1A)
+			vbe_window_granularity = 0x1000; // 4KB
+		else
+			vbe_window_granularity = 0x10000; // 64KB
+	}
+
+	if (!bitop::ispowerof2(vbe_window_granularity))
 		LOG(LOG_VGA,LOG_WARN)("User specified VBE window granularity is not a power of 2. May break some programs.");
-	if (vbe_window_size != 0 && !bitop::ispowerof2(vbe_window_size))
+	if (!bitop::ispowerof2(vbe_window_size))
 		LOG(LOG_VGA,LOG_WARN)("User specified VBE window size is not a power of 2. May break some programs.");
-	if (vbe_window_size != 0 && vbe_window_granularity != 0 && vbe_window_size < vbe_window_granularity)
+	if (vbe_window_size < vbe_window_granularity)
 		LOG(LOG_VGA,LOG_WARN)("VBE window size is less than window granularity, which prevents full access to video memory and may break some programs.");
 
 	/* mainline compatible vmemsize (in MB)
@@ -952,6 +1029,24 @@ void VGA_Reset(Section*) {
 			vga.mem.memsize_original = 0;
 			vga.mem.memsize = 0; /* machine-specific code will choose below */
 		}
+	}
+
+	/* traditional VGA limits including older SVGA cards like Tseng */
+	if (IS_VGA_ARCH) {
+		vga.max_svga_width = 1024;
+		vga.max_svga_height = 1024;
+	}
+	else if (IS_EGA_ARCH) {//GUESS
+		vga.max_svga_width = 1024;
+		vga.max_svga_height = 512;
+	}
+	else if (IS_PC98_ARCH) {//GUESS
+		vga.max_svga_width = 1024;
+		vga.max_svga_height = 512;
+	}
+	else {
+		vga.max_svga_width = 1024;
+		vga.max_svga_height = 512;
 	}
 
 	/* sanity check according to adapter type.
@@ -1012,18 +1107,6 @@ void VGA_Reset(Section*) {
 	if (IS_EGA_ARCH && vga.mem.memsize < _KB_bytes(128))
 		LOG_MSG("WARNING: EGA 64KB emulation is very experimental and not well supported");
 
-	/* If video memory is limited by bank switching, then reduce video memory */
-	if (vbe_window_granularity != 0 && !IS_PC98_ARCH) {
-		const uint32_t sz = GetReportedVideoMemorySize();
-
-		LOG(LOG_VGA,LOG_NORMAL)("Video RAM size %uKB exceeds maximum possible %uKB given VBE window granularity, reducing",
-				vga.mem.memsize>>10,(unsigned int)(sz>>10ul));
-
-		/* reduce by half, until video memory is reported or larger but not more than 2x */
-		while (vga.mem.memsize > _KB_bytes(512) && (vga.mem.memsize/2ul) >= sz)
-			vga.mem.memsize /= 2u;
-	}
-
 	// prepare for transition
 	if (want_fm_towns) {
 		if (vga.mem.memsize < _KB_bytes(640)) vga.mem.memsize = _KB_bytes(640); /* "640KB of RAM, 512KB VRAM and 128KB sprite RAM" */
@@ -1032,10 +1115,29 @@ void VGA_Reset(Section*) {
 	if (!IS_PC98_ARCH)
 		SVGA_Setup_Driver();        // svga video memory size is set here, possibly over-riding the user's selection
 
-	// NTS: This is WHY the memory size must be a power of 2
-	vga.mem.memmask = vga.mem.memsize - 1u;
+	// By default, VBE reported memory size is the same as actual memory size
+	vga.mem.vbe_memsize = vga.mem.memsize;
 
-	LOG(LOG_VGA,LOG_NORMAL)("Video RAM: %uKB",vga.mem.memsize>>10);
+	// Allow the user to limit what is reported through the VBE in case of DOS programs that cannot handle too much video memory.
+	// Looking at you, SciTech VBETEST.EXE from 1994.
+	{
+		int sz_m = section->Get_int("vbememsize");
+		int sz_k = section->Get_int("vbememsizekb");
+		uint32_t b = _MB_bytes((unsigned int)sz_m) + _KB_bytes((unsigned int)sz_k);
+		/* does not need to be a power of 2, only larger than 256KB, and less than or equal to video memory size */
+		if (b != 0) {
+			if (b > vga.mem.memsize) b = vga.mem.memsize;
+			if (b < _KB_bytes(256u)) b = _KB_bytes(256u);
+			vga.mem.vbe_memsize = b; 
+		}
+	}
+
+	// NTS: This is WHY the memory size must be a power of 2
+	vga.mem.memmask = bitop::rounduppow2mask(vga.mem.memsize - 1u);
+
+	LOG(LOG_VGA,LOG_NORMAL)("Video RAM: %uKB (mask 0x%x)",vga.mem.memsize>>10,(unsigned int)vga.mem.memmask);
+	LOG(LOG_VGA,LOG_DEBUG)("VBE bios will report %uKB of video memory",vga.mem.vbe_memsize>>10);
+	LOG(LOG_VGA,LOG_DEBUG)("Maximum video resolution supported by card: %ux%u",vga.max_svga_width,vga.max_svga_height);
 
 	// TODO: If S3 emulation, and linear framebuffer bumps up against the CPU memalias limits,
 	//       trim Video RAM to fit (within reasonable limits) or else E_Exit() to let the user
@@ -1055,8 +1157,13 @@ void VGA_Reset(Section*) {
 		VGA_SetupXGA();
 		VGA_SetClock(0,CLK_25);
 		VGA_SetClock(1,CLK_28);
+
 		/* Generate tables */
-		VGA_SetCGA2Table(0,1);
+		if (machine == MCH_HERC && hercCard < HERC_InColor)
+			VGA_SetCGA2Table(0,7); /* make graphics mode use colors 0 and 7 so hercules palette selection works */
+		else
+			VGA_SetCGA2Table(0,1);
+
 		VGA_SetCGA4Table(0,1,2,3);
 
 		if (machine == MCH_HERC || machine == MCH_MDA) {
@@ -1418,7 +1525,6 @@ void VGA_Init() {
 	vga.tandy.draw_base = NULL;
 	vga.tandy.mem_base = NULL;
 	LOG(LOG_MISC,LOG_DEBUG)("Initializing VGA");
-	LOG(LOG_MISC,LOG_DEBUG)("Render scaler maximum resolution is %u x %u",SCALER_MAXWIDTH,SCALER_MAXHEIGHT);
 
 	/* the purpose of this is so that, if everything is crammed up at the top to make room for system RAM, the S3 and 3Dfx do not conflict */
 	if (IS_VGA_ARCH && svgaCard != SVGA_None)
@@ -1710,6 +1816,169 @@ void SVGA_Setup_JEGA(void) {
 	phys_writeb(rom_base + 0x40 * 512 - 18 + 3, 'A');
 }
 
+extern VideoModeBlock* CurMode;
+
+void FinishSetMode_DOSBoxIG(Bitu /*crtc_base*/, VGA_ModeExtraData* modeData) {
+	uint32_t htadd = CurMode->htotal - CurMode->hdispend, vtadd = CurMode->vtotal - CurMode->vdispend;
+	uint32_t fmtc = 0,cwidth = (CurMode->pitch != 0) ? CurMode->pitch : CurMode->swidth;
+	uint32_t width = CurMode->swidth,height = CurMode->sheight;
+	uint32_t refresh = (uint32_t)(70.09 * 0x10000);
+	uint8_t hscale = 0,vscale = 0;
+	uint32_t darctl = 0;
+	uint32_t ctl = 0;
+
+	/* 16-color planar modes and standard VGA modes use standard VGA emulation */
+	if (CurMode->type == M_ERROR || CurMode->type == M_TEXT || modeData->modeNo <= 0x13) {
+		/* switch off Integration Graphics */
+		dosbox_int_push_save_state();
+
+		if (width > 640 || height > 480) {
+			ctl |= DOSBOX_ID_REG_VGAIG_CTL_OVERRIDE_REFRESH;
+			vga.config.compatible_chain4 = false; /* or else >800x600 16-color planar modes will not work properly */
+			vga.config.line_compare=0x7FFu;
+		}
+		else {
+			vga.config.line_compare=0x3FFu;
+		}
+
+		dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_CTL,0);
+		dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_REFRESHRATE,refresh);
+		dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_BANKWINDOW,0);
+		dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_CTL,ctl);
+
+		dosbox_int_pop_save_state();
+
+		/* VGA draw code still uses S3 extended horz/vert regs so put it there so >800x600 modes work correctly */
+		vga.s3.ex_hor_overflow=(uint8_t)modeData->hor_overflow;
+		vga.s3.ex_ver_overflow=(uint8_t)modeData->ver_overflow;
+		vga.config.scan_len=modeData->offset;
+		return;
+	}
+
+	htadd *= 8u;
+	vga.config.line_compare=0x7FFu;
+	vga.config.compatible_chain4 = false; /* or else bank switching support does not work properly */
+	ctl = DOSBOX_ID_REG_VGAIG_CTL_OVERRIDE|DOSBOX_ID_REG_VGAIG_CTL_VGAREG_LOCKOUT|DOSBOX_ID_REG_VGAIG_CTL_ACPAL_BYPASS|DOSBOX_ID_REG_VGAIG_CTL_DAC_LOCKOUT;
+	switch (CurMode->type) {
+		case M_CGA2:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_1BPP;
+			fmtc |= (uint16_t)(((cwidth+15U)/8U)&(~1U)); // must match code in VESA BIOS emulation
+
+			// must be able to change the palette with 3C6-3C9h
+			ctl &= ~DOSBOX_ID_REG_VGAIG_CTL_DAC_LOCKOUT;
+			break;
+		case M_LIN4:
+		case M_EGA:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_1BPP4PLANE;
+			fmtc |= (uint16_t)(((cwidth+15U)/8U)&(~1U)); // must match code in VESA BIOS emulation
+
+			// VGA registers are REQUIRED in order to use planar modes properly.
+			// DOS games expect the 16-color planar VBE modes to remap colors through the AC palette
+			// such that colors 0-15 become colors 0x00-0x07 and 0x38-0x3F, same as EGA/VGA 16-color and EGA/VGA text mode.
+			// must be able to change the palette with 3C6-3C9h
+			ctl &= ~(DOSBOX_ID_REG_VGAIG_CTL_VGAREG_LOCKOUT|DOSBOX_ID_REG_VGAIG_CTL_ACPAL_BYPASS|DOSBOX_ID_REG_VGAIG_CTL_DAC_LOCKOUT);
+			break;
+		case M_PACKED4:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_4BPP;
+			fmtc |= (uint16_t)((((cwidth+15U)/8U)&(~1U))*4); // must match code in VESA BIOS emulation
+
+			// must be able to change the palette with 3C6-3C9h
+			ctl &= ~DOSBOX_ID_REG_VGAIG_CTL_DAC_LOCKOUT;
+			break;
+		case M_VGA:
+		case M_LIN8:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_8BPP;
+			fmtc |= cwidth;
+
+			// must be able to change the palette with 3C6-3C9h
+			ctl &= ~DOSBOX_ID_REG_VGAIG_CTL_DAC_LOCKOUT;
+			break;
+		case M_LIN15:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_15BPP;
+			fmtc |= cwidth * 2u;
+			break;
+		case M_LIN16:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_16BPP;
+			fmtc |= cwidth * 2u;
+			break;
+		case M_LIN24:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_24BPP8;
+			fmtc |= cwidth * 3u;
+			break;
+		case M_LIN32:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_32BPP8;
+			fmtc |= cwidth * 4u;
+			break;
+		default:
+			fmtc |= DOSBOX_ID_REG_VGAIG_FMT_NONE;
+			break;
+	}
+
+	/* for specific video modes, make sure to display it correctly.
+	 * Most of the time the mode is 4:3.
+	 * Some modes like 640x400 and 1280x1024 must be slightly distorted to display at the intended 4:3.
+	 * For everything else, leave the aspect ratio setting as zero, the DOSBox IG handling will assume a square 1:1 pixel aspect ratio. */
+	if (height >= 480) {
+		double ar = (double)width / height;
+
+		if (ar >= 1.65) /* NTS: 640x400 mode 0x100 would be mistaken as 16:9 otherwise (ar=1.6) */
+			darctl = (9 << 16u) | 16u; /* 16:9 */
+		else /* including modes such as 320x480 */
+			darctl = (3 << 16u) | 4u; /* 4:3 */
+	}
+	else {
+		/* 640x400, 640x350, etc. are always 4:3 */
+		darctl = (3 << 16u) | 4u; /* 4:3 */
+	}
+
+	/* pixel doubling */
+	while ((width * (1+hscale)) < 640)
+		hscale++;
+	while ((height * (1+vscale)) < 400)
+		vscale++;
+
+	dosbox_int_push_save_state();
+
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_FMT_BYTESPERSCANLINE,fmtc);
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_HVTOTALADD,(vtadd << 16u) | htadd);
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_DISPLAYSIZE,(height << 16u) | width);
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_HVPELSCALE,(vscale << 24u) | (hscale << 16u));
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_REFRESHRATE,refresh);
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_ASPECTRATIO,darctl);
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_DISPLAYOFFSET,0);
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_BANKWINDOW,0);
+
+	dosbox_integration_trigger_write_direct32(DOSBOX_ID_REG_VGAIG_CTL,ctl);
+
+	dosbox_int_pop_save_state();
+
+	/* INT 10h at this point still has the screen blanked, having not yet written bit 5 of the attr control index.
+	 * It won't be able to with our lockout in effect, do it now directly.
+	 * 2026/01/07: We could leave it in the blanking state, the VGA draw code ignores this bit in DOSBox IG SVGA mode now, but, we won't */
+	vga.attr.disabled = 0;
+
+	LOG(LOG_MISC,LOG_DEBUG)("DOSBox Integration Device is active");
+}
+
+bool SVGA_S3_AcceptsMode(Bitu mode);
+
+void SVGA_Setup_DOSBoxIG(void) {
+	if (vga.mem.memsize == 0)
+		vga.mem.memsize = 512*1024;
+	if (vga.mem.memsize < (256*1024))
+		vga.mem.memsize = (256*1024);
+	if (vga.mem.memsize > (128*1024*1024))
+		vga.mem.memsize = (128*1024*1024);
+
+	svga.set_video_mode = &FinishSetMode_DOSBoxIG;
+	svga.accepts_mode = &SVGA_S3_AcceptsMode; // eh, borrow the S3 function
+
+	vga.max_svga_width = 4096;
+	vga.max_svga_height = 4096;
+
+	PCI_AddSVGADOSBoxIG_Device();
+}
+
 void SVGA_Setup_Driver(void) {
 	memset(&svga, 0, sizeof(SVGA_Driver));
 
@@ -1728,6 +1997,9 @@ void SVGA_Setup_Driver(void) {
 			break;
 		case SVGA_ATI:
 			SVGA_Setup_ATI();
+			break;
+		case SVGA_DOSBoxIG:
+			SVGA_Setup_DOSBoxIG();
 			break;
 		default:
 			if (IS_JEGA_ARCH) SVGA_Setup_JEGA();
@@ -2007,6 +2279,12 @@ private:
 
 		if( tandy_membase_idx == 0xffffffff ) vga.tandy.mem_base = vga.mem.linear;
 		else vga.tandy.mem_base = MemBase + tandy_membase_idx;
+
+		// fix: re-derive VGA_DrawLine, line_length, address_add, width, height, etc. from the
+		// freshly-loaded VGA registers. The serialised drawline_idx enum covers only 14 of ~46
+		// variants and the load-side switch has no default, so without this the renderer can be
+		// left pointing at a stale function (mode 13h → vertical colour bands).
+		VGA_SetupDrawing(0);
 	}
 } dummy;
 }

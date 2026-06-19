@@ -12,21 +12,20 @@ jobs:
     permissions:
       actions: write  # for styfle/cancel-workflow-action to cancel/stop running workflows
       contents: write # for actions/checkout to fetch code and softprops/action-gh-release
-    runs-on: windows-latest
+    runs-on: windows-2022
     defaults:
       run:
         shell: pwsh
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.12.1
+        uses: styfle/cancel-workflow-action@0.13.1
         with:
           access_token: ${{ github.token }}
-      - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/checkout@v6
+      - uses: microsoft/setup-msbuild@v3
       - name: Prepare Visual Studio builds
         shell: bash
         run: |
-          ls -1 vs/dosbox-x.vcxproj vs/freetype/builds/windows/vc2010/freetype.vcxproj vs/libpdcurses/libpdcurses.vcxproj vs/libpng/projects/vstudio/libpng/libpng.vcxproj vs/libpng/projects/vstudio/libpng/libpng.vcxproj vs/sdl/VisualC/SDL/SDL.vcxproj vs/sdl/VisualC/SDLmain/SDLmain.vcxproj vs/sdl2/VisualC/SDL/SDL.vcxproj vs/sdl2/VisualC/SDLmain/SDLmain.vcxproj vs/sdlnet/VisualC/SDL_net_VS2008.vcxproj vs/sdlnet/VisualC/SDL_net_VS2008.vcxproj vs/zlib/zlib/zlib.vcxproj | xargs sed -b -i 's/>10.0</>10.0.22621.0</g'
           echo "timestamp=`git show -s --format=%at | xargs -I# date -d @# +%Y%m%d%H%M%S`" >> $GITHUB_ENV
           export shortsha=`git show --format='%h' --no-patch`
           export copyrightyear=`git show -s --format=%at | xargs -I# date -d @# +'%Y'`
@@ -63,22 +62,22 @@ jobs:
       - name: Build Visual Studio ARM64 SDL1
         shell: pwsh
         run: |
-          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=ARM64 -p:PostBuildEventUseInBuild=false
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=ARM64 -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143
           if (-not(Test-Path -Path bin\ARM64\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
       - name: Build Visual Studio ARM64 SDL2
         shell: pwsh
         run: |
-          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=ARM64 -p:PostBuildEventUseInBuild=false
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=ARM64 -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143
           if (-not(Test-Path -Path bin\ARM64\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
       - name: Build Visual Studio ARM32 SDL1
         shell: pwsh
         run: |
-          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=ARM -p:PostBuildEventUseInBuild=false
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=ARM -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143 -p:WindowsTargetPlatformVersion=10.0.22621.0
           if (-not(Test-Path -Path bin\ARM\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
       - name: Build Visual Studio ARM32 SDL2
         shell: pwsh
         run: |
-          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=ARM -p:PostBuildEventUseInBuild=false
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=ARM -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143 -p:WindowsTargetPlatformVersion=10.0.22621.0
           if (-not(Test-Path -Path bin\ARM\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
       - name: Package Visual Studio x86/x64 builds
         shell: bash
@@ -121,10 +120,10 @@ jobs:
           cp $top/COPYING $top/package/COPYING
           cd $top/package/
           $top/vs/tool/zip.exe -r -9 "$top/dosbox-x-vsbuild-win-x86_x64-${{ env.timestamp }}.zip" "*"
-          cd $top
-          ls -lg
+          #cd $top
+          #ls -lg
       - name: Upload preview package(VS x86/x64)
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: dosbox-x-vsbuild-win-x86_x64-${{ env.timestamp }}
           path: ${{ github.workspace }}/package/
@@ -145,22 +144,113 @@ jobs:
           $top/vs/tool/zip.exe -r -9 "$top/dosbox-x-vsbuild-ARM32_64-${{ env.timestamp }}.zip" "*"
           cd $top
       - name: Upload preview package(ARM 32/64-bit)
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: dosbox-x-vsbuild-ARM32_64-${{ env.timestamp }}
           path: ${{ github.workspace }}/package/
       - name: Cache Visual Studio builds (nightly)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/vs-bin
           key: vs-${{ github.sha }}
       - name: Cache Visual Studio builds (release)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/vs-bin
           key: vs-r-${{ github.sha }}
+      - name: Prepare VS osfree build
+        shell: bash
+        run: |
+          echo '#define C_OSFREE 1' >> vs/config_package.h
+          echo '#define OSFREE 1' >> vs/config_package.h
+      - name: Build Visual Studio x86 SDL1 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=Win32
+          if (-not(Test-Path -Path bin\Win32\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
+          #contrib\windows\installer\PatchPE.exe bin\Win32\Release\dosbox-x.exe
+      - name: Build Visual Studio x86 SDL2 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=Win32
+          if (-not(Test-Path -Path bin\Win32\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
+          #contrib\windows\installer\PatchPE.exe bin\Win32\"Release SDL2"\dosbox-x.exe
+      - name: Build Visual Studio x64 SDL1 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=x64
+          if (-not(Test-Path -Path bin\x64\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
+          #contrib\windows\installer\PatchPE.exe bin\x64\Release\dosbox-x.exe
+      - name: Build Visual Studio x64 SDL2 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=x64
+          if (-not(Test-Path -Path bin\x64\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
+          #contrib\windows\installer\PatchPE.exe bin\x64\"Release SDL2"\dosbox-x.exe
+      - name: Build Visual Studio ARM64 SDL1 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=ARM64 -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143
+          if (-not(Test-Path -Path bin\ARM64\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
+      - name: Build Visual Studio ARM64 SDL2 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=ARM64 -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143
+          if (-not(Test-Path -Path bin\ARM64\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
+      - name: Build Visual Studio ARM32 SDL1 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration=Release -p:Platform=ARM -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143 -p:WindowsTargetPlatformVersion=10.0.22621.0
+          if (-not(Test-Path -Path bin\ARM\Release\dosbox-x.exe -PathType Leaf)) {exit 1}
+      - name: Build Visual Studio ARM32 SDL2 osfree
+        shell: pwsh
+        run: |
+          msbuild -m vs/dosbox-x.sln -t:dosbox-x:Rebuild -p:Configuration="Release SDL2" -p:Platform=ARM -p:PostBuildEventUseInBuild=false -p:PlatformToolset=v143 -p:WindowsTargetPlatformVersion=10.0.22621.0
+          if (-not(Test-Path -Path bin\ARM\"Release SDL2"\dosbox-x.exe -PathType Leaf)) {exit 1}
+      - name: Package Visual Studio 32/64-bit osfree builds
+        shell: bash
+        run: |
+          top=`pwd`
+          rm $top/package/dosbox-x_*.exe
+          cp $top/bin/Win32/Release/dosbox-x.exe $top/package/dosbox-x_x86_SDL1.exe
+          cp $top/bin/Win32/Release/dosbox-x.exe $top/vs-bin/dosbox-x_x86_SDL1.exe
+          cp $top/bin/Win32/"Release SDL2"/dosbox-x.exe $top/package/dosbox-x_x86_SDL2.exe
+          cp $top/bin/Win32/"Release SDL2"/dosbox-x.exe $top/vs-bin/dosbox-x_x86_SDL2.exe
+          cp $top/bin/x64/Release/dosbox-x.exe $top/package/dosbox-x_x64_SDL1.exe
+          cp $top/bin/x64/Release/dosbox-x.exe $top/vs-bin/dosbox-x_x64_SDL1.exe
+          cp $top/bin/x64/"Release SDL2"/dosbox-x.exe $top/package/dosbox-x_x64_SDL2.exe
+          cp $top/bin/x64/"Release SDL2"/dosbox-x.exe $top/vs-bin/dosbox-x_x64_SDL2.exe
+          cd $top/package/
+          $top/vs/tool/zip.exe -r -9 "$top/dosbox-x-vsbuild-win-x86_x64-osfree-${{ env.timestamp }}.zip" "*"
+          cd $top
+      - name: Upload Visual Studio 32/64-bit osfree builds
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dosbox-x-vsbuild-win-x86_x64-osfree-${{ env.timestamp }}
+          path: ${{ github.workspace }}/package/
+      - name: Package Visual Studio ARM 32/64-bit osfree builds
+        shell: bash
+        run: |
+          top=`pwd`
+          rm $top/package/dosbox-x_*.exe
+          cp $top/bin/ARM/Release/dosbox-x.exe $top/package/dosbox-x_ARM_SDL1.exe
+          cp $top/bin/ARM/Release/dosbox-x.exe $top/vs-bin/dosbox-x_ARM_SDL1.exe
+          cp $top/bin/ARM/"Release SDL2"/dosbox-x.exe $top/package/dosbox-x_ARM_SDL2.exe
+          cp $top/bin/ARM/"Release SDL2"/dosbox-x.exe $top/vs-bin/dosbox-x_ARM_SDL2.exe
+          cp $top/bin/ARM64/Release/dosbox-x.exe $top/package/dosbox-x_ARM64_SDL1.exe
+          cp $top/bin/ARM64/Release/dosbox-x.exe $top/vs-bin/dosbox-x_ARM64_SDL1.exe
+          cp $top/bin/ARM64/"Release SDL2"/dosbox-x.exe $top/package/dosbox-x_ARM64_SDL2.exe
+          cp $top/bin/ARM64/"Release SDL2"/dosbox-x.exe $top/vs-bin/dosbox-x_ARM64_SDL2.exe
+          cd $top/package/
+          $top/vs/tool/zip.exe -r -9 "$top/dosbox-x-vsbuild-ARM32_64-osfree-${{ env.timestamp }}.zip" "*"
+          cd $top
+      - name: Upload preview package(ARM 32/64-bit)
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dosbox-x-vsbuild-ARM32_64-osfree-${{ env.timestamp }}
+          path: ${{ github.workspace }}/package/
   MinGW32_CI_build:
     permissions:
       actions: write  # for styfle/cancel-workflow-action to cancel/stop running workflows
@@ -171,15 +261,15 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.12.1
+        uses: styfle/cancel-workflow-action@0.13.1
         with:
           access_token: ${{ github.token }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW32
           update: true
-          install: git mingw-w64-i686-toolchain mingw-w64-i686-libtool mingw-w64-i686-nasm autoconf automake mingw-w64-i686-libslirp
+          install: git mingw-w64-i686-toolchain mingw-w64-i686-libtool mingw-w64-i686-nasm autoconf automake
       - name: Update build info
         shell: bash
         run: |
@@ -192,6 +282,19 @@ jobs:
           echo "#define GIT_COMMIT_HASH \"${shortsha}\""  >> include/build_timestamp.h
           echo "#define COPYRIGHT_END_YEAR \"${copyrightyear}\"" >> include/build_timestamp.h
           cat include/build_timestamp.h
+      - name: Install libslirp
+        run: |
+          # Run this job when MinGW drops 32-bit library support (Other libraries can be built as well)
+          top=`pwd`
+          mkdir pkg
+          cd pkg
+          git clone https://github.com/msys2/MINGW-packages.git
+          pwd
+          cd MINGW-packages
+          cd mingw-w64-libslirp
+          sed -i -e "s/^mingw_arch=\(.*\)/mingw_arch=(\'mingw32\')/" PKGBUILD
+          MINGW_ARCH=MINGW32 makepkg-mingw -sCLf --noconfirm
+          pacman --noconfirm -U mingw-w64-*-any.pkg.tar.zst
       - name: Build MinGW32 SDL1
         run: |
           top=`pwd`
@@ -211,13 +314,13 @@ jobs:
           cp $top/src/dosbox-x.exe $top/mingw-x86-bin/dosbox-x_MinGWx86_SDL2.exe
       - name: Cache MinGW x86 builds (nightly)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/mingw-x86-bin
           key: mingw-x86-bin-${{ github.sha }}
       - name: Cache MinGW x86 builds (release)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/mingw-x86-bin
           key: mingw-x86-bin-r-${{ github.sha }}
@@ -231,10 +334,10 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.12.1
+        uses: styfle/cancel-workflow-action@0.13.1
         with:
           access_token: ${{ github.token }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -270,13 +373,13 @@ jobs:
           cp $top/src/dosbox-x.exe $top/mingw-x64-bin/dosbox-x_MinGWx64_SDL2.exe
       - name: Cache MinGW x64 builds (nightly)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/mingw-x64-bin
           key: mingw-x64-bin-${{ github.sha }}
       - name: Cache MinGW x64 builds (release)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/mingw-x64-bin
           key: mingw-x64-bin-r-${{ github.sha }}
@@ -284,7 +387,7 @@ jobs:
     permissions:
       actions: write  # for styfle/cancel-workflow-action to cancel/stop running workflows
       contents: write # for actions/checkout to fetch code and softprops/action-gh-release
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: [MinGW32_CI_build, MinGW64_CI_build, Visual_Studio_CI_build]
     env:
       GH_TOKEN: ${{ github.token }}
@@ -292,40 +395,40 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Restore MinGW x86 builds (nightly)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/mingw-x86-bin
           key: mingw-x86-bin-${{ github.sha }}
       - name: Restore MinGW x64 builds (nightly)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/mingw-x64-bin
           key: mingw-x64-bin-${{ github.sha }}
       - name: Restore Visual Studio builds (nightly)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/vs-bin
           key: vs-${{ github.sha }}
       - name: Restore MinGW x86 builds (release)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/mingw-x86-bin
           key: mingw-x86-bin-r-${{ github.sha }}
       - name: Restore MinGW x64 builds (release)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/mingw-x64-bin
           key: mingw-x64-bin-r-${{ github.sha }}
       - name: Restore Visual Studio builds (release)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/vs-bin
           key: vs-r-${{ github.sha }}
@@ -361,7 +464,7 @@ jobs:
           cd $top/package/
           cd $top
       - name: Upload preview package (MinGW)
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: dosbox-x-mingw-x86_x64-${{ env.timestamp }}
           path: ${{ github.workspace }}/package/
@@ -387,12 +490,12 @@ jobs:
           cd contrib/windows/installer/
           ISCC.exe ./DOSBox-X-installer.iss
       - name: Upload preview installer
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: dosbox-x-windows-${{ env.timestamp }}-setup.exe
           path: contrib/windows/installer/dosbox-x-windows*.exe
       - name: Upload Windows build installer release version
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |

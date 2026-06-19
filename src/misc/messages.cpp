@@ -59,6 +59,8 @@ Bitu DOS_LoadKeyboardLayout(const char* layoutname, int32_t codepage, const char
 const char* DOS_GetLoadedLayout(void);
 bool CheckDBCSCP(int32_t codepage);
 void MSG_Init(void);
+void get_yesno_chars(void);
+extern char char_yes, char_no;
 
 #define LINE_IN_MAXLEN 2048
 
@@ -106,6 +108,23 @@ const char* MSG_Get(const char* msg) { // add messages to the translation messag
 
     return msg; // Return the original name if not found
 }
+
+const char* MSG_GetUTF8(const char* msg)
+{
+    thread_local std::string storage;
+
+    const char* guest = MSG_Get(msg);
+
+    size_t len = strlen(guest);
+    std::vector<char> buf(len * 4 + 1, 0);
+
+    CodePageGuestToHostUTF8(buf.data(), guest);
+
+    storage = buf.data();
+    return storage.c_str();
+}
+
+
 
 std::string formatString(const char* format, ...) {
     /**
@@ -189,6 +208,7 @@ void AddMessages() {
     MSG_Add("OK","OK");
     MSG_Add("CANCEL","Cancel");
     MSG_Add("CLOSE","Close");
+    MSG_Add("THEME","Theme");
     MSG_Add("DEBUGCMD","Enter Debugger Command");
     MSG_Add("ADD","Add");
     MSG_Add("DEL","Del");
@@ -220,7 +240,7 @@ void AddMessages() {
     MSG_Add("HELP_COMMAND","Help on DOS command");
     MSG_Add("CURRENT_VOLUME","Current sound mixer volumes");
     MSG_Add("CURRENT_SBCONFIG","Sound Blaster configuration");
-    MSG_Add("CURRENT_MIDICONFIG","Current MIDI configuration");
+    MSG_Add("CURRENT_MIDICONFIG","Current MIDI/OPL configuration");
     MSG_Add("CREATE_IMAGE","Create blank disk image");
     MSG_Add("NETWORK_LIST","Network interface list");
     MSG_Add("PRINTER_LIST","Printer device list");
@@ -257,6 +277,11 @@ void AddMessages() {
     MSG_Add("LANG_DOSV_INCOMPATIBLE", "You have specified a language file which uses a code page incompatible with the current DOS/V system.\n\n"
         "Are you sure to use the language file for this system type?");
     MSG_Add("LANG_CHANGE_CP", "The specified language file uses code page %d. Do you want to change to this code page accordingly?");
+    MSG_Add("HELP_ABOUT_VERSION","DOSBox-X ver.%s (%s %s %s-bit)%s");
+    MSG_Add("HELP_ABOUT_UPDATED","Build date/time: %s");
+    MSG_Add("HELP_ABOUT_COPYRIGHT","Copyright %s-%s %s");
+    MSG_Add("HELP_ABOUT_MAINTAINER","Project maintainer: %s");
+    MSG_Add("HELP_ABOUT_HOMEPAGE","DOSBox-X homepage: %s");
 }
 
 // True if specified codepage is a DBCS codepage
@@ -271,8 +296,8 @@ bool CheckDBCSCP(int32_t codepage) {
 FILE* testLoadLangFile(const char* fname) {
     std::string exepath = GetDOSBoxXPath();
     std::string config_path, res_path;
-    Cross::GetPlatformConfigDir(config_path);
-    Cross::GetPlatformResDir(res_path);
+    config_path = Cross::GetPlatformConfigDir();
+    res_path = Cross::GetPlatformResDir();
 
     std::vector<std::string> base_paths = {
         "", exepath, config_path, res_path,
@@ -466,13 +491,16 @@ void LoadMessageFile(const char* fname) {
     update_bindbutton_text();
     dos.loaded_codepage = cp;
 
+#if !defined(OSFREE)
     if(loadlangcp && msgcodepage > 0) {
         const char* layoutname = DOS_GetLoadedLayout();
         if(!IS_DOSV && !IS_JEGA_ARCH && !IS_PC98_ARCH && layoutname != nullptr) {
             toSetCodePage(nullptr, msgcodepage, -1);
         }
     }
+#endif
 
+    get_yesno_chars();
     refreshExtChar();
     LOG_MSG("LoadMessageFile: Loaded language file: %s", fname);
     loadlang = true;
@@ -597,8 +625,12 @@ void MSG_Init() {
         if (pathprop != NULL) {
             std::string path = pathprop->realpath;
             ResolvePath(path);
-            if (testLoadLangFile(path.c_str()))
+
+            FILE* f = testLoadLangFile(path.c_str());
+            if (f) {
+                fclose(f);
                 LoadMessageFile(path.c_str());
+            }
             else {
                 std::string lang = section->Get_string("language");
                 if (lang.size()) LoadMessageFile(lang.c_str());

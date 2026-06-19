@@ -32,6 +32,8 @@
 #include "render.h"
 /* Include all the devices */
 
+unsigned int BeepDuration();
+
 #include "dev_con.h"
 #include <fstream>
 
@@ -46,7 +48,9 @@ extern int dos_clipboard_device_access;
 extern bool morelen, halfwidthkana, showdbcs;
 extern const char * dos_clipboard_device_name;
 bool isDBCSCP(), shiftjis_lead_byte(int c);
+#if !defined(OSFREE)
 bool Network_IsNetworkResource(const char * filename), TTF_using(void);
+#endif
 bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/);
 
 
@@ -57,8 +61,10 @@ bool DOS_ExtDevice::CheckSameDevice(uint16_t seg, uint16_t s_off, uint16_t i_off
 	return false;
 }
 
-uint16_t DOS_ExtDevice::CallDeviceFunction(uint8_t command, uint8_t length, uint16_t seg, uint16_t offset, uint16_t size) {
+/* This function is optimized for use with read/write and ioctl read/write commands for character devices */
+uint16_t DOS_ExtDevice::CallRWIODeviceFunction(uint8_t command, uint8_t length, uint16_t seg, uint16_t offset, uint16_t size) {
 	uint16_t oldbx = reg_bx;
+	uint16_t oldds = SegValue(ds);
 	uint16_t oldes = SegValue(es);
 
 	real_writeb(dos.dcp, 0, length);
@@ -67,17 +73,21 @@ uint16_t DOS_ExtDevice::CallDeviceFunction(uint8_t command, uint8_t length, uint
 	real_writew(dos.dcp, 3, 0);
 	real_writed(dos.dcp, 5, 0);
 	real_writed(dos.dcp, 9, 0);
-	real_writeb(dos.dcp, 13, 0);
-	real_writew(dos.dcp, 14, offset);
-	real_writew(dos.dcp, 16, seg);
-	real_writew(dos.dcp, 18, size);
+	if (length >= 20) { // this code is used below for input/output status which does not use these fields
+		real_writeb(dos.dcp, 13, 0);
+		real_writew(dos.dcp, 14, offset);
+		real_writew(dos.dcp, 16, seg);
+		real_writew(dos.dcp, 18, size);
+	}
 
 	reg_bx = 0;
+	SegSet16(ds, ext.segment);
 	SegSet16(es, dos.dcp);
 	CALLBACK_RunRealFar(ext.segment, ext.strategy);
 	CALLBACK_RunRealFar(ext.segment, ext.interrupt);
 	reg_bx = oldbx;
 	SegSet16(es, oldes);
+	SegSet16(ds, oldds);
 
 	return real_readw(dos.dcp, 3);
 }
@@ -85,7 +95,7 @@ uint16_t DOS_ExtDevice::CallDeviceFunction(uint8_t command, uint8_t length, uint
 bool DOS_ExtDevice::ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) {
 	if(ext.attribute & DeviceAttributeFlags::SupportsIoctl) {
 		// IOCTL INPUT
-		if((CallDeviceFunction(3, 26, (uint16_t)(bufptr >> 4), (uint16_t)(bufptr & 0x000f), size) & 0x8000) == 0) {
+		if((CallRWIODeviceFunction(DEVFUNC_IOCTL_READ, 26, (uint16_t)(bufptr >> 4), (uint16_t)(bufptr & 0x000f), size) & 0x8000) == 0) {
 			*retcode = real_readw(dos.dcp, 18);
 			return true;
 		}
@@ -96,7 +106,7 @@ bool DOS_ExtDevice::ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t 
 bool DOS_ExtDevice::WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) {
 	if(ext.attribute & DeviceAttributeFlags::SupportsIoctl) {
 		// IOCTL OUTPUT
-		if((CallDeviceFunction(12, 26, (uint16_t)(bufptr >> 4), (uint16_t)(bufptr & 0x000f), size) & 0x8000) == 0) {
+		if((CallRWIODeviceFunction(DEVFUNC_IOCTL_WRITE, 26, (uint16_t)(bufptr >> 4), (uint16_t)(bufptr & 0x000f), size) & 0x8000) == 0) {
 			*retcode = real_readw(dos.dcp, 18);
 			return true;
 		}
@@ -105,36 +115,100 @@ bool DOS_ExtDevice::WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t *
 }
 
 bool DOS_ExtDevice::Read(uint8_t * data,uint16_t * size) {
-	PhysPt bufptr = (dos.dcp << 4) | 32;
-	for(uint16_t no = 0 ; no < *size ; no++) {
-		// INPUT
-		if(CallDeviceFunction(4, 26, dos.dcp + 2, 0, 1) & 0x8000) {
+	PhysPt bufptr = (dos.dcp << 4) + 32;
+
+	if (dos.dcp_size_seg <= 2) return false;
+
+	unsigned int batch_size = (dos.dcp_size_seg - 2) << 4;
+	unsigned int todo = *size;
+	unsigned int done = 0;
+	unsigned int rd;
+
+	const auto inproc = [bufptr, &todo, &done, &rd, &data, this](const unsigned int batch_size) {
+		rd = 0;
+
+		if (CallRWIODeviceFunction(DEVFUNC_READ, 26, dos.dcp + 2/*2 paras = 32 bytes*/, 0, batch_size) & 0x8000/*error*/)
+			return;
+
+		rd = real_readw(dos.dcp, 18);/*how much was read?*/
+		if (rd > batch_size) {
+			LOG(LOG_MISC,LOG_DEBUG)("Device driver read too much data!");
+			rd = 0;
+			return;
+		}
+		for (unsigned int c=0;c < rd;c++) data[c] = mem_readb(bufptr+c);
+		todo -= rd;
+		data += rd;
+		done += rd;
+	};
+
+	while (todo >= batch_size) {
+		inproc(batch_size);
+		if (rd != batch_size) {
+			*size = done;
 			return false;
-		} else {
-			if(real_readw(dos.dcp, 18) != 1) {
-				return false;
-			}
-			*data++ = mem_readb(bufptr);
 		}
 	}
+
+	if (todo != 0) {
+		inproc(todo);
+		if (rd != todo) {
+			*size = done;
+			return false;
+		}
+	}
+
+	*size = done;
 	return true;
 }
 
 bool DOS_ExtDevice::Write(const uint8_t * data,uint16_t * size) {
-	PhysPt bufptr = (dos.dcp << 4) | 32;
-	for(uint16_t no = 0 ; no < *size ; no++) {
-		mem_writeb(bufptr, *data);
-		// OUTPUT
-		if(CallDeviceFunction(8, 26, dos.dcp + 2, 0, 1) & 0x8000) {
-			return false;
-		} else {
-			if(real_readw(dos.dcp, 18) != 1) {
-				return false;
-			}
+	PhysPt bufptr = (dos.dcp << 4) + 32;
+
+	if (dos.dcp_size_seg <= 2) return false;
+
+	unsigned int batch_size = (dos.dcp_size_seg - 2) << 4;
+	unsigned int todo = *size;
+	unsigned int done = 0;
+	unsigned int wd;
+
+	const auto inproc = [bufptr, &todo, &done, &wd, &data, this](const unsigned int batch_size) {
+		wd = 0;
+
+		for (unsigned int c=0;c < batch_size;c++) mem_writeb(bufptr+c,data[c]);
+		if (CallRWIODeviceFunction(DEVFUNC_WRITE, 26, dos.dcp + 2/*2 paras = 32 bytes*/, 0, batch_size) & 0x8000/*error*/)
+			return;
+
+		wd = real_readw(dos.dcp, 18);/*how much was written?*/
+		if (wd > batch_size) {
+			LOG(LOG_MISC,LOG_DEBUG)("Device driver wrote too much data!");
+			wd = 0;
+			return;
 		}
-		data++;
+		todo -= wd;
+		data += wd;
+		done += wd;
+	};
+
+	while (todo >= batch_size) {
+		inproc(batch_size);
+		if (wd != batch_size) {
+			*size = done;
+			return false;
+		}
 	}
+
+	if (todo != 0) {
+		inproc(todo);
+		if (wd != todo) {
+			*size = done;
+			return false;
+		}
+	}
+
+	*size = done;
 	return true;
+
 }
 
 bool DOS_ExtDevice::Close() {
@@ -142,13 +216,13 @@ bool DOS_ExtDevice::Close() {
 }
 
 bool DOS_ExtDevice::Seek(uint32_t * pos,uint32_t type) {
-    (void)pos;//UNUSED
-    (void)type;//UNUSED
+	(void)pos;//UNUSED
+	(void)type;//UNUSED
 	return true;
 }
 
 uint16_t DOS_ExtDevice::GetInformation(void) {
-	uint16_t ret = EXT_DEVICE_BIT;
+	uint16_t ret = DeviceInfoFlags::ExternalDevice;
 	if (ext.attribute & DeviceAttributeFlags::CharacterDevice)   ret |= DeviceInfoFlags::Device;
 	if (ext.attribute & DeviceAttributeFlags::SupportsIoctl)     ret |= DeviceInfoFlags::IoctlSupport;
 	if (ext.attribute & DeviceAttributeFlags::SupportsRemovable) ret |= DeviceInfoFlags::OpenCloseSupport;
@@ -159,11 +233,11 @@ uint16_t DOS_ExtDevice::GetInformation(void) {
 uint8_t DOS_ExtDevice::GetStatus(bool input_flag) {
 	uint16_t status;
 	if(input_flag) {
-		// NON-DESTRUCTIVE INPUT NO WAIT
-		status = CallDeviceFunction(5, 14, 0, 0, 0);
+		// INPUT STATUS
+		status = CallRWIODeviceFunction(DEVFUNC_INPUT_STATUS, 13, 0, 0, 0);
 	} else {
 		// OUTPUT STATUS
-		status = CallDeviceFunction(10, 13, 0, 0, 0);
+		status = CallRWIODeviceFunction(DEVFUNC_OUTPUT_STATUS, 13, 0, 0, 0);
 	}
 	// check NO ERROR & BUSY
 	if((status & 0x8200) == 0) {
@@ -173,7 +247,7 @@ uint8_t DOS_ExtDevice::GetStatus(bool input_flag) {
 }
 
 uint32_t DOS_CheckExtDevice(const char *name, bool already_flag) {
-	uint32_t addr = dos_infoblock.GetDeviceChain();
+	uint32_t addr = dos_infoblock.GetStartOfDeviceChain();
 	uint16_t seg, off;
 	uint16_t next_seg, next_off;
 	uint16_t no;
@@ -185,9 +259,6 @@ uint32_t DOS_CheckExtDevice(const char *name, bool already_flag) {
 		no = real_readw(seg, off + 4);
 		next_seg = real_readw(seg, off + 2);
 		next_off = real_readw(seg, off);
-		if(next_seg == 0xffff && next_off == 0xffff) {
-			break;
-		}
 		if(no & 0x8000) {
 			for(no = 0 ; no < 8 ; no++) {
 				if((devname[no] = real_readb(seg, off + 10 + no)) <= 0x20) {
@@ -200,7 +271,7 @@ uint32_t DOS_CheckExtDevice(const char *name, bool already_flag) {
 				if(already_flag) {
 					for(no = 0 ; no < DOS_DEVICES ; no++) {
 						if(Devices[no]) {
-							if(Devices[no]->GetInformation() & EXT_DEVICE_BIT) {
+							if(Devices[no]->GetInformation() & DeviceInfoFlags::ExternalDevice) {
 								if(((DOS_ExtDevice *)Devices[no])->CheckSameDevice(seg, real_readw(seg, off + 6), real_readw(seg, off + 8))) {
 									return 0;
 								}
@@ -215,6 +286,9 @@ uint32_t DOS_CheckExtDevice(const char *name, bool already_flag) {
 				return (uint32_t)seg << 16 | (uint32_t)off;
 			}
 		}
+		if(next_seg == 0xffff && next_off == 0xffff) {
+			break;
+		}
 		seg = next_seg;
 		off = next_off;
 	}
@@ -225,6 +299,7 @@ static void DOS_CheckOpenExtDevice(const char *name) {
 	uint32_t addr;
 
 	if((addr = DOS_CheckExtDevice(name, true)) != 0) {
+		LOG(LOG_MISC,LOG_DEBUG)("Found external device driver '%s' (%x:%x), adding", name, addr >> 16, addr & 0xffff);
 		DOS_ExtDevice *device = new DOS_ExtDevice(name, addr >> 16, addr & 0xffff);
 		DOS_AddDevice(device);
 	}
@@ -257,6 +332,7 @@ public:
 	bool WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) override { (void)bufptr; (void)size; (void)retcode; return false; }
 };
 
+#if !defined(OSFREE)
 class device_PRN : public DOS_Device {
 public:
 	device_PRN() {
@@ -293,6 +369,7 @@ public:
 		return false;
 	}
 };
+#endif
 
 uint16_t cpMap[512] = { // Codepage is standard 437
 	0x0020, 0x263a, 0x263b, 0x2665, 0x2666, 0x2663, 0x2660, 0x2219, 0x25d8, 0x25cb, 0x25d9, 0x2642, 0x2640, 0x266a, 0x266b, 0x263c,
@@ -366,6 +443,7 @@ uint16_t cpMap_PC98[256] = {
     0x0020, 0x0020, 0x0020, 0x0020, 0x005C, 0x0020, 0x0020, 0x0020                  // 0xF8-0xFF   0xFC = Backslash
 };
 
+#if !defined(OSFREE)
 bool getClipboard();
 bool lastwrite = false;
 uint32_t cPointer = 0, fPointer;
@@ -620,6 +698,7 @@ public:
 		return DeviceInfoFlags::Device | DeviceInfoFlags::EofOnInput | DeviceInfoFlags::Binary;
 	}
 };
+#endif
 
 bool DOS_Device::Read(uint8_t * data,uint16_t * size) {
 	return Devices[devnum]->Read(data,size);
@@ -652,7 +731,7 @@ uint16_t DOS_Device::GetInformation(void) {
 }
 
 void DOS_Device::SetInformation(uint16_t info) {
-	if(Devices[devnum]->IsName("CON") && !(Devices[devnum]->GetInformation() & EXT_DEVICE_BIT)) {
+	if(Devices[devnum]->IsName("CON") && !(Devices[devnum]->GetInformation() & DeviceInfoFlags::ExternalDevice)) {
 		Devices[devnum]->SetInformation(info);
 	}
 }
@@ -667,7 +746,7 @@ bool DOS_Device::WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * re
 
 uint8_t DOS_Device::GetStatus(bool input_flag) {
 	uint16_t info = Devices[devnum]->GetInformation();
-	if(info & EXT_DEVICE_BIT) {
+	if(info & DeviceInfoFlags::ExternalDevice) {
 		return Devices[devnum]->GetStatus(input_flag);
 	}
 	return (info & DeviceInfoFlags::EofOnInput) ? 0x00 : 0xff;
@@ -731,9 +810,11 @@ uint8_t DOS_FindDevice(char const * name) {
 	}
 	char* name_part = strrchr_dbcs(fullname,'\\');
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
-	if(Network_IsNetworkResource(name))
+ #if !defined(OSFREE)
+    if(Network_IsNetworkResource(name))
 		name_part = fullname;
 	else
+ #endif
 #endif
 	if(name_part) {
 		*name_part++ = 0;
@@ -747,11 +828,12 @@ uint8_t DOS_FindDevice(char const * name) {
 	DOS_CheckOpenExtDevice(name_part);
 	for(int index = DOS_DEVICES - 1 ; index >= 0 ; index--) {
 		if(Devices[index]) {
-			if(Devices[index]->GetInformation() & EXT_DEVICE_BIT) {
+			if(Devices[index]->GetInformation() & DeviceInfoFlags::ExternalDevice) {
 				if(WildFileCmp(name_part, Devices[index]->name)) {
 					if(DOS_CheckExtDevice(name_part, false) != 0) {
 						return index;
 					} else {
+						LOG(LOG_MISC,LOG_DEBUG)("Remove external device driver '%s', no longer in the device chain",name);
 						delete Devices[index];
 						Devices[index] = nullptr;
 						break;
@@ -911,14 +993,18 @@ void DOS_SetupDevices(void) {
 	DOS_Device * newdev2;
 	newdev2=new device_NUL();
 	DOS_AddDevice(newdev2);
+#if !defined(OSFREE)
 	DOS_Device * newdev3;
 	newdev3=new device_PRN();
 	DOS_AddDevice(newdev3);
+#endif
+#if !defined(OSFREE)
 	if (dos_clipboard_device_access) {
 		DOS_Device * newdev4;
 		newdev4=new device_CLIP();
 		DOS_AddDevice(newdev4);
 	}
+#endif
 }
 
 /* PC-98 INT DC CL=0x10 AH=0x00 DL=cjar */

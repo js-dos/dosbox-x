@@ -29,6 +29,7 @@
 #include "render.h"
 #include "mapper.h"
 #include "control.h"
+#include "../ints/int10.h"
 
 #include <output/output_ttf.h>
 
@@ -943,6 +944,27 @@ static void write_tandy_reg(uint8_t val) {
 	}
 }
 
+/* You're not SUPPOSED to read Tandy registers 3D8, 3DE, 3DF, they're documented WRITE ONLY! */
+static Bitu read_tandy(Bitu port,Bitu /*iolen*/) {
+	LOG(LOG_VGAMISC,LOG_DEBUG)("DOS applications are NOT SUPPOSED to read Tandy register %x",(unsigned int)port);
+
+	switch (port) {
+		/* "Troubadours" does not switch into Tandy 320x200 16-color by calling INT 10h.
+		 * Instead, it has it's own hand-written code to modify registers directly.
+		 * For whatever reason, it modifies 3DD and 3DF by reading, modifying, and writing
+		 * the registers EVEN THOUGH Tandy documents the registers as write only.
+		 * Returning the last written value doesn't work, because the modified values
+		 * come out incorrect. 3DFh after modification comes out to 0xFF which maps the
+		 * video RAM to B800h as repeating 16KB banks for example. The game works correctly
+		 * if this code provides 0x00, not 0xFF, when it reads these specific registers. */
+		case 0x3DD:
+		case 0x3DF:
+			return 0;
+	}
+
+	return ~0u;
+}
+
 static void write_tandy(Bitu port,Bitu val,Bitu /*iolen*/) {
 	switch (port) {
 	case 0x3d8:
@@ -980,7 +1002,6 @@ static void write_tandy(Bitu port,Bitu val,Bitu /*iolen*/) {
 		// appears to be ORed with CPU A14 (to preserve some sort of
 		// backwards compatibility?), resulting in odd pages being mapped
 		// as 2x16kB. Implemented in vga_memory.cpp Tandy handler.
-
 		vga.tandy.line_mask = (uint8_t)(val >> 6);
 		vga.tandy.draw_bank = val & ((vga.tandy.line_mask&2) ? 0x6 : 0x7);
 		vga.tandy.mem_bank = (val >> 3) & 7;
@@ -1092,6 +1113,8 @@ void Herc_Palette(void) {
 		VGA_DAC_SetEntry(0xf,0x00,0x3f,0x00);
 		break;
 	}
+
+	VGA_DAC_UpdateColorPalette();
 }
 
 void Mono_CGA_Palette(void) {	
@@ -1220,7 +1243,6 @@ Bitu read_herc_status(Bitu /*port*/,Bitu /*iolen*/) {
 }
 
 extern int eurAscii;
-extern uint8_t int10_font_08[256 * 8], int10_font_14[256 * 14], int10_font_16[256 * 16];
 uint8_t euro_08[8] = {
   0x3c, 0x66, 0xfc, 0x60, 0xf8, 0x66, 0x3c, 0x00,
 };
@@ -1234,14 +1256,16 @@ uint8_t euro_16[16] = {
 };
 
 void VGA_SetupOther(void) {
-    if (eurAscii>32 && eurAscii<256) {
-        for (int i=eurAscii*8;i<(eurAscii+1)*8;i++)
-            int10_font_08[i]=euro_08[i%8];
-        for (int i=eurAscii*14;i<(eurAscii+1)*14;i++)
-            int10_font_14[i]=euro_14[i%14];
-        for (int i=eurAscii*16;i<(eurAscii+1)*16;i++)
-            int10_font_16[i]=euro_16[i%16];
-    }
+	if (eurAscii>32 && eurAscii<256) {
+		for (int i=eurAscii*8;i<(eurAscii+1)*8;i++)
+			int10_font_08[i]=euro_08[i%8];
+		for (int i=eurAscii*14;i<(eurAscii+1)*14;i++)
+			int10_font_14[i]=euro_14[i%14];
+		for (int i=eurAscii*16;i<(eurAscii+1)*16;i++)
+			int10_font_16[i]=euro_16[i%16];
+		for (int i=eurAscii*16;i<(eurAscii+1)*16;i++)
+			int10_font_16_mcga[i]=euro_16[i%16];
+	}
 	memset( &vga.tandy, 0, sizeof( vga.tandy ));
 	vga.attr.disabled = 0;
 	vga.config.bytes_skip=0;
@@ -1295,6 +1319,18 @@ void VGA_SetupOther(void) {
 	}
 	if (machine==MCH_TANDY) {
 		write_tandy( 0x3df, 0x0, 0 );
+
+		// according to Tandy SX documentation a lot of registers are write-only
+		IO_RegisterReadHandler(0x3d4,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3d5,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3d8,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3d9,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3db,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3dc,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3dd,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3de,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3df,read_tandy,IO_MB);
+
 		IO_RegisterWriteHandler(0x3d8,write_tandy,IO_MB);
 		IO_RegisterWriteHandler(0x3d9,write_tandy,IO_MB);
 		IO_RegisterWriteHandler(0x3da,write_tandy,IO_MB);

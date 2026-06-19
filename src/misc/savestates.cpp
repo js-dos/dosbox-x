@@ -170,6 +170,8 @@ namespace
 	void SaveGameState(bool pressed) {
 		if (!pressed) return;
 
+		GFX_LosingFocus();
+
 		try
 		{
 			LOG_MSG("Saving state to slot: %d", (int)currentSlot + 1);
@@ -194,7 +196,7 @@ namespace
 		//        LOG_MSG("[%s]: State %d is empty!", getTime().c_str(), currentSlot + 1);
 		//        return;
 		//    }
-		if (!GFX_IsFullscreen()&&render.aspect) GFX_LosingFocus();
+
 		try
 		{
 			LOG_MSG("Loading state from slot: %d", (int)currentSlot + 1);
@@ -523,7 +525,7 @@ void SaveState::save(size_t slot) { //throw (Error)
 		if ((errclose=zipOutOpenFile(zf,"Memory_Size",zi,compresssaveparts)) != ZIP_OK) { save_err = true; goto done; }
 		zip_ostreambuf zos(zf); std::ostream memorysize(&zos);
 
-		memorysize << MEM_TotalPages();
+		memorysize << std::to_string( MEM_TotalPages());
 
 		if ((errclose=zos.close()) != ZIP_OK) { save_err = true; goto done; }
 	}
@@ -584,6 +586,8 @@ void savestatecorrupt(const char* part) {
 }
 
 bool confres=false;
+std::string loadstate_detail_saved;
+std::string loadstate_detail_current;
 bool loadstateconfirm(int ind) {
 	if (ind<0||ind>4) return false;
 	confres=true;
@@ -671,6 +675,8 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		if (p!=NULL) *p=0;
 		std::string emulatorversion = std::string("DOSBox-X ") + VERSION + std::string(" (") + SDL_STRING + std::string(")");
 		if (strcasecmp(buffer,emulatorversion.c_str())) {
+			loadstate_detail_saved = strlen(buffer) ? std::string(buffer) : std::string("(none)");
+			loadstate_detail_current = emulatorversion;
 			if(!force_load_state&&!loadstateconfirm(0)) {
 				LOG_MSG("Aborted. Check your DOSBox-X version: %s",buffer);
 				load_err=true;
@@ -691,8 +697,10 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		size_t length = (size_t)zis.xsgetn((zip_istreambuf::char_type*)buffer,sizeof(buffer)-1); buffer[length] = 0;
 
 		if (!length||(size_t)length!=strlen(RunningProgram)||strncmp(buffer,RunningProgram,length)) {
+			buffer[length]='\0';
+			loadstate_detail_saved = length ? std::string(buffer) : std::string("(none)");
+			loadstate_detail_current = RunningProgram ? std::string(RunningProgram) : std::string("(none)");
 			if(!force_load_state&&!loadstateconfirm(1)) {
-				buffer[length]='\0';
 				LOG_MSG("Aborted. Check your program name: %s",buffer);
 				load_err=true;
 				goto done;
@@ -725,8 +733,17 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		char str[10];
 		itoa((int)MEM_TotalPages(), str, 10);
 		if(!length||(size_t)length!=strlen(str)||strncmp(buffer,str,length)) {
+			buffer[length]='\0';
+			{
+				char tmp[32];
+				int saved_mb = length ? (atoi(buffer)*4096/1024/1024) : 0;
+				int current_mb = (int)MEM_TotalPages()*4096/1024/1024;
+				snprintf(tmp,sizeof(tmp),"%d MB",saved_mb);
+				loadstate_detail_saved = tmp;
+				snprintf(tmp,sizeof(tmp),"%d MB",current_mb);
+				loadstate_detail_current = tmp;
+			}
 			if(!force_load_state&&!loadstateconfirm(2)) {
-				buffer[length]='\0';
 				int size=atoi(buffer)*4096/1024/1024;
 				LOG_MSG("Aborted. Check your memory size: %d MB", size);
 				load_err=true;
@@ -749,6 +766,9 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		char str[20];
 		strcpy(str, getType().c_str());
 		if(!length||(size_t)length!=strlen(str)||strncmp(buffer,str,length)) {
+			buffer[length]='\0';
+			loadstate_detail_saved = length ? std::string(buffer) : std::string("(none)");
+			loadstate_detail_current = std::string(str);
 			if(!force_load_state&&!loadstateconfirm(3)) {
 				LOG_MSG("Aborted. Check your machine type: %s",buffer);
 				load_err=true;
@@ -924,6 +944,7 @@ std::string SaveState::getName(size_t slot, bool nl) const {
 			if (length != 0) ret += nl?"Remark: "+(!strlen(buffer1)?"-":std::string(buffer1))+"\n":" - "+std::string(buffer1);
 		}
 	}
-
+    unzClose(zf);
 	return ret;
 }
+

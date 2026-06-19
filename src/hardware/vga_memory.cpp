@@ -49,9 +49,23 @@ extern bool enable_pc98_256color_planar;
 extern bool enable_pc98_256color;
 extern bool isa_memory_hole_15mb;
 
+extern bool vbe_window_size_literal;
 extern unsigned int vbe_window_granularity;
 extern unsigned int vbe_window_size;
 extern const char* RunningProgram;
+
+static inline void vga_vram_write_trigger_update(void) {
+	vga.draw.must_complete_frame = true;
+}
+
+static inline void vga_cg_write_trigger_update(void) {
+	vga.draw.must_complete_frame = true;
+}
+
+static inline void vga_vram_write_trigger_update_planar_mem(const PhysPt a) {
+	if ((a-(PhysPt)vga.draw.draw_base_planar) < (PhysPt)vga.draw.draw_base_size) /* NTS: Subtract and compare must all use unsigned integers or this won't work! */
+		vga.draw.must_complete_frame = true;
+}
 
 uint32_t tandy_128kbase = 0x80000;
 
@@ -84,14 +98,17 @@ template <class baseLFBHandler> class VGA_SlowLFBHandler : public baseLFBHandler
 		VGA_SlowLFBHandler() : baseLFBHandler(PFLAG_NOCODE) {}
 		void writeb(PhysPt addr,uint8_t val) override {
 			VGAMEM_USEC_write_delay();
+			vga_vram_write_trigger_update();
 			PageHandler_HostPtWriteB(this,addr,val);
 		}
 		void writew(PhysPt addr,uint16_t val) override {
 			VGAMEM_USEC_write_delay();
+			vga_vram_write_trigger_update();
 			PageHandler_HostPtWriteW(this,addr,val);
 		}
 		void writed(PhysPt addr,uint32_t val) override {
 			VGAMEM_USEC_write_delay();
+			vga_vram_write_trigger_update();
 			PageHandler_HostPtWriteD(this,addr,val);
 		}
 
@@ -405,6 +422,7 @@ public:
 			return 0xFF; /* should not happen, byte I/O is always aligned */
 	}
 	template <typename T=uint8_t> static INLINE void do_write_aligned(const PhysPt a,const T v) {
+		vga_vram_write_trigger_update();
 		*((T*)(&vga.mem.linear[a])) = v;
 	}
 	template <typename T=uint8_t> static INLINE void do_write(const PhysPt a,const T v) {
@@ -461,6 +479,7 @@ public:
 		return VGA_Generic_Read_Handler(addr&~3u, addr, (uint8_t)(addr&3u));
 	}
 	static INLINE void writeHandler8(PhysPt addr, uint8_t val) {
+		vga_vram_write_trigger_update();
 		return VGA_Generic_Write_Handler<true/*chained*/>(addr&~3u, addr, (uint8_t)val);
 	}
 
@@ -516,6 +535,7 @@ public:
 		return VGA_Generic_Read_Handler(addr>>2u, addr, (uint8_t)(addr&3u));
 	}
 	static INLINE void writeHandler8(PhysPt addr, uint8_t val) {
+		vga_vram_write_trigger_update();
 		return VGA_Generic_Write_Handler<true/*chained*/>(addr>>2u, addr, (uint8_t)val);
 	}
 
@@ -568,6 +588,7 @@ public:
 		return VGA_Generic_Read_Handler(addr, addr, vga.config.read_map_select);
 	}
 	static INLINE void writeHandler8(PhysPt addr, uint8_t val) {
+		vga_vram_write_trigger_update_planar_mem(addr);
 		VGA_Generic_Write_Handler<false/*chained*/>(addr, addr, val);
 	}
 
@@ -623,6 +644,7 @@ public:
 	}
 
 	static INLINE void writeHandler8(PhysPt addr, uint8_t val) {
+		vga_vram_write_trigger_update_planar_mem(addr);
 		((uint32_t*)vga.mem.linear)[addr] =
 			(((uint32_t*)vga.mem.linear)[addr] & vga.config.full_not_map_mask) + (ExpandTable[val] & vga.config.full_map_mask);
 	}
@@ -660,6 +682,7 @@ public:
 		return vga.tandy.mem_base[addr];
 	}
 	void writeb(PhysPt addr,uint8_t val) override {
+		vga_vram_write_trigger_update();
 		VGAMEM_USEC_write_delay();
 		addr = PAGING_GetPhysicalAddress(addr) & 0x3FFF;
 		vga.tandy.mem_base[addr] = val;
@@ -689,6 +712,7 @@ public:
 		return vga.tandy.mem_base[addr];
 	}
 	void writeb(PhysPt addr,uint8_t val) override {
+		vga_vram_write_trigger_update();
 		VGAMEM_USEC_write_delay();
 		addr = PAGING_GetPhysicalAddress(addr) & 0xFFFF;
 		vga.tandy.mem_base[addr] = val;
@@ -1568,6 +1592,7 @@ class VGA_PC98_TEXT_PageHandler : public PageHandler {
 		}
 		void writeb(PhysPt addr,uint8_t val) override {
 			addr = PAGING_GetPhysicalAddress(addr) & 0x3FFFu;
+			vga_vram_write_trigger_update();
 
 			if (addr >= 0x3FE0u)
 				return pc98_mem_msw_write((addr >> 2u) & 7u,(unsigned char)val);
@@ -1615,6 +1640,7 @@ class VGA_PC98_CG_PageHandler : public PageHandler {
 		}
 		void writeb(PhysPt addr,uint8_t val) override {
 			/* uses the low 12 bits and therefore does not need PAGING_GetPhysicalAddress() */
+			vga_cg_write_trigger_update();
 			if ((a1_font_load_addr & 0x007E) == 0x0056 && (a1_font_load_addr & 0xFF00) != 0x0000)
 				pc98_font_char_write(a1_font_load_addr,(addr >> 1) & 0xF,addr & 1,val);
 			else
@@ -1677,6 +1703,7 @@ template <const unsigned int bank> class VGA_PC98_256BANK_PageHandler : public P
 			return pc98_vram_256bank_from_window(bank)[PAGING_GetPhysicalAddress(addr) & 0x7FFFu];
 		}
 		void writeb(PhysPt addr,uint8_t val) override {
+			vga_vram_write_trigger_update();
 			pc98_vram_256bank_from_window(bank)[PAGING_GetPhysicalAddress(addr) & 0x7FFFu] = val;
 		}
 };
@@ -1987,6 +2014,7 @@ public:
 	}
 	void writeb(PhysPt addr,uint8_t val) override {
 		VGAMEM_USEC_write_delay();
+		vga_vram_write_trigger_update();
 		writec<uint8_t>( PAGING_GetPhysicalAddress(addr), val );
 	}
 
@@ -2004,6 +2032,7 @@ public:
 	}
 	void writew(PhysPt addr,uint16_t val) override {
 		VGAMEM_USEC_write_delay();
+		vga_vram_write_trigger_update();
 		addr = PAGING_GetPhysicalAddress(addr);
 		if (!(addr & 1)) /* if WORD aligned */
 			writec<uint16_t>(addr,val);
@@ -2056,6 +2085,7 @@ public:
 	}
 	void writeb(PhysPt addr,uint8_t val) override {
 		delay();
+		vga_vram_write_trigger_update();
 		vga.tandy.mem_base[(PAGING_GetPhysicalAddress(addr) - 0xb8000) & 0x3FFF] = val;
 	}
 	
@@ -2083,16 +2113,19 @@ public:
 	VGA_MMIO_Handler() : PageHandler(PFLAG_NOCODE) {}
 	void writeb(PhysPt addr,uint8_t val) override {
 		VGAMEM_USEC_write_delay();
+		vga_vram_write_trigger_update();
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
 		XGA_Write(port, val, 1);
 	}
 	void writew(PhysPt addr,uint16_t val) override {
 		VGAMEM_USEC_write_delay();
+		vga_vram_write_trigger_update();
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
 		XGA_Write(port, val, 2);
 	}
 	void writed(PhysPt addr,uint32_t val) override {
 		VGAMEM_USEC_write_delay();
+		vga_vram_write_trigger_update();
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
 		XGA_Write(port, val, 4);
 	}
@@ -2179,6 +2212,7 @@ public:
 			return (T)do_read_aligned(mapread(a));
 	}
 	template <typename T=uint8_t> static INLINE void do_write_aligned(const PhysPt a,const T v) {
+		vga_vram_write_trigger_update();
 		const uint8_t plane = (vga.mode==M_AMSTRAD) ? vga.amstrad.write_plane : 0x01; // 0x0F?
 		if (plane & 0x08) *((T*)(&vga.tandy.mem_base[a+0xC000u])) = v;
 		if (plane & 0x04) *((T*)(&vga.tandy.mem_base[a+0x8000u])) = v;
@@ -2265,6 +2299,7 @@ public:
 		return latch.b[0];
 	}
 	static INLINE void writeHandler(PhysPt start, uint8_t val) {
+		vga_vram_write_trigger_update();
 		((uint32_t*)vga.mem.linear)[start] = ExpandTable[val];
 	}
 
@@ -2376,6 +2411,7 @@ public:
 				break;
 		}
 
+		vga_vram_write_trigger_update();
 		((uint32_t*)vga.mem.linear)[start] = (((uint32_t*)vga.mem.linear)[start] & nochangemask) + (pl.d & (~nochangemask));
 	}
 
@@ -2501,8 +2537,14 @@ void VGA_SetupHandlers(void) {
 	 * mapped to A0000-BFFFF. Most cards expose a window of 64KB. Most cards also have
 	 * a bank granularity of 64KB, but some, like Paradise and Cirrus, have 64KB windows
 	 * and 4KB granularity. */
-	vga.svga.bank_read_full = vga.svga.bank_read*vga.svga.bank_size;
-	vga.svga.bank_write_full = vga.svga.bank_write*vga.svga.bank_size;
+	if (svgaCard == SVGA_DOSBoxIG) {
+		vga.svga.bank_read_full = vga.dosboxig.rbank_offset & (~0xFFFu);
+		vga.svga.bank_write_full = vga.dosboxig.wbank_offset & (~0xFFFu);
+	}
+	else {
+		vga.svga.bank_read_full = vga.svga.bank_read*vga.svga.bank_size;
+		vga.svga.bank_write_full = vga.svga.bank_write*vga.svga.bank_size;
+	}
 	bool runeten = false;
 	PageHandler *newHandler;
 	switch (machine) {
@@ -2719,70 +2761,84 @@ void VGA_SetupHandlers(void) {
 			newHandler = vga_memio_lfb_delay ? &vgaph.map_slow : &vgaph.map;
 			break;
 	}
+
+	if (vga.dosboxig.svga && !(vga.mode == M_EGA || vga.mode == M_LIN4)/*non-planar modes only*/) {
+		newHandler = vga_memio_lfb_delay ? &vgaph.map_slow : &vgaph.map;
+	}
+
 	// Workaround for ETen Chinese DOS system (e.g. ET24VA)
 	if ((dos.loaded_codepage == 936 || dos.loaded_codepage == 950 || dos.loaded_codepage == 951) && strlen(RunningProgram) > 3 && !strncmp(RunningProgram, "ET", 2)) enveten = true;
 	runeten = !vga_fill_inactive_ram && enveten && (dos.loaded_codepage == 936 || dos.loaded_codepage == 950 || dos.loaded_codepage == 951) && ((strlen(RunningProgram) > 3 && !strncmp(RunningProgram, "ET", 2)) || !TTF_using());
-	switch ((vga.gfx.miscellaneous >> 2) & 3) {
-		case 0:
-			vgapages.base = VGA_PAGE_A0;
-			switch (svgaCard) {
-				case SVGA_TsengET3K:
-				case SVGA_TsengET4K:
-					vgapages.mask = 0x1ffff & vga.mem.memmask;
-					break;
-					/* NTS: Looking at the official ET4000 programming guide, it does in fact support the full 128KB */
-				case SVGA_S3Trio:
-				default:
-					vgapages.mask = 0xffff & vga.mem.memmask;
-					break;
-			}
-			if (CurMode && CurMode->mode >= 0x14/*VESA BIOS or extended mode*/ && vbe_window_size > 0/*user override of window size*/) {
-				unsigned int pages = (vbe_window_size + 0xFFFu) >> 12u; /* bytes to pages, round up */
-				if (pages > 32) pages = 32;
-				assert(pages != 0u);
 
-				/* map only what the window size determines, make the rest empty */
-				MEM_SetPageHandler(VGA_PAGE_A0, pages, newHandler );
-				MEM_SetPageHandler(VGA_PAGE_A0 + pages, 32 - pages, &vgaph.empty );
-			}
-			else {
-				/*full 128KB */
-				MEM_SetPageHandler(VGA_PAGE_A0, 32, newHandler );
-			}
-			break;
-		case 1:
-			vgapages.base = VGA_PAGE_A0;
-			vgapages.mask = 0xffff & vga.mem.memmask;
-			MEM_SetPageHandler( VGA_PAGE_A0, 16, newHandler );
-			if (vga_fill_inactive_ram || runeten)
-				MEM_ResetPageHandler_RAM( VGA_PAGE_B0, 16);
-			else
-				MEM_SetPageHandler( VGA_PAGE_B0, 16, &vgaph.empty );
-			break;
-		case 2:
-			vgapages.base = VGA_PAGE_B0;
-			vgapages.mask = 0x7fff & vga.mem.memmask;
-			MEM_SetPageHandler( VGA_PAGE_B0, 8, newHandler );
-			if (vga_fill_inactive_ram || runeten) {
-				MEM_ResetPageHandler_RAM( VGA_PAGE_A0, 16 );
-				MEM_ResetPageHandler_RAM( VGA_PAGE_B8, 8 );
-			} else {
-				MEM_SetPageHandler( VGA_PAGE_A0, 16, &vgaph.empty );
-				MEM_SetPageHandler( VGA_PAGE_B8, 8, &vgaph.empty );
-			}
-			break;
-		case 3:
-			vgapages.base = VGA_PAGE_B8;
-			vgapages.mask = 0x7fff & vga.mem.memmask;
-			MEM_SetPageHandler( VGA_PAGE_B8, 8, newHandler );
-			if (vga_fill_inactive_ram || runeten) {
-				MEM_ResetPageHandler_RAM( VGA_PAGE_A0, 16 );
-				MEM_ResetPageHandler_RAM( VGA_PAGE_B0, 8 );
-			} else {
-				MEM_SetPageHandler( VGA_PAGE_A0, 16, &vgaph.empty );
-				MEM_SetPageHandler( VGA_PAGE_B0, 8, &vgaph.empty );
-			}
-			break;
+	if (vga.dosboxig.force_A0000) {
+		vgapages.base = VGA_PAGE_A0;
+		vgapages.mask = 0xffff & vga.mem.memmask;
+		MEM_SetPageHandler( VGA_PAGE_A0, 16, newHandler );
+		MEM_SetPageHandler( VGA_PAGE_B0, 16, &vgaph.empty ); // NTS: Windows 3.1 may have debug output functions that write to a second MDA display
+	}
+	else {
+		switch ((vga.gfx.miscellaneous >> 2) & 3) {
+			case 0:
+				vgapages.base = VGA_PAGE_A0;
+				switch (svgaCard) {
+					case SVGA_TsengET3K:
+					case SVGA_TsengET4K:
+						vgapages.mask = 0x1ffff & vga.mem.memmask;
+						break;
+						/* NTS: Looking at the official ET4000 programming guide, it does in fact support the full 128KB */
+					case SVGA_S3Trio:
+					default:
+						vgapages.mask = 0xffff & vga.mem.memmask;
+						break;
+				}
+				if (CurMode && CurMode->mode >= 0x14/*VESA BIOS or extended mode*/ && (vbe_window_size < 0x10000/*64KB*/ || vbe_window_size_literal)) {
+					unsigned int pages = (vbe_window_size + 0xFFFu) >> 12u; /* bytes to pages, round up */
+					if (pages > 32) pages = 32;
+					assert(pages != 0u);
+
+					/* map only what the window size determines, make the rest empty */
+					MEM_SetPageHandler(VGA_PAGE_A0, pages, newHandler );
+					MEM_SetPageHandler(VGA_PAGE_A0 + pages, 32 - pages, &vgaph.empty );
+				}
+				else {
+					/*full 128KB */
+					MEM_SetPageHandler(VGA_PAGE_A0, 32, newHandler );
+				}
+				break;
+			case 1:
+				vgapages.base = VGA_PAGE_A0;
+				vgapages.mask = 0xffff & vga.mem.memmask;
+				MEM_SetPageHandler( VGA_PAGE_A0, 16, newHandler );
+				if (vga_fill_inactive_ram || runeten)
+					MEM_ResetPageHandler_RAM( VGA_PAGE_B0, 16);
+				else
+					MEM_SetPageHandler( VGA_PAGE_B0, 16, &vgaph.empty );
+				break;
+			case 2:
+				vgapages.base = VGA_PAGE_B0;
+				vgapages.mask = 0x7fff & vga.mem.memmask;
+				MEM_SetPageHandler( VGA_PAGE_B0, 8, newHandler );
+				if (vga_fill_inactive_ram || runeten) {
+					MEM_ResetPageHandler_RAM( VGA_PAGE_A0, 16 );
+					MEM_ResetPageHandler_RAM( VGA_PAGE_B8, 8 );
+				} else {
+					MEM_SetPageHandler( VGA_PAGE_A0, 16, &vgaph.empty );
+					MEM_SetPageHandler( VGA_PAGE_B8, 8, &vgaph.empty );
+				}
+				break;
+			case 3:
+				vgapages.base = VGA_PAGE_B8;
+				vgapages.mask = 0x7fff & vga.mem.memmask;
+				MEM_SetPageHandler( VGA_PAGE_B8, 8, newHandler );
+				if (vga_fill_inactive_ram || runeten) {
+					MEM_ResetPageHandler_RAM( VGA_PAGE_A0, 16 );
+					MEM_ResetPageHandler_RAM( VGA_PAGE_B0, 8 );
+				} else {
+					MEM_SetPageHandler( VGA_PAGE_A0, 16, &vgaph.empty );
+					MEM_SetPageHandler( VGA_PAGE_B0, 8, &vgaph.empty );
+				}
+				break;
+		}
 	}
 	if(svgaCard == SVGA_S3Trio && (vga.s3.ext_mem_ctrl & 0x10))
 		MEM_SetPageHandler(VGA_PAGE_A0, 16, &vgaph.mmio);
@@ -2807,58 +2863,69 @@ range_done:
 }
 
 void VGA_StartUpdateLFB(void) {
-	/* please obey the Linear Address Window Size register!
-	 * Windows 3.1 S3 driver will reprogram the linear framebuffer down to 0xA0000 when entering a DOSBox
-	 * and assuming the full VRAM size will cause a LOT of problems! */
-	Bitu winsz = 0x10000;
-
-	switch (vga.s3.reg_58&3) {
-		case 1:
-			winsz = 1 << 20;	//1MB
-			break;
-		case 2:
-			winsz = 2 << 20;	//2MB
-			break;
-		case 3:
-			winsz = 4 << 20;	//4MB
-			break;
-		// FIXME: What about the 8MB window?
-	}
-
-	/* NTS: 64KB winsz = 0x10000 => winmsk = 0xFFFF0000 => 0xFFFF
-	 *      1MB winsz = 0x100000 => winmsk = 0xFFF00000 => 0xFFF0
-	 *      2MB winsz = 0x200000 => winmsk = 0xFFE00000 => 0xFFE0
-	 *      and so on.
-	 *
-	 * From the S3 Trio32/Trio64 documentation regarding the Linear Address Window Position Registers:
-	 * "The Linear Address Window resides on a 64KB, 1MB, 2MB, or 4MB (Trio64 only) memory boundary (size-aligned) ...
-	 *  Some LSBs of this register are ignored because of the size-aligned boundary scheme" */
-	const unsigned int la_winmsk = ~((winsz - 1u) >> 16u); /* Register holds the upper 16 bits of the linear address */
-
-	/* The LFB register has an enable bit */
-	if (!(vga.s3.reg_58 & 0x10)) {
-		vga.lfb.page = (unsigned int)(vga.s3.la_window & la_winmsk) << 4u;
-		vga.lfb.addr = (unsigned int)(vga.s3.la_window & la_winmsk) << 16u;
-		vga.lfb.handler = NULL;
-		MEM_SetLFB(0,0,NULL,NULL);
-	}
-	/* if the DOS application or Windows 3.1 driver attempts to put the linear framebuffer
-	 * below the top of memory, then we're probably entering a DOS VM and it's probably
-	 * a 64KB window. If it's not a 64KB window then print a warning. */
-	else if ((unsigned long)(vga.s3.la_window << 4UL) < (unsigned long)MEM_TotalPages()) {
-		if (winsz != 0x10000) // 64KB window normal for entering a DOS VM in Windows 3.1 or legacy bank switching in DOS
-			LOG(LOG_MISC,LOG_WARN)("S3 warning: Window size != 64KB and address conflict with system RAM!");
-
-		vga.lfb.page = (unsigned int)(vga.s3.la_window & la_winmsk) << 4u;
-		vga.lfb.addr = (unsigned int)(vga.s3.la_window & la_winmsk) << 16u;
-		vga.lfb.handler = NULL;
-		MEM_SetLFB(0,0,NULL,NULL);
+	if (svgaCard == SVGA_DOSBoxIG) {
+		/* TODO: Perhaps the DOSBox Integrated Device could have an MMIO region */
+		vga.lfb.page = (unsigned int)(S3_LFB_BASE >> 12ul);
+		vga.lfb.addr = (unsigned int)S3_LFB_BASE;
+		vga.lfb.handler = vga_memio_lfb_delay ? &vgaph.lfb_slow : &vgaph.lfb;
+		MEM_SetLFB(vga.lfb.page,(unsigned int)vga.mem.memsize/4096u, vga.lfb.handler, NULL);
+		LOG(LOG_MISC,LOG_DEBUG)("DOSBox Integrated Device setting LFB at 0x%lx size 0x%lx",
+			(unsigned long)vga.lfb.addr,(unsigned long)vga.mem.memsize);
 	}
 	else {
-		vga.lfb.page = (unsigned int)(vga.s3.la_window & la_winmsk) << 4u;
-		vga.lfb.addr = (unsigned int)(vga.s3.la_window & la_winmsk) << 16u;
-		vga.lfb.handler = vga_memio_lfb_delay ? &vgaph.lfb_slow : &vgaph.lfb;
-		MEM_SetLFB((unsigned int)(vga.s3.la_window & la_winmsk) << 4u,(unsigned int)vga.mem.memsize/4096u, vga.lfb.handler, &vgaph.mmio);
+		/* please obey the Linear Address Window Size register!
+		 * Windows 3.1 S3 driver will reprogram the linear framebuffer down to 0xA0000 when entering a DOSBox
+		 * and assuming the full VRAM size will cause a LOT of problems! */
+		Bitu winsz = 0x10000;
+
+		switch (vga.s3.reg_58&3) {
+			case 1:
+				winsz = 1 << 20;	//1MB
+				break;
+			case 2:
+				winsz = 2 << 20;	//2MB
+				break;
+			case 3:
+				winsz = 4 << 20;	//4MB
+				break;
+				// FIXME: What about the 8MB window?
+		}
+
+		/* NTS: 64KB winsz = 0x10000 => winmsk = 0xFFFF0000 => 0xFFFF
+		 *      1MB winsz = 0x100000 => winmsk = 0xFFF00000 => 0xFFF0
+		 *      2MB winsz = 0x200000 => winmsk = 0xFFE00000 => 0xFFE0
+		 *      and so on.
+		 *
+		 * From the S3 Trio32/Trio64 documentation regarding the Linear Address Window Position Registers:
+		 * "The Linear Address Window resides on a 64KB, 1MB, 2MB, or 4MB (Trio64 only) memory boundary (size-aligned) ...
+		 *  Some LSBs of this register are ignored because of the size-aligned boundary scheme" */
+		const unsigned int la_winmsk = ~((winsz - 1u) >> 16u); /* Register holds the upper 16 bits of the linear address */
+
+		/* The LFB register has an enable bit */
+		if (!(vga.s3.reg_58 & 0x10)) {
+			vga.lfb.page = (unsigned int)(vga.s3.la_window & la_winmsk) << 4u;
+			vga.lfb.addr = (unsigned int)(vga.s3.la_window & la_winmsk) << 16u;
+			vga.lfb.handler = NULL;
+			MEM_SetLFB(0,0,NULL,NULL);
+		}
+		/* if the DOS application or Windows 3.1 driver attempts to put the linear framebuffer
+		 * below the top of memory, then we're probably entering a DOS VM and it's probably
+		 * a 64KB window. If it's not a 64KB window then print a warning. */
+		else if ((unsigned long)(vga.s3.la_window << 4UL) < (unsigned long)MEM_TotalPages()) {
+			if (winsz != 0x10000) // 64KB window normal for entering a DOS VM in Windows 3.1 or legacy bank switching in DOS
+				LOG(LOG_MISC,LOG_WARN)("S3 warning: Window size != 64KB and address conflict with system RAM!");
+
+			vga.lfb.page = (unsigned int)(vga.s3.la_window & la_winmsk) << 4u;
+			vga.lfb.addr = (unsigned int)(vga.s3.la_window & la_winmsk) << 16u;
+			vga.lfb.handler = NULL;
+			MEM_SetLFB(0,0,NULL,NULL);
+		}
+		else {
+			vga.lfb.page = (unsigned int)(vga.s3.la_window & la_winmsk) << 4u;
+			vga.lfb.addr = (unsigned int)(vga.s3.la_window & la_winmsk) << 16u;
+			vga.lfb.handler = vga_memio_lfb_delay ? &vgaph.lfb_slow : &vgaph.lfb;
+			MEM_SetLFB((unsigned int)(vga.s3.la_window & la_winmsk) << 4u,(unsigned int)vga.mem.memsize/4096u, vga.lfb.handler, &vgaph.mmio);
+		}
 	}
 }
 
@@ -2912,14 +2979,7 @@ void VGA_SetupMemory() {
 
 	vga.svga.bank_read = vga.svga.bank_write = 0;
 	vga.svga.bank_read_full = vga.svga.bank_write_full = 0;
-
-	/* obey user override for "bank size", which this code inherited from DOSBox SVN
-	 * confuses with "bank granularity". If "bank size" were truly a concern it would
-	 * affect how much of the A0000-BFFFF region VGA mapping would expose. */
-	if (vbe_window_granularity > 0)
-		vga.svga.bank_size = vbe_window_granularity; /* allow different sizes for dev testing */
-	else
-		vga.svga.bank_size = 0x10000; /* most common bank size is 64K */
+	vga.svga.bank_size = vbe_window_granularity;
 
 	if (!VGA_Memory_ShutDown_init) {
 		AddExitFunction(AddExitFunctionFuncPair(VGA_Memory_ShutDown));

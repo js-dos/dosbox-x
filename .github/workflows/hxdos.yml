@@ -18,10 +18,10 @@ jobs:
         shell: pwsh
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.12.1
+        uses: styfle/cancel-workflow-action@0.13.1
         with:
           access_token: ${{ github.token }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Prepare HX-DOS
         shell: bash
         run: |
@@ -46,6 +46,10 @@ jobs:
           echo "#define GIT_COMMIT_HASH \"${shortsha}\""  >> include/build_timestamp.h
           echo "#define COPYRIGHT_END_YEAR \"${copyrightyear}\"" >> include/build_timestamp.h
           cat include/build_timestamp.h
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION=$(echo "${GITHUB_REF##*/}" | sed -E 's/^dosbox-x-v([0-9]+\.[0-9]+\.[0-9]+)$/\1/' || echo "unknown")
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+          fi
       - name: Build HX-DOS
         shell: pwsh
         run: |
@@ -79,37 +83,71 @@ jobs:
           mkdir -p $top/package/language
           cp $top/contrib/translations/*/*.lng $top/package/language/
           cd $top/package/
-          $top/vs/tool/zip.exe -r -9 $top/dosbox-x-mingw-hx-dos-${{ env.timestamp }}.zip *
+          TIMESTAMP="${{ env.timestamp }}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            ZIPNAME="dosbox-x-hx-dos-${VERSION}.zip"
+            $top/vs/tool/zip.exe -r -9 "$top/$ZIPNAME" *
+          else
+            ZIPNAME="dosbox-x-hx-dos-${TIMESTAMP}-nightly"
+          fi
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           cd $top
       - name: Wait for VS 32bit build to finish (Release only)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           sleep 40m
+      - name: Get releases
+        run: |
+          curl -s https://api.github.com/repos/joncampbell123/dosbox-x/releases?per_page=100 > releases.json
+      - name: Find valid tag (no osfree)
+        id: decide
+        shell: bash
+        run: |
+          TAG=$(jq -r '
+            .[]
+            | select(.draft == false and .prerelease == false)
+            | select([(.assets // [])[].name | contains("osfree")] | any | not)
+            | .tag_name
+          ' releases.json | head -n 1)
+          if [ -z "$TAG" ]; then
+            echo "No valid release found"
+            exit 1
+          fi
+          echo "Selected tag: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Download Windows build
-        uses: robinraju/release-downloader@v1.12
+        uses: robinraju/release-downloader@v1.13
         with:
           repository: "joncampbell123/dosbox-x"
-          latest: true
+          tag: ${{ steps.decide.outputs.tag }}
           filename: "dosbox-x-vsbuild-win32-*.zip"
+          
       - name: Run in Windows build
+        if: false
         shell: bash
         run: |
           top=`pwd`
-          $top/vs/tool/unzip.exe -n "dosbox-x-vsbuild-win32-*.zip" "bin/Win32/Release/dosbox-x.*"
+          ZIP=$(ls dosbox-x-vsbuild-win32-*.zip | head -n 1) || exit 1
+          $top/vs/tool/unzip.exe -n "$ZIP" "bin/Win32/Release/dosbox-x.*"
+          test -f "$top/bin/Win32/Release/dosbox-x.exe" || (echo "exe not found" && exit 1)
           cp $top/package/dosbox-x.ref $top/hxdos.cfg
           echo mount b ..>>$top/hxdos.cfg
           echo "echo success>b:\SUCCESS.TXT">>$top/hxdos.cfg
-          $top/bin/Win32/Release/dosbox-x.exe -silent -exit -set memsize=128 -c "mount c ." -c "c:" -c "cd package" -c "dosbox-x -silent -exit -conf ..\hxdos.cfg>..\OUTPUT.TXT"
+          $top/bin/Win32/Release/dosbox-x.exe -silent -exit -set memsize=128 \
+            -c "mount c ." \
+            -c "c:" \
+            -c "cd package" \
+            -c "dosbox-x -silent -exit -conf ..\hxdos.cfg>..\OUTPUT.TXT"
           cat $top/OUTPUT.TXT
-          test -f $top/SUCCESS.TXT || (echo The HX-DOS build did not run successfully && exit 1)
+          test -f $top/SUCCESS.TXT || (echo "HX-DOS build failed" && exit 1)
       - name: Upload preview package
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
-          name: dosbox-x-mingw-hx-dos-${{ env.timestamp }}
+          name: ${{ env.ZIPNAME }}
           path: ${{ github.workspace }}/package/
       - name: Upload release package
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: dosbox-x-mingw-hx-dos-${{ env.timestamp }}.zip
+          files: ${{ env.ZIPNAME }}

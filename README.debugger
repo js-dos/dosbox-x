@@ -7,7 +7,7 @@ In builds where it is enabled, DOSBox-X supports breaking into the debugger
 interface, which is shown on the console.
 
 A mapper shortcut is provided to break into the debugger on demand. Normally
-this shortcut is set to Alt+Pause.
+this shortcut is set to Alt+Pause (Mac: Alt+F12).
 
 In Windows, DOSBox-X can create a console and show the debugger interface
 on it.
@@ -92,15 +92,28 @@ debugger.
 Debugger keyboard shortcuts
 ---------------------------
 
-Tab                 Switch between windows
+Tab/Shift+Tab       Switch to the next/previous window
+F3/F6               Previous command in history
+F4/F7               Next command in history
 F5                  Resume emulation
+F8                  Toggle printable characters display in data view
 F9                  Set/clear breakpoint
 F10                 Single step (over)
 F11                 Single step (into)
 Up arrow            Scroll up one line (if applicable)
 Down arrow          Scroll down one line (if applicable)
-Page Up             Scroll up by window height (if applicable)
-Page Down           Scroll down by window height (if applicable)
+Left arrow          Move cursor left in command line
+Right arrow         Move cursor right in command line
+Page Up/Fn+Up       Scroll up by window height (if applicable)
+Page Down/Fn+Down   Scroll down by window height (if applicable)
+Home/Fn+Left        Scroll to top (in Output window)
+End/Fn+Right        Scroll to bottom (in Output window)
+Insert              Toggle insert/overwrite mode in command line
+Alt+D               Set data view to DS:SI
+Alt+E               Set data view to ES:DI
+Alt+X               Set data view to DS:DX
+Alt+B               Set data view to ES:BX
+Alt+S               Set data view to SS:SP
 
 Debugger commands
 -----------------
@@ -111,13 +124,19 @@ SHOWWIN <winname>                           Show window (by name)
 HIDEWIN <winname>                           Hide window (by name)
 MEMDUMP <seg> <off> <bytecount>             Dump memory to file (MEMDUMP.TXT)
 MEMDUMPBIN <seg> <off> <bytecount>          Dump memory to file (MEMDUMP.BIN)
+MEMFIND <seg> <off> [bytes in hex]          Start a memory find search instance
+MEMS <operator> <value>                     Search a value within the find instance
 IV <seg> <off> <name>                       Insert variable
 SV <name>                                   Save variables to <name>
 LV <name>                                   Load variables from <name>
 SR <reg> <value>                            Set register <reg> value to <value>
 SM <seg> <off> [bytes in hex]               Set memory at <seg>:<off> to byte values given
+SMV <off> [bytes in hex]                    Set memory at linear/virtual <off> to byte values
+FM <seg> <off>                              Freeze (lock) memory value at <seg>:<off>
+EV <value> [value] ...                      Show register/expression value(s)
 BP <seg> <off>                              Add breakpoint (real mode)
 BPM <seg> <off>                             Add breakpoint (protected mode)
+BPPM <seg> <off>                            Add memory-change breakpoint (protected mode)
 BPLM <offset>                               Add breakpoint (linear/virtual address)
 BPINT <intnum>                              Add breakpoint on interrupt
 BPINT <intnum> <value>                      Add breakpoint on interrupt and AH=<value>
@@ -134,6 +153,8 @@ PIC UNMASKIRQ <irq>                         Unmask IRQ at interrupt controller
 PIC ACKIRQ <irq>                            Acknowledge IRQ at interrupt controller
 PIC LOWERIRQ <irq>                          Manually lower interrupt signal
 PIC RAISEIRQ <irq>                          Manually raise interrupt signal
+INP/INW/IND <port>                          I/O port read byte/word/dword
+OUTP/OUTW/OUTD <port> <data>                I/O port write byte/word/dword
 C <seg> <off>                               Set code view to address
 D <seg> <off>                               Set data view to address (segment:offset)
 DV <offset>                                 Set data view to address (linear/virtual address)
@@ -141,6 +162,8 @@ DP <offset>                                 Set data view to address (physical)
 LOG <hexadecimal count>                     Log CPU state, for the specified number of instructions, to LOGCPU.TXT
 LOGS <hexadecimal count>                    Log CPU state, short log, to LOGCPU.TXT
 LOGL <hexadecimal count>                    Log CPU state, long log, to LOGCPU.TXT
+LOGC <hexadecimal count>                    Log CPU state, CS:IP-only log, to LOGCPU.TXT
+ADDLOG <message>                            Add a message line to the CPU log file
 INTT <intnum>                               Trace interrupt
 INT <intnum>                                Start interrupt
 CALLBACKS                                   Show callbacks of interrupts.
@@ -149,12 +172,17 @@ DOS MCBS                                    Dump DOS kernel MCB chain (conventio
 DOS KERN                                    Dump DOS kernel memory allocation list
 DOS XMS                                     Dump XMS (extended memory) allocation list
 DOS EMS                                     Dump EMS (expanded memory) allocation list
+DOS FNKEY                                   Dump PC-98 function key (FnKey) mapping
 BIOS MEM                                    Dump BIOS allocation and layout list
 GDT                                         Dump GDT (global descriptor table)
 LDT                                         Dump LDT (local descriptor table)
 IDT                                         Dump IDT (interrupt descriptor table)
 PAGING                                      Dump page table information
 CPU                                         Dump additional CPU information
+FPU                                         Dump additional FPU information
+MMX [=t] <reg> [SET <val>]                  Display or set MMX registers (t=B,W,D,Q)
+SSE [=t] <reg> [SET <val>]                  Display or set SSE regs (t=B,W,D,Q,X,S,F)
+VRD                                         Redraw video output
 VGA cmd                                     VGA related debugging commands.
 PC98 cmd                                    PC98 related debugging commands.
 EMU MEM/MACHINE                             Show emulator memory or machine info.
@@ -162,6 +190,7 @@ INTVEC <file>                               Dump interrupt vector table to <file
 INTHAND <intnum>                            Set code view to start of interrupt handler
 EXTEND                                      Toggle additional information
 TIMERIRQ                                    Start timer IRQ
+VRT                                         Run, then enter debugger at next vertical retrace
 TIME <time>                                 Display or change the internal time
 DATE <date>                                 Display or change the internal date
 HEAVYLOG                                    Toggle heavy CPU logging
