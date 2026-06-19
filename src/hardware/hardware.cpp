@@ -2144,7 +2144,9 @@ void CAPTURE_Init() {
     SetGameState_Run(section->Get_int("saveslot")-1);
     noremark_save_state = !section->Get_bool("saveremark");
     video_debug_overlay = section->Get_bool("video debug at startup");
+#ifdef C_DEBUG
     mainMenu.get_item("video_debug_overlay").check(video_debug_overlay).refresh_item(mainMenu);
+#endif
     mainMenu.get_item("noremark_savestate").check(noremark_save_state).refresh_item(mainMenu);
     force_load_state = section->Get_bool("forceloadstate");
     mainMenu.get_item("force_loadstate").check(force_load_state).refresh_item(mainMenu);
