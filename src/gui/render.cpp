@@ -559,9 +559,6 @@ std::string RENDER_GetScaler(void) {
     return prop->GetSection()->Get_string("type");
 }
 
-#ifdef JSDOS
-extern void RENDER_Reset( void );
-#else
 static int aspect_x=0, aspect_y=0;
 
 void RENDER_Reset( void ) {
@@ -576,8 +573,10 @@ void RENDER_Reset( void ) {
 
 	Scaler_AspectChangedLinesFree();
 	scalerSourceCacheBufferFree();
+#if RENDER_USE_ADVANCED_SCALERS>1
 	scalerChangeCacheFree();
 	scalerFrameCacheFree();
+#endif
 	scalerWriteCacheFree();
 	TempLineFree();
 
@@ -612,7 +611,11 @@ void RENDER_Reset( void ) {
 	if( sdl.desktop.isperfect ) /* Handle scaling if no pixel-perfect mode */
 		goto forcenormal;
 
-	if(render.scale.prompt && (!dblh || !dblw) && !((dblh || dblw) && !render.scale.hardware) && scalerOpTV != render.scale.op && scaler != "none" && strncasecmp(scaler.c_str(), "normal", 6) && !render.scale.forced && sdl.desktop.want_type != SCREEN_TTF) {
+	if(render.scale.prompt && (!dblh || !dblw) && !((dblh || dblw) && !render.scale.hardware) &&
+#ifndef JSDOS
+	  scalerOpTV != render.scale.op &&
+#endif
+	  scaler != "none" && strncasecmp(scaler.c_str(), "normal", 6) && !render.scale.forced && sdl.desktop.want_type != SCREEN_TTF) {
 		std::string message = formatString(MSG_Get("SCALER_LOAD_WARN"), scaler.c_str());
 		render.scale.forced = systemmessagebox("Loading scaler", message.c_str(), "yesno","question", 1);
 		render.scale.prompt = false;
@@ -702,6 +705,7 @@ void RENDER_Reset( void ) {
 		}
 #endif
 	} else if (dblw && !render.scale.hardware) {
+#ifndef JSDOS
 		if(scalerOpGray == render.scale.op){
 			simpleBlock = &ScaleGrayDw;
 		}else if(scalerOpTV == render.scale.op){
@@ -719,13 +723,16 @@ void RENDER_Reset( void ) {
 				simpleBlock = &ScaleScan3xDw;
 			else
 				simpleBlock = &ScaleScan2xDw;
-		}else{
+		}else
+#endif
+		  {
 			if (render.scale.forced && render.scale.size >= 2)
 				simpleBlock = &ScaleNormal2xDw;
 			else
 				simpleBlock = &ScaleNormalDw;
 		}
 	} else if (dblh && !render.scale.hardware) {
+#ifndef JSDOS
 		//Check whether tv2x and scan2x is selected
 		if(scalerOpGray == render.scale.op){
 			simpleBlock = &ScaleGrayDh;
@@ -733,7 +740,9 @@ void RENDER_Reset( void ) {
 			simpleBlock = &ScaleTVDh;
 		}else if(scalerOpScan == render.scale.op){
 			simpleBlock = &ScaleScanDh;
-		}else{
+		}else
+#endif
+		  {
 			if (render.scale.forced && render.scale.size >= 2)
 				simpleBlock = &ScaleNormal2xDh;
 			else
@@ -743,9 +752,12 @@ void RENDER_Reset( void ) {
 	if( simpleBlock == NULL && complexBlock == NULL ) {
 forcenormal:
 		complexBlock = nullptr;
+#ifndef JSDOS
 		if(scalerOpGray==render.scale.op){
 			simpleBlock = &ScaleGrayNormal;
-		}else{
+		}else
+#endif
+		  {
 			simpleBlock = &ScaleNormal1x;
 		}
 	}
@@ -756,12 +768,12 @@ forcenormal:
 		goto forcenormal;
 #endif
 		gfx_flags = complexBlock->gfxFlags & ~(GFX_NORMALSCALE);
-		xscale = complexBlock->xscale;  
+		xscale = complexBlock->xscale;
 		yscale = complexBlock->yscale;
 		//      LOG_MSG("Scaler:%s",complexBlock->name);
 	} else {
 		gfx_flags = simpleBlock->gfxFlags & ~(GFX_NORMALSCALE);
-		xscale = simpleBlock->xscale;   
+		xscale = simpleBlock->xscale;
 		yscale = simpleBlock->yscale;
 		if ((simpleBlock->gfxFlags & GFX_NORMALSCALE) && render.scale.hardware) {
 			/* Normal (pixel duplication) scalers should not be used for hardware scaling,
@@ -835,9 +847,9 @@ forcenormal:
 		gfx_flags |= GFX_RGBONLY | GFX_CAN_RANDOM;
 #endif
 	if (!gfx_flags) {
-		if (!complexBlock && simpleBlock == &ScaleNormal1x) 
+		if (!complexBlock && simpleBlock == &ScaleNormal1x)
 			E_Exit("Failed to create a rendering output");
-		else 
+		else
 			goto forcenormal;
 	}
 	width *= xscale;
@@ -929,7 +941,7 @@ forcenormal:
 		render.scale.outMode = scalerMode16;
 	else if (gfx_flags & GFX_CAN_32)
 		render.scale.outMode = scalerMode32;
-	else 
+	else
 		E_Exit("Failed to create a rendering output");
 	ScalerLineBlock_t *lineBlock;
 
@@ -1024,6 +1036,8 @@ forcenormal:
 	/* only allocate frame cache if using a complex scaler.
 	 * the way the advanced scalers are coded, the pitch MUST be sizeof(PTYPE)*SCALER_COMPLEXWIDTH or else the code will misrender!
 	 * Also allocate the change cache. */
+
+#if RENDER_USE_ADVANCED_SCALERS>1
 	if (render.scale.complexHandler) {
 		/* outPitch == 0 at this point. we don't get the value until GFX_StartUpdate().
 		 * use outMode to compute what the advanced scalers render to, not what the video buffer is doing. */
@@ -1045,6 +1059,7 @@ forcenormal:
 		scalerFrameCacheAlloc(render.scale.frameCachePitch,render.src.width,render.src.height);
 		scalerChangeCacheAlloc(render.src.width,render.src.height);
 	}
+#endif
 
 	TempLineAlloc(render.src.width); // vga_draw.cpp make the scan line larger or smaller to match. that code also previously used scaler max width
 	if (use_wcache) scalerWriteCacheAlloc(wcpitch);
@@ -1082,7 +1097,6 @@ forcenormal:
 	SetWindowTransparency(-1);
 #endif
 }
-#endif
 
 void RENDER_CallBack( GFX_CallBackFunctions_t function ) {
     if (function == GFX_CallBackStop) {
