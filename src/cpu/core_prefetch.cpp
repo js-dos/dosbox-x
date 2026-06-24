@@ -32,7 +32,7 @@ using namespace std;
 
 #define CPU_CORE CPU_ARCHTYPE_386
 
-#define DoString DoString_Prefetch
+#define DoString DoString_Prefetch_Default
 
 extern bool ignore_opcode_63;
 
@@ -309,4 +309,3 @@ Bits CPU_Core_Prefetch_Trap_Run(void) {
 void CPU_Core_Prefetch_Init(void) {
 
 }
-

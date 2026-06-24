@@ -1588,7 +1588,10 @@ void DOSBOX_SetupConfigSections(void) {
 #if (C_DYNREC)
         "dynamic_rec",
 #endif
-        "normal", "full", "simple", nullptr };
+        #if defined(C_EMSCRIPTEN)
+"wasm",
+#endif
+"normal", "full", "simple", nullptr };
 
     const char* voodoo_settings[] = {
         "false",

@@ -93,6 +93,8 @@ Bits CPU_Core_Dynrec_Run(void);
 Bits CPU_Core_Dynrec_Trap_Run(void);
 Bits CPU_Core_Prefetch_Run(void);
 Bits CPU_Core_Prefetch_Trap_Run(void);
+Bits CPU_Core_Wasm_Run(void);
+Bits CPU_Core_Wasm_Trap_Run(void);
 
 Bits CPU_Core286_Normal_Run(void);
 Bits CPU_Core286_Normal_Trap_Run(void);

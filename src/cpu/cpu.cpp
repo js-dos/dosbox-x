@@ -227,6 +227,9 @@ Bitu CPU_extflags_toggle=0;	// ID and AC flags may be toggled depending on emula
 unsigned int CPU_PrefetchQueueSize=0;
 
 void CPU_Core_Normal_Init(void);
+#if defined(C_EMSCRIPTEN)
+void CPU_Core_Wasm_Init(void);
+#endif
 #if !defined(C_EMSCRIPTEN)
 void CPU_Core_Simple_Init(void);
 void CPU_Core_Full_Init(void);
@@ -620,11 +623,11 @@ void CPU_Check_NMI() {
     }
 }
 
-/* In debug mode exceptions are tested and dosbox exits when 
- * a unhandled exception state is detected. 
+/* In debug mode exceptions are tested and dosbox exits when
+ * a unhandled exception state is detected.
  * USE CHECK_EXCEPT to raise an exception in that case to see if that exception
  * solves the problem.
- * 
+ *
  * In non-debug mode dosbox doesn't do detection (and hence doesn't crash at
  * that point). (game might crash later due to the unhandled exception) */
 
@@ -634,7 +637,7 @@ void CPU_Check_NMI() {
 #if C_DEBUG
 // #define CPU_CHECK_EXCEPT 1
 // #define CPU_CHECK_IGNORE 1
- /* Use CHECK_EXCEPT when something doesn't work to see if an exception is 
+ /* Use CHECK_EXCEPT when something doesn't work to see if an exception is
  * needed that isn't enabled by default.*/
 #else
 /* NORMAL NO CHECKING => More Speed */
@@ -794,7 +797,7 @@ bool CPU_PUSHF(Bitu use32) {
 		return CPU_PrepareException(EXCEPTION_GP,0);
 	}
 	FillFlags();
-	if (use32) 
+	if (use32)
 		CPU_Push32(reg_flags & 0xfcffff);
 	else CPU_Push16((uint16_t)reg_flags);
 	return false;
@@ -911,7 +914,7 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,uint32_t old_eip) {
 
 	FillFlags();
 	TaskStateSegment new_tss;
-	if (!new_tss.SetSelector(new_tss_selector)) 
+	if (!new_tss.SetSelector(new_tss_selector))
 		E_Exit("Illegal TSS for switch, selector=%x, switchtype=%lx",(int)new_tss_selector,(unsigned long)tstype);
 	if (tstype==TSwitch_IRET) {
 		if (!new_tss.desc.IsBusy())
@@ -1016,7 +1019,7 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,uint32_t old_eip) {
 		new_fs = SegValue(fs);
 		new_gs = SegValue(gs);
 	} else {
-	
+
 		/* Setup the new cr3 */
 		if (paging.cr3 != new_cr3)
 			// if they are the same it is not flushed
@@ -1304,7 +1307,7 @@ void CPU_Interrupt(Bitu num,Bitu type,uint32_t oldeip) {
 				CPU_Exception(EXCEPTION_GP,0);
 				return;
 			}
-		} 
+		}
 
 		Descriptor gate;
 		if (!cpu.idt.GetDescriptor(num<<3,gate)) {
@@ -1426,7 +1429,7 @@ void CPU_Interrupt(Bitu num,Bitu type,uint32_t oldeip) {
 						}
 //						LOG_MSG("INT:Gate to inner level SS:%X SP:%X",n_ss,n_esp);
 						goto do_interrupt;
-					} 
+					}
 					if (cs_dpl!=cpu.cpl)
 						E_Exit("Non-conforming intra privilege INT with DPL!=CPL");
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
@@ -1451,7 +1454,7 @@ do_interrupt:
 						CPU_Push16(oldeip);
 						if (type & CPU_INT_HAS_ERROR) CPU_Push16((uint16_t)cpu.exception.error);
 					}
-					break;		
+					break;
 				default:
 					E_Exit("INT:Gate Selector points to illegal descriptor with type %x",(int)cs_desc.Type());
 				}
@@ -1582,7 +1585,7 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 				return;
 			}
 		}
-		/* Check if this is task IRET */	
+		/* Check if this is task IRET */
 		if (GETFLAG(NT)) {
 			if (GETFLAG(VM)) E_Exit("Pmode IRET with VM bit set");
 			CPU_CHECK_COND(!cpu_tss.IsValid(),
@@ -1630,7 +1633,7 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 				reg_esp=n_esp;
 				cpu.code.big=false;
 				SegSet16(cs,(uint16_t)n_cs_sel);
-				LOG(LOG_CPU,LOG_NORMAL)("IRET:Back to V86: CS:%X IP %X SS:%X SP %X FLAGS:%X",SegValue(cs),reg_eip,SegValue(ss),reg_esp,reg_flags);	
+				LOG(LOG_CPU,LOG_NORMAL)("IRET:Back to V86: CS:%X IP %X SS:%X SP %X FLAGS:%X",SegValue(cs),reg_eip,SegValue(ss),reg_esp,reg_flags);
 				return;
 				}
 				catch (const GuestPageFaultException &pf) {
@@ -1684,7 +1687,7 @@ void CPU_IRET(bool use32,uint32_t oldeip) {
 			"IRET with nonpresent code segment",
 			EXCEPTION_NP,n_cs_sel & 0xfffc)
 
-		if (n_cs_rpl==cpu.cpl) {	
+		if (n_cs_rpl==cpu.cpl) {
 			/* Return to same level */
 
 			// commit point
@@ -1961,7 +1964,7 @@ void CPU_CALL(bool use32,Bitu selector,Bitu offset,uint32_t oldeip) {
 				"CALL:CODE:NC:DPL!=CPL",
 				EXCEPTION_GP,selector & 0xfffc)
 			LOG(LOG_CPU,LOG_NORMAL)("CALL:CODE:NC to %X:%X",selector,offset);
-			goto call_code;	
+			goto call_code;
 		case DESC_CODE_N_C_A:case DESC_CODE_N_C_NA:
 		case DESC_CODE_R_C_A:case DESC_CODE_R_C_NA:
 			CPU_CHECK_COND(call.DPL()>cpu.cpl,
@@ -1999,7 +2002,7 @@ call_code:
 			cpu.code.big=call.Big()>0;
 			Segs.val[cs]=(uint16_t)((selector & 0xfffc) | cpu.cpl);
 			return;
-		case DESC_386_CALL_GATE: 
+		case DESC_386_CALL_GATE:
 		case DESC_286_CALL_GATE:
 		case DESC_TASK_GATE:
 			{
@@ -2082,7 +2085,7 @@ call_code:
 						// catch pagefaults
 						if (call.saved.gate.paramcount&31) {
 							if (call.Type()==DESC_386_CALL_GATE) {
-								for (int8_t i=(call.saved.gate.paramcount&31)-1;i>=0;i--) 
+								for (int8_t i=(call.saved.gate.paramcount&31)-1;i>=0;i--)
 									mem_readd(o_stack+(uint8_t)i*4u);
 							} else {
 								for (int8_t i=(call.saved.gate.paramcount&31)-1;i>=0;i--)
@@ -2127,7 +2130,7 @@ call_code:
 							CPU_Push32(o_ss);		//save old stack
 							CPU_Push32(o_esp);
 							if (call.saved.gate.paramcount&31)
-								for (int8_t i=(call.saved.gate.paramcount&31)-1;i>=0;i--) 
+								for (int8_t i=(call.saved.gate.paramcount&31)-1;i>=0;i--)
 									CPU_Push32(mem_readd(o_stack+(uint8_t)i*4u));
 							CPU_Push32(oldcs);
 							CPU_Push32(oldeip);
@@ -2142,7 +2145,7 @@ call_code:
 						}
 
 						dosbox_allow_nonrecursive_page_fault = old_allow;
-						break;		
+						break;
 					} else if (n_cs_dpl > cpu.cpl)
 						E_Exit("CALL:GATE:CS DPL>CPL");		// or #GP(sel)
 				case DESC_CODE_N_C_A:case DESC_CODE_N_C_NA:
@@ -2260,7 +2263,7 @@ void CPU_RET(bool use32,Bitu bytes,uint32_t oldeip) {
 			"RET:CS beyond limits",
 			EXCEPTION_GP,selector & 0xfffc)
 
-		if (cpu.cpl==rpl) {	
+		if (cpu.cpl==rpl) {
 			/* Return to same level */
 			switch (desc.Type()) {
 			case DESC_CODE_N_NC_A:case DESC_CODE_N_NC_NA:
@@ -2468,7 +2471,7 @@ bool CPU_LTR(Bitu selector) {
 		cpu_tss.desc.SetBusy(true);
 		cpu_tss.SaveSelector();
 	} else {
-		/* Descriptor was no available TSS descriptor */ 
+		/* Descriptor was no available TSS descriptor */
 		LOG(LOG_CPU,LOG_NORMAL)("LTR failed, selector=%X (type=%X)",selector,desc.Type());
 		return CPU_PrepareException(EXCEPTION_GP,selector);
 	}
@@ -2784,9 +2787,9 @@ void CPU_ARPL(Bitu & dest_sel,Bitu src_sel) {
 		SETFLAGBIT(ZF,true);
 	} else {
 		SETFLAGBIT(ZF,false);
-	} 
+	}
 }
-	
+
 void CPU_LAR(Bitu selector,Bitu & ar) {
 	FillFlags();
 	if (selector == 0) {
@@ -2817,7 +2820,7 @@ void CPU_LAR(Bitu selector,Bitu & ar) {
 
 	case DESC_386_TSS_A:		case DESC_386_TSS_B:
 	case DESC_386_CALL_GATE:
-	
+
 
 	case DESC_DATA_EU_RO_NA:	case DESC_DATA_EU_RO_A:
 	case DESC_DATA_EU_RW_NA:	case DESC_DATA_EU_RW_A:
@@ -2858,7 +2861,7 @@ void CPU_LSL(Bitu selector,Bitu & limit) {
 	case DESC_LDT:
 	case DESC_286_TSS_A:
 	case DESC_286_TSS_B:
-	
+
 	case DESC_386_TSS_A:
 	case DESC_386_TSS_B:
 
@@ -2866,7 +2869,7 @@ void CPU_LSL(Bitu selector,Bitu & limit) {
 	case DESC_DATA_EU_RW_NA:	case DESC_DATA_EU_RW_A:
 	case DESC_DATA_ED_RO_NA:	case DESC_DATA_ED_RO_A:
 	case DESC_DATA_ED_RW_NA:	case DESC_DATA_ED_RW_A:
-	
+
 	case DESC_CODE_N_NC_A:		case DESC_CODE_N_NC_NA:
 	case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 		if (desc.DPL()<cpu.cpl || desc.DPL() < rpl) {
@@ -2894,8 +2897,8 @@ void CPU_VERR(Bitu selector) {
 		return;
 	}
 	switch (desc.Type()){
-	case DESC_CODE_R_C_A:		case DESC_CODE_R_C_NA:	
-		//Conforming readable code segments can be always read 
+	case DESC_CODE_R_C_A:		case DESC_CODE_R_C_NA:
+		//Conforming readable code segments can be always read
 		break;
 	case DESC_DATA_EU_RO_NA:	case DESC_DATA_EU_RO_A:
 	case DESC_DATA_EU_RW_NA:	case DESC_DATA_EU_RW_A:
@@ -3266,7 +3269,7 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level) {
 		mem_writew(SegPhys(ss)+sp_index,reg_bp);
 		reg_bp=(uint16_t)(reg_esp-2);
 		if (level) {
-			for (Bitu i=1;i<level;i++) {	
+			for (Bitu i=1;i<level;i++) {
 				sp_index-=2;bp_index-=2;
 				mem_writew(SegPhys(ss)+sp_index,mem_readw(SegPhys(ss)+bp_index));
 			}
@@ -3283,7 +3286,7 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level) {
 		reg_ebp=(reg_esp-4)&(mask_stack_ptr_on_enter?cpu.stack.mask:0xFFFFFFFF);
 
 		if (level) {
-			for (Bitu i=1;i<level;i++) {	
+			for (Bitu i=1;i<level;i++) {
 				sp_index-=4;bp_index-=4;
 				mem_writed(SegPhys(ss)+sp_index,mem_readd(SegPhys(ss)+bp_index));
 			}
@@ -3421,6 +3424,16 @@ static void CPU_ToggleNormalCore(bool pressed) {
 	sec->HandleInputline(tmp);
     }
 }
+#if defined(C_EMSCRIPTEN)
+static void CPU_ToggleWasmCore(bool pressed) {
+    if (!pressed) return;
+    Section* sec=control->GetSection("cpu");
+    if(sec) {
+        std::string tmp="core=wasm";
+        sec->HandleInputline(tmp);
+    }
+}
+#endif
 
 #if (C_DYNAMIC_X86) || (C_DYNREC)
 static void CPU_ToggleDynamicCore(bool pressed) {
@@ -3594,14 +3607,14 @@ public:
 		reg_esp=0;
 
 		do_seg_limits = section->Get_bool("segment limits");
-	
+
 		SegSet16(cs,0); Segs.limit[cs] = do_seg_limits ? 0xFFFF : ((PhysPt)(~0UL)); Segs.expanddown[cs] = false;
 		SegSet16(ds,0); Segs.limit[ds] = do_seg_limits ? 0xFFFF : ((PhysPt)(~0UL)); Segs.expanddown[ds] = false;
 		SegSet16(es,0); Segs.limit[es] = do_seg_limits ? 0xFFFF : ((PhysPt)(~0UL)); Segs.expanddown[es] = false;
 		SegSet16(fs,0); Segs.limit[fs] = do_seg_limits ? 0xFFFF : ((PhysPt)(~0UL)); Segs.expanddown[fs] = false;
 		SegSet16(gs,0); Segs.limit[gs] = do_seg_limits ? 0xFFFF : ((PhysPt)(~0UL)); Segs.expanddown[gs] = false;
 		SegSet16(ss,0); Segs.limit[ss] = do_seg_limits ? 0xFFFF : ((PhysPt)(~0UL)); Segs.expanddown[ss] = false;
-	
+
 		CPU_SetFlags(FLAG_IF,FMASK_ALL);		//Enable interrupts
 		fpu.mxcsr=0x1F80; // The default MXCSR value is... [https://www.felixcloutier.com/x86/ldmxcsr]
 		cpu.cr0=0x00000000;
@@ -3629,6 +3642,9 @@ public:
 
 		/* Init the cpu cores */
 		CPU_Core_Normal_Init();
+#if defined(C_EMSCRIPTEN)
+    CPU_Core_Wasm_Init();
+#endif
 #if !defined(C_EMSCRIPTEN)
 		CPU_Core_Simple_Init();
 		CPU_Core_Full_Init();
@@ -3652,6 +3668,10 @@ public:
 
 		MAPPER_AddHandler(CPU_ToggleNormalCore,MK_nothing,0,"normal"  ,"CPU: normal core", &item);
 		item->set_text("Normal core");
+#if defined(C_EMSCRIPTEN)
+        MAPPER_AddHandler(CPU_ToggleWasmCore,MK_nothing,0,"wasm","CPU: wasm core",&item);
+        item->set_text("WASM core");
+#endif
 
 #if (C_DYNAMIC_X86) || (C_DYNREC)
 		MAPPER_AddHandler(CPU_ToggleDynamicCore,MK_nothing,0,"dynamic","CPU: dynamic core",&item);
@@ -3709,7 +3729,7 @@ public:
 		do_pse = false;
 		enable_pse = false;
 
-		CPU::Change_Config(configuration);	
+		CPU::Change_Config(configuration);
 		CPU_JMP(false,0,0,0);					//Setup the first cpu core
 		menu_update_dynamic();
 
@@ -3855,8 +3875,13 @@ public:
 
 		core_mode[15] = '\0';
 		if (core == "normal") {
-			cpudecoder=&CPU_Core_Normal_Run;
-		} else if (core =="simple") {
+        cpudecoder=&CPU_Core_Normal_Run;
+#if defined(C_EMSCRIPTEN)
+    } else if (core == "wasm") {
+        cpudecoder=&CPU_Core_Wasm_Run;
+        CPU_PrefetchQueueSize = 64;
+#endif
+    } else if (core =="simple") {
 #if defined(C_EMSCRIPTEN)
 			cpudecoder=&CPU_Core_Normal_Run;
 #else
@@ -3869,7 +3894,9 @@ public:
 			cpudecoder=&CPU_Core_Full_Run;
 #endif
 		} else if (core == "auto") {
-			cpudecoder=&CPU_Core_Normal_Run;
+		printf("Defaulting to WASM core\n");
+		cpudecoder=&CPU_Core_Wasm_Run;
+		    // cpudecoder=&CPU_Core_Normal_Run;
 			CPU_AutoDetermineMode|=CPU_AUTODETERMINE_CORE;
 			mainMenu.get_item("mapper_normal").check(true).refresh_item(mainMenu);
 #if defined(C_DYNAMIC_X86) || defined(C_DYNREC)
@@ -4253,7 +4280,7 @@ public:
 	}
 	~CPU(){ /* empty */};
 };
-	
+
 static CPU * test;
 
 void CPU_ShutDown(Section* sec) {
@@ -4330,8 +4357,8 @@ void DescriptorTable::SaveState( std::ostream& stream )
 	WRITE_POD( &table_base, table_base );
 	WRITE_POD( &table_limit, table_limit );
 }
- 
- 
+
+
 void DescriptorTable::LoadState( std::istream& stream )
 {
 	READ_POD( &table_base, table_base );
@@ -4395,6 +4422,9 @@ uint16_t CPU_FindDecoderType( CPU_Decoder *decoder )
 	if(0) {}
 	else if( cpudecoder == &CPU_Core_Normal_Run ) decoder_idx = 0;
 	else if( cpudecoder == &CPU_Core_Prefetch_Run ) decoder_idx = 1;
+#if defined(C_EMSCRIPTEN)
+    else if( cpudecoder == &CPU_Core_Wasm_Run ) decoder_idx = 6;
+#endif
 #if !defined(C_EMSCRIPTEN)
 	else if( cpudecoder == &CPU_Core_Simple_Run ) decoder_idx = 2;
 	else if( cpudecoder == &CPU_Core_Full_Run ) decoder_idx = 3;
@@ -4425,6 +4455,9 @@ CPU_Decoder* CPU_IndexDecoderType(uint16_t decoder_idx)
     switch (decoder_idx) {
 	    case 0: return &CPU_Core_Normal_Run;
 	    case 1: return &CPU_Core_Prefetch_Run;
+#if defined(C_EMSCRIPTEN)
+        case 6: return &CPU_Core_Wasm_Run;
+#endif
 #if !defined(C_EMSCRIPTEN)
 	    case 2: return &CPU_Core_Simple_Run;
 	    case 3: return &CPU_Core_Full_Run;
