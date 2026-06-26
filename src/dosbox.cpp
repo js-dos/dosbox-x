@@ -562,12 +562,12 @@ static Bitu Normal_Loop(void) {
 	return 0;
 }
 
-#ifdef JSDOS
+#ifdef JSDOS_X
 extern std::string cpuMetrics;
 #endif
 
 void increaseticks() { //Make it return ticksRemain and set it in the function above to remove the global variable.
-#ifdef JSDOS
+#ifdef JSDOS_X
     jsdos::increaseticks();
 #else
     static int32_t lastsleepDone = -1;
@@ -588,7 +588,7 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
 
     if (ticksNew <= ticksLast) { //lower should not be possible, only equal.
         ticksAdded = 0;
-#ifdef JSDOS
+#ifdef JSDOS_X
         int32_t timeslept = 0;
         while (timeslept < 1) {
 	  asyncify_sleep(1, true);
@@ -690,7 +690,7 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
         if (new_cmax < CPU_CYCLES_LOWER_LIMIT)
           new_cmax = CPU_CYCLES_LOWER_LIMIT;
 
-#ifdef JSDOS
+#ifdef JSDOS_X
         cpuMetrics += "r" + std::to_string(ratio) +  "|" + std::to_string(new_cmax) + "|" + std::to_string(ticksDone) + "|" + std::to_string(ticksScheduled) + " ";
 #endif
 
