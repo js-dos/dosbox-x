@@ -849,6 +849,9 @@
     <ClCompile Include="..\src\debug\debug_gui.cpp">
       <Filter>Sources\debug</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\debug\debug_mcp.cpp">
+      <Filter>Sources\debug</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\debug\debug_win32.cpp">
       <Filter>Sources\debug</Filter>
     </ClCompile>
@@ -2016,6 +2019,9 @@
       <Filter>Sources\hardware\reSID</Filter>
     </ClInclude>
     <ClInclude Include="..\src\debug\debug_inc.h">
+      <Filter>Sources\debug</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\debug\debug_mcp.h">
       <Filter>Sources\debug</Filter>
     </ClInclude>
     <ClInclude Include="..\src\debug\disasm_tables.h">
