@@ -42,8 +42,8 @@
 
 using namespace std;
 
-bool log_int21 = false;
-bool log_fileio = false;
+extern bool log_int21;
+extern bool log_fileio;
 extern bool logging_con;
 
 static bool has_LOG_Init = false;
@@ -54,7 +54,7 @@ bool logBuffSuppressConsole = false;
 bool logBuffSuppressConsoleNeedUpdate = false;
 
 int debuggerrun = 0;
-int log_dev_con = 0;
+extern int log_dev_con;
 
 _LogGroup loggrp[LOG_MAX]={{"",LOG_NORMAL},{nullptr,LOG_NORMAL}};
 FILE* debuglog = NULL;
@@ -62,7 +62,11 @@ FILE* debuglog = NULL;
 #if C_DEBUG
 static bool logBuffHasDiscarded = false;
 
+#ifdef EMSCRIPTEN
+#include <jsdos-curses.h>
+#else
 #include <curses.h>
+#endif
 
 #include <list>
 #include <string>
@@ -588,8 +592,12 @@ void DEBUG_FlushInput(void) {
 }
 
 void DBGUI_StartUp(void) {
-	mainMenu.get_item("show_console").check(true).enable(false).refresh_item(mainMenu);
-	mainMenu.get_item("clear_console").check(false).enable(false).refresh_item(mainMenu);
+        if (mainMenu.item_exists("show_console")) {
+            mainMenu.get_item("show_console").check(true).enable(false).refresh_item(mainMenu);
+        }
+        if (mainMenu.item_exists("clear_console")) {
+            mainMenu.get_item("clear_console").check(false).enable(false).refresh_item(mainMenu);
+        }
 
 	LOG(LOG_MISC,LOG_DEBUG)("DEBUG GUI startup");
 	/* Start the main window */
@@ -960,7 +968,7 @@ void LOG::EarlyInit(void) {
 	loggrp[LOG_INT10].front="INT10";
 	loggrp[LOG_SB].front="SBLASTER";
 	loggrp[LOG_DMACONTROL].front="DMA_CONTROL";
-	
+
 	loggrp[LOG_FPU].front="FPU";
 	loggrp[LOG_CPU].front="CPU";
 	loggrp[LOG_PAGING].front="PAGING";
@@ -982,7 +990,7 @@ void LOG::EarlyInit(void) {
 
 	loggrp[LOG_IO].front="IO";
 	loggrp[LOG_PCI].front="PCI";
-	
+
 	loggrp[LOG_VOODOO].front="SST";
 
 	do_LOG_stderr = control->opt_earlydebug;

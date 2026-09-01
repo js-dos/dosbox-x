@@ -54,7 +54,7 @@ dyncore_flags_t         dyncore_flags = 0;
 # define _LOG LOG
 # define UNBLOCKED_LOG LOG
 #else
-#ifndef JSDOS_X
+#if !defined(JSDOS_X) || defined(C_DEBUG)
 class UNBLOCKED_LOG : public LOG {
 public:
 	UNBLOCKED_LOG(LOG_TYPES type , LOG_SEVERITIES severity) : LOG(type,severity) { }
