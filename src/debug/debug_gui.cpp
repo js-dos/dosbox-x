@@ -678,10 +678,15 @@ void DEBUG_DrawInput(void);
 
 void DEBUG_BeginPagedContent(void) {
 #if C_DEBUG
-	if (agent_output_capture_active || DEBUG_MCP_IsCapturingOutput())
+# if defined(C_DOSBOX_AGENT)
+    if (agent_output_capture_active)
 		return;
+#endif
 
-	int maxy, maxx; getmaxyx(dbg.win_out,maxy,maxx);
+    if (DEBUG_MCP_IsCapturingOutput())
+        return;
+
+    int maxy, maxx; getmaxyx(dbg.win_out,maxy,maxx);
 
     debugPageCounter = 0;
     debugPageStopAt = maxy;
@@ -690,8 +695,13 @@ void DEBUG_BeginPagedContent(void) {
 
 void DEBUG_EndPagedContent(void) {
 #if C_DEBUG
-	if (agent_output_capture_active || DEBUG_MCP_IsCapturingOutput())
+# if defined(C_DOSBOX_AGENT)
+    if (agent_output_capture_active)
 		return;
+# endif
+
+    if (DEBUG_MCP_IsCapturingOutput())
+        return;
 
     debugPageCounter = 0;
     debugPageStopAt = 0;
@@ -705,7 +715,7 @@ bool in_debug_showmsg = false;
 
 bool IsDebuggerActive(void);
 
-#if C_DEBUG
+#if C_DEBUG && defined(C_DOSBOX_AGENT)
 bool DEBUG_AgentBeginOutputCapture(void)
 {
     if (agent_output_capture_active)
@@ -769,7 +779,7 @@ void DEBUG_ShowMsg(char const* format,...) {
     /* remove newlines if present */
     while (len > 0 && buf[len-1] == '\n') buf[--len] = 0;
 
-#if C_DEBUG
+#if C_DEBUG && defined(C_DOSBOX_AGENT)
     if (agent_output_capture_active) {
         if (!agent_output_capture.empty())
             agent_output_capture += '\n';
