@@ -51,6 +51,10 @@
 # pragma warning(disable:4065) /* switch statement no case labels */
 #endif
 
+static inline unsigned int ide_chs_cylinder(const uint16_t lba[3]) {
+    return ((unsigned int)lba[1] & 0xffu) | (((unsigned int)lba[2] & 0xffu) << 8u);
+}
+
 struct IDEEventPack {
 #if defined(HX_DOS) || (defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 	IDEEventPack() = default;
@@ -1732,7 +1736,9 @@ bool IDEATADevice::increment_current_address(Bitu count) {
                     if (heads == 16) drivehead -= 0x10;
                     /* increment cylinder */
                     if (((++lba[1])&0xFF) == 0x00) {
+                        lba[1] = 0x00;
                         if (((++lba[2])&0xFF) == 0x00) {
+                            lba[2] = 0x00;
                             return false;
                         }
                     }
@@ -3436,9 +3442,9 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
                     else if ((unsigned int)(ata->drivehead & 0xFu) >= (unsigned int)ata->heads ||
                         (unsigned int)ata->lba[0] > (unsigned int)ata->sects ||
-                        (unsigned int)(ata->lba[1] | (ata->lba[2] << 8u)) >= (unsigned int)ata->cyls) {
+                        ide_chs_cylinder(ata->lba) >= (unsigned int)ata->cyls) {
                         LOG_MSG("C/H/S %u/%u/%u out of bounds %u/%u/%u\n",
-                            (unsigned int)(ata->lba[1] | (ata->lba[2] << 8u)),
+                            ide_chs_cylinder(ata->lba),
                             (unsigned int)(ata->drivehead&0xFu),
                             (unsigned int)(ata->lba[0]),
                             (unsigned int)ata->cyls,
@@ -3450,7 +3456,7 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
 
                     sectorn = ((ata->drivehead & 0xF) * ata->sects) +
-                        (((unsigned int)ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) * ata->sects * ata->heads) +
+                        (ide_chs_cylinder(ata->lba) * ata->sects * ata->heads) +
                         ((unsigned int)ata->lba[0] - 1u);
                 }
 
@@ -3518,9 +3524,9 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
                     else if ((unsigned int)(ata->drivehead & 0xF) >= (unsigned int)ata->heads ||
                         (unsigned int)ata->lba[0] > (unsigned int)ata->sects ||
-                        (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) >= (unsigned int)ata->cyls) {
+                        ide_chs_cylinder(ata->lba) >= (unsigned int)ata->cyls) {
                         LOG_MSG("C/H/S %u/%u/%u out of bounds %u/%u/%u\n",
-                            (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)),
+                            ide_chs_cylinder(ata->lba),
                             (unsigned int)(ata->drivehead&0xF),
                             (unsigned int)ata->lba[0],
                             (unsigned int)ata->cyls,
@@ -3532,7 +3538,7 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
 
                     sectorn = ((ata->drivehead & 0xFu) * ata->sects) +
-                        (((unsigned int)ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) * ata->sects * ata->heads) +
+                        (ide_chs_cylinder(ata->lba) * ata->sects * ata->heads) +
                         ((unsigned int)ata->lba[0] - 1u);
                 }
 
@@ -3582,9 +3588,9 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
                     else if ((unsigned int)(ata->drivehead & 0xF) >= (unsigned int)ata->heads ||
                         (unsigned int)ata->lba[0] > (unsigned int)ata->sects ||
-                        (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) >= (unsigned int)ata->cyls) {
+                        ide_chs_cylinder(ata->lba) >= (unsigned int)ata->cyls) {
                         LOG_MSG("C/H/S %u/%u/%u out of bounds %u/%u/%u\n",
-                            (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)),
+                            ide_chs_cylinder(ata->lba),
                             (unsigned int)(ata->drivehead&0xFu),
                             (unsigned int)ata->lba[0],
                             (unsigned int)ata->cyls,
@@ -3596,7 +3602,7 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
 
                     sectorn = (((unsigned int)ata->drivehead & 0xFu) * ata->sects) +
-                        (((unsigned int)ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) * ata->sects * ata->heads) +
+                        (ide_chs_cylinder(ata->lba) * ata->sects * ata->heads) +
                         ((unsigned int)ata->lba[0] - 1u);
                 }
 
@@ -3659,9 +3665,9 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
                     else if ((unsigned int)(ata->drivehead & 0xF) >= (unsigned int)ata->heads ||
                         (unsigned int)ata->lba[0] > (unsigned int)ata->sects ||
-                        (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) >= (unsigned int)ata->cyls) {
+                        ide_chs_cylinder(ata->lba) >= (unsigned int)ata->cyls) {
                         LOG_MSG("C/H/S %u/%u/%u out of bounds %u/%u/%u\n",
-                            (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)),
+                            ide_chs_cylinder(ata->lba),
                             (unsigned int)(ata->drivehead&0xF),
                             (unsigned int)ata->lba[0],
                             (unsigned int)ata->cyls,
@@ -3673,7 +3679,7 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
 
                     sectorn = ((ata->drivehead & 0xF) * ata->sects) +
-                        (((unsigned int)ata->lba[1] | ((unsigned int)ata->lba[2] << 8u)) * ata->sects * ata->heads) +
+                        (ide_chs_cylinder(ata->lba) * ata->sects * ata->heads) +
                         ((unsigned int)ata->lba[0] - 1);
                 }
 
@@ -3728,9 +3734,9 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
                     else if ((unsigned int)(ata->drivehead & 0xF) >= (unsigned int)ata->heads ||
                         (unsigned int)ata->lba[0] > (unsigned int)ata->sects ||
-                        (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8)) >= (unsigned int)ata->cyls) {
+                        ide_chs_cylinder(ata->lba) >= (unsigned int)ata->cyls) {
                         LOG_MSG("C/H/S %u/%u/%u out of bounds %u/%u/%u\n",
-                            (unsigned int)(ata->lba[1] | ((unsigned int)ata->lba[2] << 8)),
+                            ide_chs_cylinder(ata->lba),
                             (unsigned int)(ata->drivehead&0xF),
                             (unsigned int)ata->lba[0],
                             (unsigned int)ata->cyls,
@@ -3742,7 +3748,7 @@ static void IDE_DelayedCommand(Bitu pk/*which IDE device*/) {
                     }
 
                     sectorn = ((unsigned int)(ata->drivehead & 0xF) * ata->sects) +
-                        (((unsigned int)ata->lba[1] | ((unsigned int)ata->lba[2] << 8)) * ata->sects * ata->heads) +
+                        (ide_chs_cylinder(ata->lba) * ata->sects * ata->heads) +
                         ((unsigned int)ata->lba[0] - 1);
                 }
 
