@@ -43,6 +43,9 @@ class DOS_Shell;
  * by "external" programs. (config) */
 extern DOS_Shell * first_shell;
 
+// The first shell owns the parent PSP for externally initiated DOS commands.
+uint16_t DOS_ShellGetPSP();
+
 const std::map<int, std::string> langcp_map {
 	{437, "en_US"},
 	//{850, "de_DE"},
@@ -106,6 +109,8 @@ private:
 	static bool hasExecutableExtension(const char* name);
 
 public:
+
+	bool free_your_own_psp = false; /* set to true if created directly, will not terminate through INT 21h, and therefore normal PSP and memory free will not happen */
 
 	DOS_Shell();
 	virtual ~DOS_Shell();

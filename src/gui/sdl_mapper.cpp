@@ -1832,7 +1832,7 @@ public:
         pos_axis_lists=new CBindList[MAXAXIS];
         neg_axis_lists=new CBindList[MAXAXIS];
         button_lists=new CBindList[MAXBUTTON];
-        hat_lists=new CBindList[4];
+        hat_lists=new CBindList[MAXHAT*4]; /* 4 binding lists (one per direction) per hat, for up to MAXHAT hats */
         Bitu i;
         for (i=0; i<MAXBUTTON; i++) {
             button_autofire[i]=0;
@@ -5977,21 +5977,21 @@ void MAPPER_StartUp() {
         item.set_text(MSG_Get("SAVE_MAPPER_FILE"));
     }
 
-    mapperMenu.displaylist_clear(mapperMenu.display_list);
+    mapperMenu.displaylist_clear(mapperMenu.unassigned_item_handle);
 
     mapperMenu.displaylist_append(
-        mapperMenu.display_list,
+        mapperMenu.unassigned_item_handle,
         mapperMenu.get_item_id_by_name("MapperMenu"));
 
     {
         mapperMenu.displaylist_append(
-            mapperMenu.get_item("MapperMenu").display_list, mapperMenu.get_item_id_by_name("ExitMapper"));
+            mapperMenu.get_item_id_by_name("MapperMenu"), mapperMenu.get_item_id_by_name("ExitMapper"));
 
         mapperMenu.displaylist_append(
-            mapperMenu.get_item("MapperMenu").display_list, mapperMenu.get_item_id_by_name("_separator_"));
+            mapperMenu.get_item_id_by_name("MapperMenu"), mapperMenu.get_item_id_by_name("_separator_"));
 
         mapperMenu.displaylist_append(
-            mapperMenu.get_item("MapperMenu").display_list, mapperMenu.get_item_id_by_name("SaveMapper"));
+            mapperMenu.get_item_id_by_name("MapperMenu"), mapperMenu.get_item_id_by_name("SaveMapper"));
     }
 #endif
 

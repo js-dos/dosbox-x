@@ -20,6 +20,7 @@
 #ifndef _DRIVES_H__
 #define _DRIVES_H__
 
+#include <cstdint>
 #include <vector>
 #include <sys/types.h>
 #include "dos_system.h"
@@ -418,7 +419,7 @@ public:
 	uint32_t getClusterSize(void);
 	uint32_t getAbsoluteSectFromChain(uint32_t startClustNum, uint32_t logicalSector,clusterChainMemory *ccm=NULL);
 	bool allocateCluster(uint32_t useCluster, uint32_t prevCluster);
-	uint32_t appendCluster(uint32_t startCluster);
+	uint32_t appendCluster(uint32_t startCluster,clusterChainMemory *ccm=NULL,clusterChainMemory *ccm_out=NULL);
 	void deleteClustChain(uint32_t startCluster, uint32_t bytePos);
 	uint32_t getFirstFreeClust(void);
 	bool directoryBrowse(uint32_t dirClustNumber, direntry *useEntry, int32_t entNum, int32_t start=0);
@@ -447,7 +448,7 @@ private:
 	char* Generate_SFN(const char *path, const char *name);
 	uint32_t getClusterValue(uint32_t clustNum);
 	void setClusterValue(uint32_t clustNum, uint32_t clustValue);
-	uint32_t getClustFirstSect(uint32_t clustNum);
+	uint32_t getClustFirstSect(uint32_t clustNum) const;
 	bool FindNextInternal(uint32_t dirClustNumber, DOS_DTA & dta, direntry *foundEntry);
 	bool getDirClustNum(const char * dir, uint32_t * clustNum, bool parDir);
 	bool getFileDirEntry(char const * const filename, direntry * useEntry, uint32_t * dirClust, uint32_t * subEntry,bool dirOk=false);

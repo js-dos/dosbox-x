@@ -39,6 +39,7 @@
 #include "pic.h"
 #include "midi.h"
 #include "bios_disk.h"
+#include "imagedisk_eltorito.h"
 #include "../dos/drives.h"
 #include "../ints/int10.h"
 
@@ -305,7 +306,6 @@ bool gui_menu_exit(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
 }
 
 extern bool toscale;
-extern const char* RunningProgram;
 static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
     in_gui = true;
 
@@ -327,7 +327,7 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
     dos.loaded_codepage = cpbak;
 
     // Comparable to the code of intro.com, but not the same! (the code of intro.com is called from within a com file)
-    shell_idle = !dos_kernel_disabled && strcmp(RunningProgram, "LOADLIN") && first_shell && (DOS_PSP(dos.psp()).GetSegment() == DOS_PSP(dos.psp()).GetParent());
+    shell_idle = !dos_kernel_disabled && RunningProgram != "LOADLIN" && first_shell && (DOS_PSP(dos.psp()).GetSegment() == DOS_PSP(dos.psp()).GetParent());
 
     int sx, sy, sw, sh, scalex, scaley, scale;
     bool fs;
@@ -540,15 +540,15 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
             item.set_text(MSG_Get("CONFIG_TOOL_EXIT"));
         }
 
-        guiMenu.displaylist_clear(guiMenu.display_list);
+        guiMenu.displaylist_clear(guiMenu.unassigned_item_handle);
 
         guiMenu.displaylist_append(
-                guiMenu.display_list,
-                guiMenu.get_item_id_by_name("ConfigGuiMenu"));
+            guiMenu.unassigned_item_handle,
+            guiMenu.get_item_id_by_name("ConfigGuiMenu"));
 
         {
             guiMenu.displaylist_append(
-                    guiMenu.get_item("ConfigGuiMenu").display_list, guiMenu.get_item_id_by_name("ExitGUI"));
+                guiMenu.get_item_id_by_name("ConfigGuiMenu"), guiMenu.get_item_id_by_name("ExitGUI"));
         }
     } else if (!shortcut || shortcutid<16) {
         {
@@ -572,10 +572,10 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
             item.set_text("");
         }
 
-        nullMenu.displaylist_clear(nullMenu.display_list);
+        nullMenu.displaylist_clear(nullMenu.unassigned_item_handle);
 
         nullMenu.displaylist_append(
-                nullMenu.display_list,
+                nullMenu.unassigned_item_handle,
                 nullMenu.get_item_id_by_name("ConfigGuiMenu"));
     }
 
@@ -3126,7 +3126,7 @@ public:
                     temp="-force -t "+temp+" \""+std::string(lTheSaveFileName)+"\"";
                     void runImgmake(const char *str);
                     runImgmake(temp.c_str());
-                    if (!dos_kernel_disabled && strcmp(RunningProgram, "LOADLIN")) {
+                    if (!dos_kernel_disabled && RunningProgram != "LOADLIN") {
                         DOS_Shell shell;
                         shell.ShowPrompt();
                     }

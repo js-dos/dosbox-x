@@ -33,6 +33,7 @@
 #include "bios_disk.h"
 #include "bios.h"
 #include "logging.h"
+#include "ide.h"
 #include "mem.h"
 #include "paging.h"
 #include "callback.h"
@@ -72,10 +73,11 @@ unsigned char exepack_handling = EXEPACK_UNPACK;
 static bool first_run=true;
 bool sync_time = false, manualtime = false;
 extern std::string log_dev_con_str;
-extern const char* RunningProgram;
 extern bool use_quick_reboot;
 #if !defined(OSFREE)
 extern bool j3100_start;
+unsigned int extdev_read_limit = 0;
+unsigned int extdev_write_limit = 0;
 #endif
 extern bool enable_config_as_shell_commands;
 extern bool checkwat, loadlang, pcibus_enable;
@@ -1485,7 +1487,7 @@ static Bitu DOS_21Handler(void) {
         case 0x25:      /* Set Interrupt Vector */
             // Magical Girl Pretty Sammy
             // Patch sound driver bugs. Swap the order of "mov sp" and "mov ss".
-            if(IS_PC98_ARCH && reg_al == 0x60 && !strcmp(RunningProgram, "SNDCDDRV")
+            if(IS_PC98_ARCH && reg_al == 0x60 && RunningProgram == "SNDCDDRV"
               && real_readd(SegValue(ds), reg_dx + 47) == 0x0fa6268b && real_readd(SegValue(ds), reg_dx + 52) == 0x0fa4168e) {
                 real_writed(SegValue(ds), reg_dx + 47, 0x0fa4168e);
                 real_writed(SegValue(ds), reg_dx + 52, 0x0fa6268b);
@@ -2651,7 +2653,7 @@ static Bitu DOS_21Handler(void) {
 #endif
                 {
                     strcat(name1, "               ");									// Simply add 15 spaces
-                    if (!strcmp(RunningProgram, "4DOS") || (reg_ip == 0xeb31 && (reg_sp == 0xc25e || reg_sp == 0xc26e))) {	// 4DOS expects it to be 0 terminated (not documented)
+                    if (RunningProgram == "4DOS" || (reg_ip == 0xeb31 && (reg_sp == 0xc25e || reg_sp == 0xc26e))) {	// 4DOS expects it to be 0 terminated (not documented)
                         name1[16] = 0;
                         MEM_BlockWrite(SegPhys(ds)+reg_dx, name1, 17);
                     } else {
@@ -4229,6 +4231,9 @@ public:
 						dos.version.major, dos.version.minor);
 			}
 		}
+
+		::extdev_read_limit = section->Get_int("ext dev read limit");
+		::extdev_write_limit = section->Get_int("ext dev write limit");
 #endif
 
 		::disk_data_rate = section->Get_int("hard drive data rate limit");
@@ -4771,8 +4776,10 @@ public:
 
 		LOG(LOG_DOSMISC,LOG_DEBUG)("   min free:     seg 0x%04x",minimum_mcb_free);
 
-#if C_IPX
+#if !defined(OSFREE)
+# if C_IPX
 		IPX_Setup(NULL);
+# endif
 #endif
 
 		DOS_SetupPrograms();
@@ -5013,6 +5020,7 @@ void DOS_ShutdownDrives() {
 	}
 }
 
+void DOS_EnableDriveIDEMenu(unsigned int idx,unsigned char ms);
 void update_pc98_function_row(unsigned char setting,bool force_redraw=false);
 void DOS_Casemap_Free();
 
@@ -5025,6 +5033,12 @@ void DOS_EnableDriveMenu(char drv) {
 		if (Drives[drv-'A']) {
 			if (dynamic_cast<isoDrive*>(Drives[drv-'A'])) cdromchange = true;
 		}
+
+		/* why even show the drive if booted into a guest OS and no drive attached? */
+		/* NTS: The vertical menu divide between A-M and N-Z might get weird depending on
+		 *      the menu API involved so to prevent that, always show drives A, B, and Z */
+		name = std::string("Drive") + drv;
+		mainMenu.get_item(name).hide((drv >= 'C' && drv != 'Z') && dos_kernel_disabled && Drives[drv-'A'] == NULL).refresh_item(mainMenu);
 
 #if defined (WIN32)
 		name = std::string("drive_") + drv + "_mountauto";
@@ -5062,7 +5076,7 @@ void DOS_EnableDriveMenu(char drv) {
 		}
 		name = std::string("drive_") + drv + "_saveimg";
 		mainMenu.get_item(name).enable(Drives[drv-'A'] != NULL && !dynamic_cast<fatDrive*>(Drives[drv-'A'])).refresh_item(mainMenu);
-		if (dos_kernel_disabled || !strcmp(RunningProgram, "LOADLIN")) {
+		if (dos_kernel_disabled || RunningProgram == "LOADLIN") {
 			bool found = false;
 			for (int i=0; i<MAX_DISK_IMAGES; i++)
 				if (imageDiskList[i] && imageDiskList[i]->ffdd && imageDiskList[i]->drvnum == drv-'A') {
@@ -5076,7 +5090,7 @@ void DOS_EnableDriveMenu(char drv) {
 
 void DOS_DoShutDown() {
 	if (test != NULL) {
-		if (strcmp(RunningProgram, "LOADLIN")) delete test;
+		if (RunningProgram != "LOADLIN") delete test;
 		test = NULL;
 	}
 
@@ -5085,6 +5099,10 @@ void DOS_DoShutDown() {
 	DOS_Casemap_Free();
 
 	for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
+
+	for (unsigned int ide=0;ide < MAX_IDE_CONTROLLERS;ide++)
+		for (unsigned int ms=0;ms < 2;ms++)
+			DOS_EnableDriveIDEMenu(ide,ms);
 }
 
 void DOS_GetMemory_reinit();
@@ -5113,6 +5131,11 @@ void DOS_Startup(Section* sec) {
 
 	force_conversion=true;
 	for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
+
+	for (unsigned int ide=0;ide < MAX_IDE_CONTROLLERS;ide++)
+		for (unsigned int ms=0;ms < 2;ms++)
+			DOS_EnableDriveIDEMenu(ide,ms);
+
 	force_conversion=false;
 }
 
@@ -5151,6 +5174,10 @@ void DOS_Init() {
 	item->enable(false).refresh_item(mainMenu);
 	item->set_text("Rescan all drives");
 	for (char drv='A';drv <= 'Z';drv++) DOS_EnableDriveMenu(drv);
+
+	for (unsigned int ide=0;ide < MAX_IDE_CONTROLLERS;ide++)
+		for (unsigned int ms=0;ms < 2;ms++)
+			DOS_EnableDriveIDEMenu(ide,ms);
 }
 
 #if !defined(OSFREE)

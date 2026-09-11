@@ -43,6 +43,7 @@
 #include "cdrom.h"
 #include "ide.h"
 #include "bios_disk.h"
+#include "imagedisk_eltorito.h"
 
 #define DOS_FILESTART 4
 
@@ -68,6 +69,7 @@ extern const char *dos_clipboard_device_name;
 #include <errno.h>
 #include <time.h>
 
+#ifndef _MACPORTS_TIME_H_
 typedef enum {
     _CLOCK_REALTIME = 0,
 #if !defined(CLOCK_REALTIME)
@@ -182,6 +184,7 @@ int clock_gettime(clockid_t clk_id, struct timespec* tp) {
 #ifdef __cplusplus
 }
 #endif
+#endif // _MACPORTS_TIME_H_
 
 #endif // __MAC_OS_X_VERSION_MIN_REQUIRED < 101200
 
@@ -223,12 +226,13 @@ uint8_t DOS_GetDefaultDrive(void) {
 }
 
 void DOS_SetDefaultDrive(uint8_t drive) {
+	if (dos_kernel_disabled) return;
 //	if (drive<=DOS_DRIVES && ((drive<2) || Drives[drive])) DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDrive(drive);
 	if (drive<DOS_DRIVES && ((drive<2) || Drives[drive])) {dos.current_drive = drive; DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDrive(drive);}
 }
 
 bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive) {
-	if(!name || *name == 0 || *name == ' ' || *name == '\n' || *name == ':') {
+    if(!name || *name == 0 || *name == ' ' || *name == '\n' || *name == ':') {
 		/* Both \0 and space are separators and
 		 * empty filenames report file not found */
 		DOS_SetError(DOSERR_FILE_NOT_FOUND);
@@ -298,7 +302,7 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 			else if (c==' ') continue; /* should be separator */
 		}
 		upname[w++]=(char)c;
-        if (((IS_PC98_ARCH && shiftjis_lead_byte(c)) || (isDBCSCP() && isKanji1(c))) && r<DOS_PATHLENGTH) {
+        if(((IS_PC98_ARCH && shiftjis_lead_byte(c)) || (isDBCSCP() && isKanji1(c))) && r < DOS_PATHLENGTH && name_int[r] != 0) {
             /* The trailing byte is NOT ASCII and SHOULD NOT be converted to uppercase like ASCII */
             upname[w++]=name_int[r++];
         }
@@ -755,10 +759,10 @@ bool DOS_FindFirst(const char * search,uint16_t attr,bool fcb_findfirst) {
 
 	// Silence CHKDSK "Invalid sub-directory entry"
 	if (fcb_findfirst && !strcmp(search+1, ":????????.???") && attr==30) {
-		char psp_name[9];
+		std::string psp_name;
 		DOS_MCB psp_mcb(dos.psp()-1);
-		psp_mcb.GetFileName(psp_name);
-		if (!strcmp(psp_name, "CHKDSK")) attr&=~DOS_ATTR_DIRECTORY;
+		psp_name = psp_mcb.GetFileName();
+		if (psp_name == "CHKDSK") attr&=~DOS_ATTR_DIRECTORY;
 	}
 
 	sdrive=drive;
@@ -925,7 +929,8 @@ bool DOS_CloseFile(uint16_t entry, bool fcb, uint8_t * refcnt) {
 		return Network_CloseFile(entry);
 # endif
 #endif
-	if (!Files[handle]) {
+
+    if ((Files && !Files[handle]) || !Files) {
 		DOS_SetError(DOSERR_INVALID_HANDLE);
 		return false;
 	}
@@ -1432,8 +1437,12 @@ bool DOS_Canonicalize(char const * const name,char * const big) {
 # define MIN(a,b) ((a) < (b) ? (a) : (b))
 # define MAX(a,b) ((a) > (b) ? (a) : (b))
 #else
-# define MIN(a,b) std::min(a,b)
-# define MAX(a,b) std::max(a,b)
+# ifndef MIN
+#  define MIN(a,b) std::min(a,b)
+# endif
+# ifndef MAX
+#  define MAX(a,b) std::max(a,b)
+# endif
 #endif
 
 /* Common routine to take larger allocation information (such as FAT32) and convert it to values
@@ -1862,7 +1871,10 @@ bool DOS_FCBOpen(uint16_t seg,uint16_t offset) {
 	/* Search for file if name has wildcards */
 	if (strpbrk(shortname,"*?")) {
 		LOG(LOG_FCB,LOG_WARN)("Wildcards in filename");
-		if (!DOS_FCBFindFirst(seg,offset)) return false;
+		if (!DOS_FCBFindFirst(seg,offset)) {
+			fcb.SetSeqData(0xff,0);
+			return false;
+		}
 		DOS_DTA find_dta(dos.tables.tempdta);
 		DOS_FCB find_fcb(RealSeg(dos.tables.tempdta),RealOff(dos.tables.tempdta));
 		char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH],file_name[9],ext[4];
@@ -1876,7 +1888,10 @@ bool DOS_FCBOpen(uint16_t seg,uint16_t offset) {
 	/* First check if the name is correct */
 	uint8_t drive;
 	char fullname[DOS_PATHLENGTH];
-	if (!DOS_MakeName(shortname,fullname,&drive)) return false;
+	if (!DOS_MakeName(shortname,fullname,&drive)) {
+		fcb.SetSeqData(0xff,0);
+		return false;
+	}
 	
 	/* Check, if file is already opened */
 	for (uint8_t i = 0;i < DOS_FILES;i++) {
@@ -1887,7 +1902,10 @@ bool DOS_FCBOpen(uint16_t seg,uint16_t offset) {
 		}
 	}
 	
-	if (!DOS_OpenFile(shortname,OPEN_READWRITE,&handle,true)) return false;
+	if (!DOS_OpenFile(shortname,OPEN_READWRITE,&handle,true)) {
+		fcb.SetSeqData(0xff,0);
+		return false;
+	}
 	fcb.FileOpen((uint8_t)handle);
 	return true;
 }
@@ -1897,6 +1915,9 @@ bool DOS_FCBClose(uint16_t seg,uint16_t offset) {
 	if(!fcb.Valid()) return false;
 	uint8_t fhandle;
 	fcb.FileClose(fhandle);
+	if (fhandle == 0xff || fhandle < 3 || fhandle >= DOS_FILES || !Files[fhandle] || !Files[fhandle]->IsOpen()) {
+		return false;
+	}
 	DOS_CloseFile(fhandle,true);
 	return true;
 }
@@ -1926,7 +1947,7 @@ uint8_t DOS_FCBRead(uint16_t seg,uint16_t offset,uint16_t recno) {
 	DOS_FCB fcb(seg,offset);
 	uint8_t fhandle,cur_rec;uint16_t cur_block,rec_size;
 	fcb.GetSeqData(fhandle,rec_size);
-	if (fhandle==0xff && rec_size!=0) {
+	if (fhandle == 0xff || fhandle < 3 || fhandle >= DOS_FILES || !Files[fhandle] || !Files[fhandle]->IsOpen()) {
 		if (!DOS_FCBOpen(seg,offset)) return FCB_READ_NODATA;
 		LOG(LOG_FCB,LOG_WARN)("Reopened closed FCB");
 		fcb.GetSeqData(fhandle,rec_size);
@@ -1956,8 +1977,8 @@ uint8_t DOS_FCBWrite(uint16_t seg,uint16_t offset,uint16_t recno) {
 	DOS_FCB fcb(seg,offset);
 	uint8_t fhandle,cur_rec;uint16_t cur_block,rec_size;
 	fcb.GetSeqData(fhandle,rec_size);
-	if (fhandle==0xffu && rec_size!=0u) {
-		if (!DOS_FCBOpen(seg,offset)) return FCB_READ_NODATA;
+	if (fhandle == 0xff || fhandle < 3 || fhandle >= DOS_FILES || !Files[fhandle] || !Files[fhandle]->IsOpen()) {
+		if (!DOS_FCBOpen(seg,offset)) return FCB_ERR_WRITE;
 		LOG(LOG_FCB,LOG_WARN)("Reopened closed FCB");
 		fcb.GetSeqData(fhandle,rec_size);
 	}
@@ -1994,6 +2015,10 @@ uint8_t DOS_FCBIncreaseSize(uint16_t seg,uint16_t offset) {
 	DOS_FCB fcb(seg,offset);
 	uint8_t fhandle,cur_rec;uint16_t cur_block,rec_size;
 	fcb.GetSeqData(fhandle,rec_size);
+	if (fhandle == 0xff || fhandle < 3 || fhandle >= DOS_FILES || !Files[fhandle] || !Files[fhandle]->IsOpen()) {
+		if (!DOS_FCBOpen(seg,offset)) return FCB_ERR_WRITE;
+		fcb.GetSeqData(fhandle,rec_size);
+	}
 	fcb.GetRecord(cur_block,cur_rec);
 	uint32_t pos=((cur_block*128u)+cur_rec)*rec_size;
 	if (!DOS_SeekFile(fhandle,&pos,DOS_SEEK_SET,true)) return FCB_ERR_WRITE; 
@@ -2440,7 +2465,12 @@ struct Opts {
     int mounttype;
     uint8_t mediaid;
     unsigned char CDROM_drive;
-    unsigned long cdrom_sector_offset;
+    /* NOT `unsigned long`: that is 4 bytes on Windows (LLP64) and 8 on
+     * Linux/macOS (LP64), and this struct is written verbatim by WRITE_POD,
+     * so its size is part of the on-disk savestate format -- widening it
+     * makes a saved state unreadable on the other platform. A CD sector
+     * offset does not need more than 32 bits. */
+    uint32_t cdrom_sector_offset;
     unsigned char floppy_emu_type;
 };
 Opts opts;
@@ -2665,6 +2695,21 @@ void POD_Load_DOS_Files( std::istream& stream )
             READ_POD( &lalloc, lalloc);
             READ_POD( &oalloc, oalloc);
             READ_POD( &opts, opts);
+#if !defined(WIN32)
+            /* The mount path is stored verbatim, so a state saved on Windows
+             * carries '\' separators. The code below unmounts the current
+             * drive and rebuilds it from this string, so without translation
+             * the new drive's base directory is a name containing a literal
+             * backslash. localDrive does not validate it, so nothing is
+             * logged and the guest simply fails every file access.
+             *
+             * Bounded by sizeof: READ_POD fills these buffers straight from
+             * the file and does not guarantee a terminator. */
+            for (size_t q = 0; q < sizeof(dinfo) && dinfo[q]; q++)
+                if (dinfo[q] == '\\') dinfo[q] = CROSS_FILESPLIT;
+            for (size_t q = 0; q < sizeof(overlaydir) && overlaydir[q]; q++)
+                if (overlaydir[q] == '\\') overlaydir[q] = CROSS_FILESPLIT;
+#endif
             if( Drives[lcv] && strcasecmp(Drives[lcv]->info, dinfo) && (!strncmp(dinfo,"local directory ",16) || !strncmp(dinfo,"CDRom ",6) || !strncmp(dinfo,"PhysFS directory ",17) || !strncmp(dinfo,"PhysFS CDRom ",13) || (!strncmp(dinfo,"isoDrive ",9) || !strncmp(dinfo,"fatDrive ",9))))
                 unmount(lcv);
             if( !Drives[lcv] ) {

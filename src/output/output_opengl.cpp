@@ -194,7 +194,11 @@ retry:
 #endif
     }
 
-    if (fixedWidth == 0 || fixedHeight == 0) 
+    bool isModeswitchSet = vga.draw.modeswitch_set;
+
+    if (isModeswitchSet)
+        fixedHeight = 0;
+    else if (fixedWidth == 0 || fixedHeight == 0)
     {
         Bitu consider_height = menu.maxwindow ? currentWindowHeight : 0;
         Bitu consider_width = menu.maxwindow ? currentWindowWidth : 0;
@@ -209,7 +213,8 @@ retry:
     /* scale the menu bar if the window is large enough */
     /* SDL drawn menus cannot coexist with 3Dfx emulation. In fact, there is a serious
      * bug in SDL1 builds that rapidly expands the vertical size of the menu every frame. */
-    if (Voodoo_OGL_GetWidth() != 0 && Voodoo_OGL_GetHeight() != 0 && Voodoo_OGL_Active() && sdl.desktop.prevent_fullscreen) {
+    
+    if (Voodoo_OGL_GetWidth() != 0 && Voodoo_OGL_GetHeight() != 0 && Voodoo_OGL_Active() && sdl.desktop.prevent_fullscreen)  {
     }
     else {
         int cw = fixedWidth, ch = fixedHeight;

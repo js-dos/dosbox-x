@@ -73,6 +73,7 @@ bool video_debug_overlay = false;
 bool skip_encoding_unchanged_frames = false, show_recorded_filename = true;
 std::string pathvid = "", pathwav = "", pathmtw = "", pathmid = "", pathopl = "", pathscr = "", pathprt = "", pathpcap = "";
 bool systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
+extern std::string working_dir;
 
 FILE* pcap_fp = NULL;
 
@@ -334,12 +335,12 @@ void ffmpeg_flushout() {
 /* FIXME: This needs to be an enum */
 bool native_zmbv = false;
 bool export_ffmpeg = false;
+std::string export_ffmpeg_codec;
 
 std::string capturedir;
 extern std::string savefilename;
 extern bool showdbcs, use_save_file, noremark_save_state, force_load_state;
 extern unsigned int hostkeyalt, sendkeymap;
-extern const char* RunningProgram;
 Bitu CaptureState = 0;
 
 void OPL_SaveRawEvent(bool pressed), SetGameState_Run(int value), ResolvePath(std::string& in);
@@ -549,7 +550,7 @@ std::string GetCaptureFilePath(const char * type,const char * ext) {
 			return {};
 		}
 	}
-	strcpy(file_start,RunningProgram);
+	strcpy(file_start,RunningProgram.c_str());
 	lowcase(file_start);
 	for (char *s=(char*)file_start;*s;s++) *s = filtercapname(*s);
 	strcat(file_start,"_");
@@ -595,7 +596,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 			return nullptr;
 		}
 	}
-	strcpy(file_start,RunningProgram);
+	strcpy(file_start,RunningProgram.c_str());
 	lowcase(file_start);
 	for (char *s=(char*)file_start;*s;s++) *s = filtercapname(*s);
 	strcat(file_start,"_");
@@ -1200,7 +1201,14 @@ skip_shot:
 			}
 
 			ffmpeg_aud_codec = avcodec_find_encoder(AV_CODEC_ID_AAC);
-			ffmpeg_vid_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+
+			if (export_ffmpeg_codec == "h265")
+				ffmpeg_vid_codec = avcodec_find_encoder(AV_CODEC_ID_H265);
+			else if (export_ffmpeg_codec == "h264")
+				ffmpeg_vid_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+			else
+				ffmpeg_vid_codec = NULL;
+
 			if (ffmpeg_aud_codec == NULL || ffmpeg_vid_codec == NULL) {
 				LOG_MSG("H.264 or AAC encoder not available");
 				goto skip_video;
@@ -1289,10 +1297,27 @@ skip_shot:
 			#else
 			ffmpeg_aud_ctx->ch_layout = AV_CHANNEL_LAYOUT_STEREO;
 			#endif
-
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 13, 100)
+            // Legacy support for FFmpeg not supporting avcodec_get_supported_config()
 			if (ffmpeg_aud_codec->sample_fmts != NULL)
 				ffmpeg_aud_ctx->sample_fmt = (ffmpeg_aud_codec->sample_fmts)[0];
-			else
+#else
+            // For FFmpeg supporting avcodec_get_supported_config()
+            const enum AVSampleFormat* formats = NULL;
+
+            const int ret = avcodec_get_supported_config(
+                NULL,
+                ffmpeg_aud_codec,
+                AV_CODEC_CONFIG_SAMPLE_FORMAT,
+                0,
+                reinterpret_cast<const void**>(&formats),
+                NULL
+            );
+
+            if(ret >= 0 && formats != NULL)
+                ffmpeg_aud_ctx->sample_fmt = formats[0];
+#endif
+            else
 				ffmpeg_aud_ctx->sample_fmt = AV_SAMPLE_FMT_FLT;
 
 			if (avcodec_open2(ffmpeg_aud_ctx,ffmpeg_aud_codec,NULL) < 0) {
@@ -2142,7 +2167,7 @@ void ParseAutoSaveArg(std::string arg) {
 void CAPTURE_Init() {
 	DOSBoxMenu::item *item;
 
-	LOG(LOG_MISC,LOG_DEBUG)("Initializing screenshot and A/V capture system");
+	LOG(LOG_MISC,LOG_DEBUG)("HARDWARE: Initializing screenshot and A/V capture system");
 
 	Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
 	assert(section != NULL);
@@ -2150,7 +2175,19 @@ void CAPTURE_Init() {
 	// grab and store capture path
 	Prop_path *proppath = section->Get_path("captures");
 	assert(proppath != NULL);
-	capturedir = proppath->realpath;
+    std::string captures_value = proppath->GetValue().ToString();
+    if(captures_value.empty()) {
+        LOG_MSG("HARDWARE: CAPTURE_Init(): Capture path is empty, using working directory.");
+        capturedir = working_dir;
+    }
+    else if(Cross::IsPathAbsolute(captures_value)) {
+         capturedir = captures_value; // use the absolute path as is
+    }
+    else {
+         capturedir = working_dir + CROSS_FILESPLIT + captures_value;
+    }
+    LOG(LOG_MISC, LOG_DEBUG)("HARDWARE: Capture directory set to %s", capturedir.c_str());
+
     SetGameState_Run(section->Get_int("saveslot")-1);
     noremark_save_state = !section->Get_bool("saveremark");
     video_debug_overlay = section->Get_bool("video debug at startup");
@@ -2220,8 +2257,21 @@ void CAPTURE_Init() {
 		LOG_MSG("Capture format is MPEGTS H.264+AAC");
 		native_zmbv = false;
 		export_ffmpeg = true;
+		export_ffmpeg_codec = "h264";
 #else
 		LOG_MSG("MPEGTS H.264+AAC not compiled in to this DOSBox-X binary. Using AVI+ZMBV");
+		native_zmbv = true;
+		export_ffmpeg = false;
+#endif
+	}
+	else if (capfmt == "mpegts-h265") {
+#if (C_AVCODEC)
+		LOG_MSG("Capture format is MPEGTS H.265+AAC");
+		native_zmbv = false;
+		export_ffmpeg = true;
+		export_ffmpeg_codec = "h265";
+#else
+		LOG_MSG("MPEGTS H.265+AAC not compiled in to this DOSBox-X binary. Using AVI+ZMBV");
 		native_zmbv = true;
 		export_ffmpeg = false;
 #endif
@@ -2230,10 +2280,12 @@ void CAPTURE_Init() {
 		LOG_MSG("USING AVI+ZMBV");
 		native_zmbv = true;
 		export_ffmpeg = false;
+		export_ffmpeg_codec.clear();
 	}
 	else {
 		LOG_MSG("Unknown capture format, using AVI+ZMBV");
 		native_zmbv = true;
+		export_ffmpeg_codec.clear();
 		export_ffmpeg = false;
 	}
 
@@ -2287,7 +2339,8 @@ void update_capture_fmt_menu(void) {
 # if (C_SSHOT)
     mainMenu.get_item("capture_fmt_avi_zmbv").check(native_zmbv).refresh_item(mainMenu);
 #  if (C_AVCODEC)
-    mainMenu.get_item("capture_fmt_mpegts_h264").check(export_ffmpeg).refresh_item(mainMenu);
+    mainMenu.get_item("capture_fmt_mpegts_h264").check(export_ffmpeg && export_ffmpeg_codec == "h264").refresh_item(mainMenu);
+    mainMenu.get_item("capture_fmt_mpegts_h265").check(export_ffmpeg && export_ffmpeg_codec == "h265").refresh_item(mainMenu);
 #  endif
 # endif
 }
@@ -2296,6 +2349,7 @@ void update_capture_fmt_menu(void) {
 bool capture_fmt_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;
 
+    std::string new_export_ffmpeg_codec = export_ffmpeg_codec;
     const char *ts = menuitem->get_name().c_str();
     Bitu old_CaptureState = CaptureState;
     bool new_native_zmbv = native_zmbv;
@@ -2308,20 +2362,28 @@ bool capture_fmt_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const 
     if (!strcmp(ts,"mpegts_h264")) {
         new_native_zmbv = false;
         new_export_ffmpeg = true;
+        new_export_ffmpeg_codec = "h264";
+    }
+    else if (!strcmp(ts,"mpegts_h265")) {
+        new_native_zmbv = false;
+        new_export_ffmpeg = true;
+        new_export_ffmpeg_codec = "h265";
     }
     else
 #endif
     {
         new_native_zmbv = true;
         new_export_ffmpeg = false;
+        export_ffmpeg_codec.clear();
     }
 
-    if (native_zmbv != new_native_zmbv || export_ffmpeg != new_export_ffmpeg) {
+    if (native_zmbv != new_native_zmbv || export_ffmpeg != new_export_ffmpeg || export_ffmpeg_codec != new_export_ffmpeg_codec) {
         void CAPTURE_StopCapture(void);
         CAPTURE_StopCapture();
 
         native_zmbv = new_native_zmbv;
         export_ffmpeg = new_export_ffmpeg;
+        export_ffmpeg_codec = new_export_ffmpeg_codec;
     }
 
     if (old_CaptureState & CAPTURE_VIDEO) {
@@ -2334,4 +2396,3 @@ bool capture_fmt_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const 
 #endif
     return true;
 }
-

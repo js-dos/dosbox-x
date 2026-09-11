@@ -1424,64 +1424,86 @@ void DOS_Shell::CMD_POPD(char * args) {
     olddirs.pop_back();
 }
 
-void DOS_Shell::CMD_CHDIR(char * args) {
-	HELP("CHDIR");
-	StripSpaces(args);
-	char sargs[CROSS_LEN];
-	if (*args && !DOS_GetSFNPath(args,sargs,false)) {
-		WriteOut(MSG_Get("SHELL_ILLEGAL_PATH"));
-		return;
-	}
-	uint8_t drive = DOS_GetDefaultDrive()+'A';
-	char dir[DOS_PATHLENGTH];
-	if (!*args) {
-		DOS_GetCurrentDir(0,dir,true);
-		WriteOut("%c:\\",drive);
-		WriteOut_NoParsing(dir, true);
-		WriteOut("\n");
-	} else if(strlen(args) == 2 && args[1]==':') {
-		uint8_t targetdrive = (args[0] | 0x20)-'a' + 1;
-		unsigned char targetdisplay = *reinterpret_cast<unsigned char*>(&args[0]);
-        if(!DOS_GetCurrentDir(targetdrive,dir,true)) { // verify that this should be true
-			if(drive == 'Z') {
-				WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"),toupper(targetdisplay));
-			} else {
-				WriteOut(MSG_Get("SHELL_ILLEGAL_PATH"));
-			}
-			return;
-		}
-		WriteOut("%c:\\",toupper(targetdisplay));
-		WriteOut_NoParsing(dir, true);
-		WriteOut("\n");
-		if(drive == 'Z')
-			WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT"),toupper(targetdisplay));
-	} else if (!DOS_ChangeDir(sargs)) {
-		/* Changedir failed. Check if the filename is longer than 8 and/or contains spaces */
+void DOS_Shell::CMD_CHDIR(char* args) {
+    HELP("CHDIR");
+    StripSpaces(args);
+    char sargs[CROSS_LEN];
 
-		std::string temps(args),slashpart;
-		std::string::size_type separator = temps.find_first_of("\\/");
-		if(!separator) {
-			slashpart = temps.substr(0,1);
-			temps.erase(0,1);
-		}
-        separator = temps.find_first_of("\"");
-        if(separator != std::string::npos) temps.erase(separator);
-		separator = temps.rfind('.');
-		if(separator != std::string::npos) temps.erase(separator);
-		separator = temps.find(' ');
-		if(separator != std::string::npos) {/* Contains spaces */
-			temps.erase(separator);
-			if(temps.size() >6) temps.erase(6);
-			temps += "~1";
-			WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT_2"),temps.insert(0,slashpart).c_str());
-		} else {
-			if (drive == 'Z') {
-				WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT_3"));
-			} else {
-				WriteOut(MSG_Get("SHELL_CMD_CHDIR_ERROR"),args);
-			}
-		}
-	}
+    uint8_t drive = DOS_GetDefaultDrive() + 'A';
+    char dir[DOS_PATHLENGTH];
+
+    if(!*args) {
+        // Display the current directory of the active drive
+        DOS_GetCurrentDir(0, dir, true);
+        WriteOut("%c:\\", drive);
+        WriteOut_NoParsing(dir, true);
+        WriteOut("\n");
+    }
+    else if(strlen(args) == 2 && args[1] == ':') {
+        // Display the current directory of the specified drive (e.g., "C:")
+        uint8_t targetdrive = (args[0] | 0x20) - 'a' + 1;
+        unsigned char targetdisplay = *reinterpret_cast<unsigned char*>(&args[0]);
+
+        if(!DOS_GetCurrentDir(targetdrive, dir, true)) {
+            if(drive == 'Z') {
+                WriteOut(MSG_Get("SHELL_EXECUTE_DRIVE_NOT_FOUND"), toupper(targetdisplay));
+            }
+            else {
+                WriteOut(MSG_Get("SHELL_ILLEGAL_PATH"));
+            }
+            return;
+        }
+        WriteOut("%c:\\", toupper(targetdisplay));
+        WriteOut_NoParsing(dir, true);
+        WriteOut("\n");
+
+        if(drive == 'Z')
+            WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT"), toupper(targetdisplay));
+    }
+    else {
+        // Try to change directory using the raw input (e.g., "sed") first
+        bool cddone = DOS_ChangeDir(args);
+
+        if(!cddone) {
+            // If the raw path failed (e.g., LFN/long folder names), try resolving via SFN (8x3) path conversion
+            if(DOS_GetSFNPath(args, sargs, false)) {
+                cddone = DOS_ChangeDir(sargs);
+            }
+        }
+
+        if(!cddone) {
+            // Change directory failed. Check if the filename is longer than 8 and/or contains spaces.
+            std::string temps(args), slashpart;
+            std::string::size_type separator = temps.find_first_of("\\/");
+            if(separator == 0) { // Fix: Safely verify if slash is at index 0
+                slashpart = temps.substr(0, 1);
+                temps.erase(0, 1);
+            }
+
+            separator = temps.find_first_of("\"");
+            if(separator != std::string::npos) temps.erase(separator);
+
+            separator = temps.rfind('.');
+            if(separator != std::string::npos) temps.erase(separator);
+
+            separator = temps.find(' ');
+            if(separator != std::string::npos) {
+                // Handle hint generation for directory paths containing spaces
+                temps.erase(separator);
+                if(temps.size() > 6) temps.erase(6);
+                temps += "~1";
+                WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT_2"), temps.insert(0, slashpart).c_str());
+            }
+            else {
+                if(drive == 'Z') {
+                    WriteOut(MSG_Get("SHELL_CMD_CHDIR_HINT_3"));
+                }
+                else {
+                    WriteOut(MSG_Get("SHELL_CMD_CHDIR_ERROR"), args);
+                }
+            }
+        }
+    }
 }
 
 #if !defined(OSFREE)
@@ -2340,10 +2362,10 @@ struct copysource {
 void DOS_Shell::CMD_COPY(char * args) {
 	HELP("COPY");
 	static std::string defaulttarget = ".";
-    const char char_yes_upper = toupper(char_yes);
-    const char char_no_upper = toupper(char_no);
-    const char ch_a = MSG_Get("SHELL_ALLFILES_CHAR")[0];
-    const char ch_A = toupper(ch_a);
+	const char char_yes_upper = toupper(char_yes);
+	const char char_no_upper = toupper(char_no);
+	const char ch_a = MSG_Get("SHELL_ALLFILES_CHAR")[0];
+	const char ch_A = toupper(ch_a);
 	StripSpaces(args);
 	/* Command uses dta so set it to our internal dta */
 	RealPt save_dta=dos.dta();
@@ -2418,21 +2440,21 @@ void DOS_Shell::CMD_COPY(char * args) {
 				}
 			}
 			if (!has_drive_spec  && !strpbrk(source_p,"*?") ) { //doubt that fu*\*.* is valid
-                char spath[DOS_PATHLENGTH];
-                if (DOS_GetSFNPath(source_p,spath,false)) {
+				char spath[DOS_PATHLENGTH];
+				if (DOS_GetSFNPath(source_p,spath,false)) {
 					bool root=false;
 					if (strlen(spath)==3&&spath[1]==':'&&spath[2]=='\\') {
 						root=true;
 						strcat(spath, "*.*");
 					}
 					if (DOS_FindFirst(spath,0xffff & ~DOS_ATTR_VOLUME)) {
-                    dta.GetResult(name,lname,size,hsize,date,time,attr);
-					if (attr & DOS_ATTR_DIRECTORY || root)
-						strcat(source_x,"\\*.*");
+						dta.GetResult(name,lname,size,hsize,date,time,attr);
+						if (attr & DOS_ATTR_DIRECTORY || root)
+							strcat(source_x,"\\*.*");
 					}
 				}
 			}
-            std::string source_xString = std::string(source_x);
+			std::string source_xString = std::string(source_x);
 			sources.push_back(copysource(source_xString,(plus)?true:false));
 			source_p = plus;
 		} while(source_p && *source_p);
@@ -2524,7 +2546,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 		char * ext = nullptr;
 		size_t replacementOffset = 0;
 		if (pathTarget[pathTargetLen-1]!='\\') {
-				// only if it's not a directory
+			// only if it's not a directory
 			ext = strchr(pathTarget, '.');
 			if (ext > pathTarget) { // no possible substitution
 				if (ext[-1] == '*') {
@@ -2581,20 +2603,20 @@ void DOS_Shell::CMD_COPY(char * args) {
 			dta.GetResult(name,lname,size,hsize,date,time,attr);
 
 			if ((attr & DOS_ATTR_DIRECTORY)==0) {
-                uint16_t ftime,fdate;
+				uint16_t ftime,fdate;
 
 				strcpy(nameSource,pathSource);
 				strcat(nameSource,name);
 
 				// Open Source
 				if (DOS_OpenFile(nameSource,0,&sourceHandle)) {
-                    // record the file date/time
-                    bool ftdvalid = DOS_GetFileDate(sourceHandle, &ftime, &fdate);
-                    if (!ftdvalid) LOG_MSG("WARNING: COPY cannot obtain file date/time");
+					// record the file date/time
+					bool ftdvalid = DOS_GetFileDate(sourceHandle, &ftime, &fdate);
+					if (!ftdvalid) LOG_MSG("WARNING: COPY cannot obtain file date/time");
 
 					// Create Target or open it if in concat mode
 					strcpy(nameTarget,q);
-                    strcat(nameTarget,pathTarget);
+					strcat(nameTarget,pathTarget);
 
 					if (ext) { // substitute parts if necessary
 						if (!ext[-1]) { // substitute extension
@@ -2607,8 +2629,8 @@ void DOS_Shell::CMD_COPY(char * args) {
 						}
 					}
 
-                    if (nameTarget[strlen(nameTarget)-1]=='\\') strcat(nameTarget,uselfn?lname:name);
-                    strcat(nameTarget,q);
+					if (nameTarget[strlen(nameTarget)-1]=='\\') strcat(nameTarget,uselfn?lname:name);
+					strcat(nameTarget,q);
 
 					//Special variable to ensure that copy * a_file, where a_file is not a directory concats.
 					bool special = second_file_of_current_source && target_is_file && strchr(target.filename.c_str(), '*')==NULL;
@@ -2649,25 +2671,25 @@ void DOS_Shell::CMD_COPY(char * args) {
 						}
 						if (!exist&&size) {
 							int drive=strlen(nameTarget)>1&&(nameTarget[1]==':'||nameTarget[2]==':')?(toupper(nameTarget[nameTarget[0]=='"'?1:0])-'A'):-1;
-                            if(drive >= 0 && Drives[drive]) {
-                                uint16_t bytes_sector; uint8_t sectors_cluster; uint16_t total_clusters; uint16_t free_clusters;
-                                uint32_t bytes32 = 0, sectors32 = 0, clusters32 = 0, free32 = 0;
-                                bool no_free_space = true;
-                                rsize = true;
-                                freec = 0;
-                                if(dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10)) {
-                                    Drives[drive]->AllocationInfo32(&bytes32, &sectors32, &clusters32, &free32);
-                                    no_free_space = (uint64_t)bytes32 * (uint64_t)sectors32 * (uint64_t)free32 < size ? true : false;
-                                    //LOG_MSG("drive=%u, no_free_space = %d bytes32=%u, sectors32=%u, free32 =%u, free_space=%u, size=%u",
-                                    //  drive, no_free_space ? 1 : 0, bytes32, sectors32, free32, bytes32*sectors32*free32, size);
-                                }
-                                if(bytes32 == 0 || sectors32 == 0 || dos.version.major < 7 || (dos.version.major == 7 && dos.version.minor < 10)) {
-                                    Drives[drive]->AllocationInfo(&bytes_sector, &sectors_cluster, &total_clusters, &free_clusters);
-                                    no_free_space = (Bitu)bytes_sector* (Bitu)sectors_cluster* (Bitu)(freec ? freec : free_clusters) < size ? true : false;
-                                    //LOG_MSG("no_free_space = %d bytes=%u, sectors=%u, free =%u, free_space=%u, size=%u",
-                                    // no_free_space ? 1 : 0, bytes_sector, sectors_cluster, freec, bytes_sector*sectors_cluster*free_clusters, size);
-                                }
-                                rsize = false;
+							if(drive >= 0 && Drives[drive]) {
+								uint16_t bytes_sector; uint8_t sectors_cluster; uint16_t total_clusters; uint16_t free_clusters;
+								uint32_t bytes32 = 0, sectors32 = 0, clusters32 = 0, free32 = 0;
+								bool no_free_space = true;
+								rsize = true;
+								freec = 0;
+								if(dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10)) {
+									Drives[drive]->AllocationInfo32(&bytes32, &sectors32, &clusters32, &free32);
+									no_free_space = (uint64_t)bytes32 * (uint64_t)sectors32 * (uint64_t)free32 < size ? true : false;
+									//LOG_MSG("drive=%u, no_free_space = %d bytes32=%u, sectors32=%u, free32 =%u, free_space=%u, size=%u",
+									//  drive, no_free_space ? 1 : 0, bytes32, sectors32, free32, bytes32*sectors32*free32, size);
+								}
+								if(bytes32 == 0 || sectors32 == 0 || dos.version.major < 7 || (dos.version.major == 7 && dos.version.minor < 10)) {
+									Drives[drive]->AllocationInfo(&bytes_sector, &sectors_cluster, &total_clusters, &free_clusters);
+									no_free_space = (Bitu)bytes_sector* (Bitu)sectors_cluster* (Bitu)(freec ? freec : free_clusters) < size ? true : false;
+									//LOG_MSG("no_free_space = %d bytes=%u, sectors=%u, free =%u, free_space=%u, size=%u",
+									// no_free_space ? 1 : 0, bytes_sector, sectors_cluster, freec, bytes_sector*sectors_cluster*free_clusters, size);
+								}
+								rsize = false;
 								if (no_free_space) {
 									WriteOut(MSG_Get("SHELL_CMD_COPY_NOSPACE"), uselfn?lname:name);
 									DOS_CloseFile(sourceHandle);
@@ -2681,8 +2703,8 @@ void DOS_Shell::CMD_COPY(char * args) {
 					if (oldsource.concat || DOS_CreateFile(nameTarget,0,&targetHandle)) {
 						uint32_t dummy=0;
 
-                        if (DOS_FindDevice(name) == DOS_DEVICES && !DOS_SetFileDate(targetHandle, ftime, fdate))
-                            LOG_MSG("WARNING: COPY unable to apply date/time to dest");
+						if (DOS_FindDevice(name) == DOS_DEVICES && !DOS_SetFileDate(targetHandle, ftime, fdate))
+							LOG_MSG("WARNING: COPY unable to apply date/time to dest");
 
 						//In concat mode. Open the target and seek to the eof
 						if (!oldsource.concat || (DOS_OpenFile(nameTarget,OPEN_READWRITE,&targetHandle) &&
@@ -2726,11 +2748,11 @@ void DOS_Shell::CMD_COPY(char * args) {
 #endif
 							if (!DOS_CloseFile(targetHandle)) failed=true;
 							if (failed)
-                                WriteOut(MSG_Get("SHELL_CMD_COPY_ERROR"),uselfn?lname:name);
-                            else if (strcmp(name,lname)&&uselfn)
-                                WriteOut(" %s [%s]\n",lname,name);
-                            else
-                                WriteOut(" %s\n",uselfn?lname:name);
+								WriteOut(MSG_Get("SHELL_CMD_COPY_ERROR"),uselfn?lname:name);
+							else if (strcmp(name,lname)&&uselfn)
+								WriteOut(" %s [%s]\n",lname,name);
+							else
+								WriteOut(" %s\n",uselfn?lname:name);
 							if(!source.concat && !special && !failed) count++; //Only count concat files once
 						} else {
 							DOS_CloseFile(sourceHandle);
@@ -3849,11 +3871,18 @@ bool set_ver(char *s);
 void DOS_Shell::CMD_VER(char *args) {
 	HELP("VER");
 	bool optR=ScanCMDBool(args,"R");
+    bool optV=ScanCMDBool(args,"V");
 	if (char* rem = ScanCMDRemain(args)) {
 		WriteOut(MSG_Get("SHELL_ILLEGAL_SWITCH"), rem);
 		return;
 	}
-	if(!optR && args && *args) {
+    if (optV)
+    {
+        WriteOut("%d.%02d\n", dos.version.major, dos.version.minor);
+        if (optR) WriteOut("%s / %s / %d-bit", GIT_COMMIT_HASH, OS_PLATFORM_LONG, OS_BIT_INT);
+        return;
+    }
+	if (!optR && args && *args) {
 		char* word = StripWord(args);
 		if(strcasecmp(word,"set")) {
 			if (*word=='=') word=trim(word+1);
@@ -4198,6 +4227,7 @@ void DOS_Shell::CMD_ADDKEY(char * args){
 #  if C_DEBUG
 extern bool tohide;
 bool debugger_break_on_exec = false;
+unsigned int debugger_box_depth = 0;
 void DEBUG_Enable_Handler(bool pressed);
 void DOS_Shell::CMD_DEBUGBOX(char * args) {
     while (*args == ' ') args++;
@@ -4214,9 +4244,15 @@ void DOS_Shell::CMD_DEBUGBOX(char * args) {
 		args[0]='/';
 		HELP("DEBUGBOX");
 		return;
-	}
+    }
     debugger_break_on_exec = true;
+#if defined(C_DOSBOX_AGENT)
+    ++debugger_box_depth;
+#endif
     DoCommand((char *)argv.c_str());
+#if defined(C_DOSBOX_AGENT)
+    --debugger_box_depth;
+#endif
     debugger_break_on_exec = false;
 }
 # endif

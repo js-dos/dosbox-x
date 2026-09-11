@@ -19,6 +19,7 @@
 
 #include "dosbox.h"
 
+#if !defined(OSFREE)
 #if C_IPX
 
 #include <string.h>
@@ -1015,10 +1016,10 @@ public:
 			WriteOut("IPXNET [ CONNECT | DISCONNECT | STARTSERVER | STOPSERVER | PING | HELP |\n         STATUS ]\n\n");
 			return;
 		}
-		
-		if(cmd->FindCommand(1, temp_line)) {
+
+		if(cmd->FindCommand(1, temp_line, /*remove*/true)) {
 			if(strcasecmp("help", temp_line.c_str()) == 0) {
-				if(!cmd->FindCommand(2, temp_line)) {
+				if(!cmd->FindCommand(1, temp_line, /*remove*/true)) {
 					WriteOut("The following are valid IPXNET commands:\n\n");
 					WriteOut("IPXNET CONNECT        IPXNET DISCONNECT       IPXNET STARTSERVER\n");
 					WriteOut("IPXNET STOPSERVER     IPXNET PING             IPXNET STATUS\n\n");
@@ -1038,7 +1039,7 @@ public:
 						return;
 					}
 					bool startsuccess;
-					if(!cmd->FindCommand(2, temp_line)) {
+					if(!cmd->FindCommand(1, temp_line, /*remove*/true)) {
 						udpPort = 213;
 					} else {
 						udpPort = (unsigned int)strtol(temp_line.c_str(), NULL, 10);
@@ -1074,26 +1075,26 @@ public:
 					WriteOut("IPX Tunneling Client already connected.\n");
 					return;
 				}
-				if(!cmd->FindCommand(2, temp_line)) {
+				if(!cmd->FindCommand(1, temp_line, /*remove*/true)) {
 					WriteOut("IPX Server address not specified.\n");
 					return;
 				}
 				strcpy(strHost, temp_line.c_str());
 
-				if(!cmd->FindCommand(3, temp_line)) {
+				if(!cmd->FindCommand(1, temp_line, /*remove*/true)) {
 					udpPort = 213;
 				} else {
 					udpPort = (unsigned int)strtol(temp_line.c_str(), NULL, 10);
 				}
 
 				if(ConnectToServer(strHost)) {
-                	WriteOut("IPX Tunneling Client connected to server at %s.\n", strHost);
+					WriteOut("IPX Tunneling Client connected to server at %s.\n", strHost);
 				} else {
 					WriteOut("IPX Tunneling Client failed to connect to server at %s.\n", strHost);
 				}
 				return;
 			}
-			
+
 			if(strcasecmp("disconnect", temp_line.c_str()) == 0) {
 				if(!incomingPacket.connected) {
 					WriteOut("IPX Tunneling Client not connected.\n");
@@ -1359,4 +1360,6 @@ void IPX_Init() {
 	AddVMEventFunction(VM_EVENT_DOS_EXIT_KERNEL,AddVMEventFunctionFuncPair(IPX_DOSExit));
 }
 
-#endif
+#endif // C_IPX
+#endif // !defined(OSFREE)
+

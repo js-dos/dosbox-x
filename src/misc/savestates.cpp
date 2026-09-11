@@ -47,7 +47,6 @@ extern unsigned int page;
 extern int autosave_last[10], autosave_count;
 extern std::string autosave_name[10], savefilename;
 extern bool use_save_file, clearline, dos_kernel_disabled;
-extern const char* RunningProgram;
 bool auto_save_state=false;
 bool noremark_save_state = false;
 bool force_load_state = false;
@@ -55,6 +54,7 @@ std::string saveloaderr="";
 void refresh_slots(void);
 void GFX_LosingFocus(void), GFX_ReleaseMouse(void), MAPPER_ReleaseAllKeys(void), resetFontSize(void);
 bool systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
+extern std::string working_dir;
 
 namespace
 {
@@ -77,6 +77,10 @@ namespace
 				return "MCH_HERC";
 			case MCH_CGA:
 				return "MCH_CGA";
+			case MCH_OLIVETTI:
+				return "MCH_OLIVETTI";
+			case MCH_3270PC:
+				return "MCH_3270PC";
 			case MCH_TANDY:
 				return "MCH_TANDY";
 			case MCH_PCJR:
@@ -174,7 +178,7 @@ namespace
 
 		try
 		{
-			LOG_MSG("Saving state to slot: %d", (int)currentSlot + 1);
+			//LOG_MSG("Saving state to slot: %d", (int)currentSlot + 1);
 			SaveState::instance().save(currentSlot);
 			if (page!=GetGameState()/SaveState::SLOT_COUNT)
 				SetGameState((int)currentSlot);
@@ -199,7 +203,7 @@ namespace
 
 		try
 		{
-			LOG_MSG("Loading state from slot: %d", (int)currentSlot + 1);
+			//LOG_MSG("Loading state from slot: %d", (int)currentSlot + 1);
 			SaveState::instance().load(currentSlot);
 #if defined(USE_TTF)
 			if (ttf.inUse) resetFontSize();
@@ -246,7 +250,7 @@ namespace
 	void LastAutoSaveSlot(bool pressed) {
 		if (!pressed) return;
 		int index=0;
-		for (int i=1; i<10&&i<=autosave_count; i++) if (autosave_name[i].size()&&!strcasecmp(RunningProgram, autosave_name[i].c_str())) index=i;
+		for (int i=1; i<10&&i<=autosave_count; i++) if (autosave_name[i].size()&&!strcasecmp(RunningProgram.c_str(), autosave_name[i].c_str())) index=i;
 		if (autosave_last[index]<1) return;
 
 		char name[6]="slot0";
@@ -462,27 +466,18 @@ void SaveState::save(size_t slot) { //throw (Error)
 	int errclose;
 	std::string path;
 	bool Get_Custom_SaveDir(std::string& savedir);
-	if(Get_Custom_SaveDir(path)) {
-		path+=CROSS_FILESPLIT;
-	} else {
-		extern std::string capturedir;
-		const size_t last_slash_idx = capturedir.find_last_of("\\/");
-		if (std::string::npos != last_slash_idx) {
-			path = capturedir.substr(0, last_slash_idx);
-		} else {
-			path = ".";
-		}
-		path+=CROSS_FILESPLIT;
-		path+="save";
-		Cross::CreateDir(path);
-		path+=CROSS_FILESPLIT;
-	}
+	if(!Get_Custom_SaveDir(path)) {
+        path = working_dir + CROSS_FILESPLIT + "save";
+        Cross::CreateDir(path);
+    }
+    path += CROSS_FILESPLIT;
 
 	std::string temp, save2;
 	std::stringstream slotname;
 	slotname << slot+1;
 	temp=path;
 	std::string save=use_save_file&&savefilename.size()?savefilename:temp+slotname.str()+".sav";
+    LOG_MSG("Saving state to slot: %d (%s)", (int)slot + 1, save.c_str());
 
 	zipFile zf;
 	{
@@ -610,24 +605,14 @@ void SaveState::load(size_t slot) const { //throw (Error)
 #else
         SDL_PauseAudio(0);
 #endif
-	extern const char* RunningProgram;
 	std::string path;
 	int err;
 	bool Get_Custom_SaveDir(std::string& savedir);
-	if(Get_Custom_SaveDir(path)) {
-		path+=CROSS_FILESPLIT;
-	} else {
-		extern std::string capturedir;
-		const size_t last_slash_idx = capturedir.find_last_of("\\/");
-		if (std::string::npos != last_slash_idx) {
-			path = capturedir.substr(0, last_slash_idx);
-		} else {
-			path = ".";
-		}
-		path += CROSS_FILESPLIT;
-		path +="save";
-		path += CROSS_FILESPLIT;
-	}
+	if(!Get_Custom_SaveDir(path)) {
+        path = working_dir + CROSS_FILESPLIT + "save";
+    }
+    path += CROSS_FILESPLIT;
+
 	std::string temp;
 	temp = path;
 	std::stringstream slotname;
@@ -642,6 +627,7 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		return;
 	}
 	check_slot.close();
+    LOG_MSG("Loading state from slot: %d (%s)", (int)slot + 1, save.c_str());
 
 	unz_file_info64 file_info;
 	unzFile zf;
@@ -696,10 +682,10 @@ void SaveState::load(size_t slot) const { //throw (Error)
 		char buffer[4096];
 		size_t length = (size_t)zis.xsgetn((zip_istreambuf::char_type*)buffer,sizeof(buffer)-1); buffer[length] = 0;
 
-		if (!length||(size_t)length!=strlen(RunningProgram)||strncmp(buffer,RunningProgram,length)) {
+		if (!length||(size_t)length!=RunningProgram.size()||strncmp(buffer,RunningProgram.c_str(),length)) {
 			buffer[length]='\0';
 			loadstate_detail_saved = length ? std::string(buffer) : std::string("(none)");
-			loadstate_detail_current = RunningProgram ? std::string(RunningProgram) : std::string("(none)");
+			loadstate_detail_current = RunningProgram.empty() ? std::string("(none)") : RunningProgram;
 			if(!force_load_state&&!loadstateconfirm(1)) {
 				LOG_MSG("Aborted. Check your program name: %s",buffer);
 				load_err=true;
@@ -947,4 +933,3 @@ std::string SaveState::getName(size_t slot, bool nl) const {
     unzClose(zf);
 	return ret;
 }
-

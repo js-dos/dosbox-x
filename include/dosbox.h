@@ -138,7 +138,10 @@ enum MachineType {
     MCH_FM_TOWNS,                    // STUB!!
 
     MCH_MCGA,                        // IBM PS/2 model 30 Multi-Color Graphics Adapter
-    MCH_MDA
+    MCH_MDA,
+
+    MCH_OLIVETTI,                    // Olivetti M24 / AT&T 6300 "OGC": CGA superset + 640x400 mono (mode 0x40)
+    MCH_3270PC                       // IBM 3270 PC (5271): CGA superset + APA modes 0x30 (720x350 mono) / 0x31 (360x350 4-color)
 };
 
 enum HerculesCard {
@@ -210,6 +213,8 @@ std::string             formatString(const char* format, ...); // Generates a fo
 void					DOSBOX_RunMachine();
 void					DOSBOX_SetLoop(LoopHandler * handler);
 void					DOSBOX_SetNormalLoop();
+
+void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple, const std::string &dev_spec=std::string(), const std::string &dev_spec_opts=std::string());
 
 /* machine tests for use with if() statements */
 #define IS_TANDY_ARCH			((machine==MCH_TANDY) || (machine==MCH_PCJR))

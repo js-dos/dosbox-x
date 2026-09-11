@@ -1,4 +1,232 @@
+Next version:
+  - Fixed DOS FCB operations trying to read/write from device_CON when performed
+    on an unopened or non-existent file. (cimarronm)
+  - Fixed VHD fixed-disk geometry detection to correctly decode the partition
+    start cylinder from the MBR CHS fields (the high bits were not shifted),
+    reject malformed CHS/LBA partition entries instead of producing a bad or
+    out-of-bounds sector address. (cimarronm)
+  - Fixed the LOCK (0xF0) prefix in the normal, full, and dynamic (dyn_x86 and
+    dynrec) CPU cores to prefix the following instruction instead of
+    executing as its own no-op, and raise a #UD exception on 80186+ if it
+    precedes an instruction LOCK is not legal on. (cimarronm)
+
+2026.08.31:
+  - Added support for mounting TeleDisk (.td0) floppy image files. (cimarronm)
+  - Fixed prompting of working directory option (maron2000)
+  - Relax sanity check of floppy image considering specially formatted disks
+    (maron2000)
+  - Disk sector I/O now returns typed INT 13h status codes instead of a
+    catch-all error, and the INT 13h handler propagates the specific code
+    (seek failed, controller failure, CRC/data error, etc.) into register
+    AH on read/write errors rather than collapsing every failure to 0x04.
+    Also fixes AH being left stale on write errors and a VFD fill-sector
+    write that reported failure after succeeding. (cimarronm)
+  - On non-MSC, only define MIN/MAX if not already defined (skitt)
+  - Fixed FreeDOS XCOPY failed to copy files when destination directory was
+    not specified (maron2000)
+  - IMGMOUNT: Fixed a regression that didn't try loading IMGMAKE.IMG if no 
+    image was specified (maron2000)
+  - Fixed a build error when FFmpeg is upgraded to FFmpeg 9 (maron2000)
+  - Fixed freeze when savestate flagged file not found (rebb)
+  - Fixed capture and savestate directory locations (maron2000)
+  - Refactored the imageDisk subclasses into their own source files and headers
+    (VFD, D88, NFD, empty drive, INT 13h passthrough, El Torito floppy, and
+    MS-DOS block device), leaving the base imageDisk class and BIOS disk-list
+    plumbing in bios_disk. (cimarronm)
+  - Shell init: allocate the COMMAND.COM environment block after allocating the
+    shell binary/PSP in both SHELL_Init() and CONFIGSHELL_Init(), so memory
+    layout and ownership ordering match expected MCB-chain behavior. (cimarronm)
+  - Debugger: fixed disassembler showing 16-bit register names for byte-sized
+    operands. (cimarronm)
+  - Fixed INT 13h CHS decoding for floppies, which incorrectly used the hard
+    disk layout (10-bit cylinder / 6-bit sector) instead of the floppy layout
+    (8-bit cylinder in CH / 8-bit sector in CL) on read, write, and get drive
+    parameters. (cimarronm)
+  - Fixed savestates written by a Windows build failing to load on Linux
+    builds. The per-drive Opts struct in the DOS component held an unsigned
+    long, which is 4 bytes on Windows and 8 on LP64 hosts, so the saved stream
+    desynchronized and the load ran off the end of the component. Also fixed
+    POD_Load_DOS_Mscdex looping forever on an out-of-range CD drive count, and
+    mounted drive paths keeping their Windows path separators when a state is
+    restored on a non-Windows host. (ozy24)
+  - Fixed chs_write packing the high cylinder bits into the sector field of the
+    synthesized MBR partition table, which corrupted the end-CHS entry for disks
+    with an end cylinder above 255. (cimarronm)
+  - Floppy INT 13h sector reads/writes now honor the bytes-per-sector code from
+    the disk base table pointed to by INT 1Eh instead of assuming 512, allowing
+    guests that reprogram INT 1Eh to access non-512 media. (cimarronm)
+  - Debugger: Resolved named variables in expressions (zlatkok)
+  - OpenGL: Fixed fullscreen and modeswitching positional offsets. (DieSkaarj)
+  - Simplified the MCB filename-stripping logic in DOS_Execute(). (cimarronm)
+  - Fixed FAT volume labels being displayed as 8.3 filenames. (cimarronm)
+  - Fixed crash of Win9x lowend build at launch due to use of AttachConsole()
+    function (maron2000)
+  - Fixed a out-of-bounds array access bug in drive_virtual.cpp (maron2000)
+
+2026.08.02
+  - Debugger: normalize 16-bit segmented offsets for address display/lookup and
+    avoid false "[illegal]" memory operand reports in AnalyzeInstruction()
+    (cimarronm)
+  - Fixed character rendering and mouse cursor display in DOS/V Japanese mode.
+    (nanshiki)
+  - Fixed build error of OSFREE release builds (maron2000)
+  - Added floppy BPB sanity check, and rearranged existing floppy BPB check code
+    (maron2000)
+  - Fixed window resizing (OpenGL, SDL2) (misty7666)
+  - Updated Nuked-OPL3-fast to v1.8-fast.3 (tgies)
+  - Added support for nested subdirectories in Z drive (maron2000)
+  - Added experimental "ethnet" command and protocol for NE2000 emulation. Instead
+    of using the pcap promiscious mode, which doesn't work over Wi-fi, a client
+    server setup can be configured to emulate a private lan between instances of
+    DOSBox-X either on localhost or on the local area network. The ethnet command
+    is deliberately built so that client and server set up is the same command
+    structure as the "ipx" command used to set up an IPX network in DOSBox and
+    DOSBox-X. (joncampbell123)
+  - FAT driver performance improvements, at least for directory enumeration,
+    file creation, reading, and writing (joncampbell123).
+  - Added PC3270 and Olivetti machine types (firevaran).
+  - Fixed fatDrive error paths so truncated boot-sector reads no longer look
+    like successful mounts, and early returns now close diskfile handles
+    instead of leaking them. (cimarronm)
+  - INT 33h: In PC-98 mode, do not maintain a hide/show display count to match
+    real mouse driver behavior (nanshiki)
+  - Fixed crash on loading lang files (macOS) (maron2000)
+
+2026.07.02
+  - Prepare for release. This time release OSFREE first so that the normal
+    version appears first on GitHub.
+  - Correct MMX FPU exception behavior: #UD if EM bit set, else #NM if TS bit 
+    set (joncampbell123)
+  - Cleanup PMULLW, enforce missing Pentium III requirement for one 
+    instruction, and add code to every MMX instruction to set FPU top of stack
+    to zero as a) documented by Intel b) implemented by Bochs and PCBox already
+    (joncampbell123)
+  - Fixed PMULLW signedness issues. (bachimusprime)
+  - MMX instructions set top of stack == 0 and all tags to available. 
+    (joncampbell123)
+  - EMMS no need to set FPU tags to valid, then set them to empty.
+    (joncampbell123)
+  - Move MMX register into FPU_Reg_80 where the X86 FPU emulation is storing 
+    state so that the MMX/FPU overlap can emulate properly. This fixes FPU/MMX 
+    bugs with Windows ME and Windows Media Player (joncampbell123)
+  - FPU: make p_regs and regs_80 an anonymous union to reduce memory use and to
+    make switching between dynamic and normal core easier (joncampbell123)
+  - Fixed savestate format incompatibility between MSVC and MinGW builds.
+    (AleWin32)
+  - gui/sdl_mapper: Fixed startup crash with joysticks reporting >1 hat switch
+    (BoykoNeov)
+  - Extend MMX_reg to include FPU exponent field. (joncampbell123)
+  - Fixed MMX instructions write to FPU registers and set the exponent field to
+    all 1s as documented by Intel. (joncampbell123)
+  - Undo CMPXCHG8B revision (joncampbell123)
+  - Fixed FPU_Reg_80 size (cimarronm)
+  - Added Nuked-CQM support to OPL emulation. (maron2000)
+  - macOS: Build OSFREE nightly builds (maron2000)
+  - D3D11: Fix Aspect ratio and Window size was not reflected when returning
+    from fullscreen mode (maron2000)
+  - Debugger: fix F11 (trace into next instruction) collision being swallowed 
+    by Windows Terminal (AleWin32) 
+  - Removed output option stubs that have been deprecated removed long ago. 
+    (maron2000)
+  - Don't signal video mem write for S3 MMIO (joncampbell123)
+  - Revise mem handler (joncampbell123)
+  - qcow2: Set logical (BIOS) CHS instead of physical (IDE) CHS when mounted
+    with Drive numbers. (maron2000)
+  - Debugger: fix F11 (trace into next instruction) collision being swallowed
+    by Windows Terminal (AleWin32)
+  - MSCDEX UpdateDrive subUnit param is never changed and does not need to be a 
+    reference (joncampbell123)
+  - IDE: Add boolean to mark whether CD-ROM emulation is drawing from MSCDEX.
+    (joncampbell123)
+  - IMGMOUNT::Unmount(): Add device spec parsing and cleanup drive letter/spec
+    parsing in general. Device spec such as ":ide:1m" will allow mounting a CD-
+    ROM image directly to IDE emulation without ever attaching it to a drive
+    letter or MSCDEX emulation (joncampbell123)
+  - FindCommand():
+      Add remove parameter, so that it is possible in one step to read a cmd
+      arg and remove it.
+      Fix printf formatting for message.
+      Add debug dump for CommandLine object.
+  - Add CommandLine method to check if a command arg exists, IMGMOUNT should
+    use that instead of calling FindCommand() just to get a string and then
+    throw it away to check if it exists (joncampbell123)
+  - Drive letter can be "*" for FAT driver, update (joncampbell123)
+  - IMGMOUNT:
+      Use tdr for drive letter/number, do not call FindCommand() again to re-
+      read the drive letter/number
+      Use new FindCommand/EraseCommand methods to simplify file parsing
+      Use tdr and not temp_line for fstype auto and "*" drive (joncampbell123)
+  - DOS_SetDefaultDrive() do not do anything if DOS kernel disabled 
+    (joncampbell123)
+  - MSCDEX: CDROM_AllocateInterface does not need to modify the path, and it
+    never does, change path param to const char * which also allows the use of
+    std::string().c_str() with it. Add device spec ISO mounting, though only
+    the CD-ROM image loading and unloading at this time (joncampbell123)
+  - IDE device spec mount, ISO only (joncampbell123)
+  - IDE device spec CD-ROM swaplist with connection to Swap CD mapper shortcut
+    (joncampbell123)
+  - IDE ATAPI CDROM swaplist, if multiple CD images (joncampbell123)
+  - IMGMOUNT -u with IDE device spec (joncampbell123)
+  - IDE opt parse spec common function (joncampbell123)
+  - Revise various dropdown menu (joncampbell123)
+  - List all outputs, even ones not supported on the target platform, so that
+    the reference config files can list them all. Add comment on what output
+    code is expected to do for unsupported outputs (joncampbell123)
+  - Make the "DOS kernel shutdown do not touch MCB" flag unnecessary by 
+    allowing BOOT to provide the boot code as data to load later, after DOS
+    kernel shutdown, and force CPU back into real mode after DOS kernel shutdown
+    (joncampbell123)
+  - CD-ROM image allocation should free existing pointer it is about to replace.
+    (joncampbell123)
+  - Show OSFREE in the title and help message to distinguish OSFREE builds.
+    (maron2000)
+  - List direct IDE mounts under the Drives menu (joncampbell123)
+  - Fixed possible boot failure when booted from "Boot from disk image" menu.
+    (maron2000)
+  - Fixed dialog box didn't show when an ISO was mounted via dropdown menu.
+    (maron2000)
+  - Define IDE functions used elsewhere in the header file, cleanup
+    (joncampbell123)
+  - IDE: Move CD clearing into a method (joncampbell123)
+  - IDE device mount --replace support (joncampbell123)
+  - IDE menu unmount and swap commands. Update Eject handling to support :ide:
+    device mounts (joncampbell123)
+  - IDE: On attach or detach directly, update the IDE drive menu 
+    (joncampbell123)
+  - Fix IDEDrive menu item naming, add code to allow mounting an ISO image or
+    images directly from the menu for IDE device mounts (joncampbell123)
+  - printer.cpp: Fixed various printer emulation issues (maron2000)
+     Fixed handling of variable_length command
+     Fixed a typo in ESC S command
+     Skip DBCS processing for bit graphic data
+     Fixed advancing cell position of DBCS characters
+  - BOOT: Store the SS:SP values in a var, have sdlmain.cpp set them when 
+    booting the guest OS. For IBM PC booter games, set SS:SP = 0x30:0x100
+    instead of 0x30:0x80. The smaller value cause Shamus to crash and was coded
+    based on a misunderstanding of the IBM PC BIOS source code (joncampbell123)
+  - COMMAND.COM emulation: After running an MS-DOS executable, set reg_al to
+    the error code returned by the DOS program. This fixes Microsoft Flight
+    Simulator 5.1 setup.com (joncampbell123)
+  - COMMAND.COM emulation: Free memory on shutdown only if and only if 
+    instructed by the shell start code that creates the initial shell, or the
+    config shell. For any other case, trust that we were run as a DOS program
+    and that INT 21h AH=4Ch will free the process memory normally.
+    (joncampbell123)
+  - Disabled formatting lockouts, which allows SubLogic Flight Simulator II to
+    run (joncampbell123)
+  - Disabled IBM PC geometry translation for PC-98 mode. PC-98 HDI images must
+    not do geometry translation, it breaks things (joncampbell123)
+  - INGMOUNT: If mounting a floppy to drive A or B, make sure the disk change
+    signal is cleared so that INT 13h works as expected, same as DOSBox SVN,
+    Staging, and any other fork others use (joncampbell123)
+  - Fixed geometry detection of host folder converted drives (maron2000)
+  - Added another heuristic to detect QCOW2 image geometry. (caiiiycuk)
+  - FPU: Set exception flags in some FPU commands in double precision
+  - Fixed a character encoding issue with 0xe0 on non-PC-98 systems. (misty7666)
+  - SDL2: Remove deleted file (yuv_rgb.c). (maron2000)
+    
 2026.06.02
+  - Feature: Add 'Send Alt+SysRq/PrtScr' menu item (AleWin32)
   - DOS file search bugfix: Prevent undefined stat_block usage on failed
     ht_stat() calls. Use a separate variable for special file attribute
     checks to avoid reusing stat_block when it contains garbage values.
@@ -188,7 +416,10 @@
     a booted guest OS. (maron2000)
   - Fixed savestate load producing scrambled graphics (AleWin32)
   - Feature: Add detailed info when loading savestate mismatch (AleWin32)
+  - Fixed wrong disassembly after LMSW in debugger (AleWin32)
   - output_ttf: Don't reset colors when already in TTF output mode (maron2000)
+  - Replaced Nuked-OPL3 with Nuked-OPL3-fast (tgies)
+  - Windows: Build OSFREE nightly builds (maron2000)
 
 2026.05.02
   - DOSBox-X will now check both the current directory and the .config
