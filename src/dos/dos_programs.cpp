@@ -6200,14 +6200,14 @@ class IMGMOUNT : public Program {
 #if defined(JSDOS)
             else if (sockdrive) {
                 std::string url;
-                if (!cmd->FindCommand(2, url)) {
+                if (!cmd->FindCommand(1, url)) {
                     WriteOut("Wrong syntax, command should be: imgmount n sockdrive <url>\n");
                     return;
                 }
                 if (url.find("wss://") != std::string::npos || url.find("ws://") != std::string::npos) {
                   std::string owner;
                   std::string name;
-                  if (!cmd->FindCommand(3, owner) || !cmd->FindCommand(4, name)) {
+                  if (!cmd->FindCommand(2, owner) || !cmd->FindCommand(3, name)) {
                     WriteOut("Wrong syntax, command should be: imgmount n sockdrive host:port owner drive\n");
                     return;
                   }
