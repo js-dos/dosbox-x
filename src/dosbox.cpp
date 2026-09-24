@@ -1814,7 +1814,7 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pint = secprop->Add_int("mcp_server", Property::Changeable::OnlyAtStart, 0);
     Pint->SetMinMax(0, 65535);
-    Pint->Set_help("TCP port of the external debugger MCP server on 127.0.0.1. Set to 0 to disable debugger MCP control.");
+    Pint->Set_help("Port of the external debugger MCP server on 127.0.0.1. Native builds use TCP and browser builds use WebSocket. Set to 0 to disable debugger MCP control.");
 
     Pstring = secprop->Add_string("machine",Property::Changeable::OnlyAtStart,"svga_s3");
     Pstring->Set_values(machines);

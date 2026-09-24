@@ -196,7 +196,7 @@ static Bitu read_p3c2(Bitu port,Bitu iolen) {
 	if (vga.draw.vret_triggered) retval |= 0x80;
 	return retval;
 	/*
-		0-3 0xF on EGA, 0x0 on VGA 
+		0-3 0xF on EGA, 0x0 on VGA
 		4	Status of the switch selected by the Miscellaneous Output
 			Register 3C2h bit 2-3. Switch high if set.
 			(apparently always 1 on VGA)

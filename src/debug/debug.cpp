@@ -58,6 +58,10 @@ using namespace std;
 
 #include "debug_mcp.h"
 
+#ifdef JSDOS_X
+#include <jsdos-asyncify.h>
+#endif
+
 bool Clear_SYSENTER_Debug();
 bool Toggle_BreakSYSEnter();
 bool Toggle_BreakSYSExit();
@@ -5188,7 +5192,11 @@ Bitu DEBUG_Loop(void) {
         uint16_t oldCS	= SegValue(cs);
         uint32_t oldEIP	= reg_eip;
         PIC_runIRQs();
+#ifdef JSDOS_X
+        asyncify_sleep(1, true);
+#else
         SDL_Delay(1);
+#endif
 
 #if (C_DYNAMIC_X86)
 	if (GetDynamicType() > 0) {

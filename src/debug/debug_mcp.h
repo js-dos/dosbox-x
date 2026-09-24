@@ -10,11 +10,13 @@
 //
 // port == 0 means disabled.
 //
-// DOSBox-X acts as a TCP client and connects to:
+// Native DOSBox-X acts as a TCP client. Browser builds use WebSocket.
+// Both connect to:
 //
 //     127.0.0.1:<port>
 //
-// The connection is maintained in a background thread.
+// The native connection is maintained in a background thread. Browser builds
+// use the Emscripten event loop and do not block the emulation thread.
 // If the server is unavailable or the connection is lost,
 // reconnection is attempted automatically.
 //
