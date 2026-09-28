@@ -839,7 +839,7 @@ const char* Section_prop::Get_string(string const& _propname) const {
 
             if (strcmp(value, "jsdos_pentium_mmx") == 0) {
                 printf("WARN! pentium_mmx is enabled, emulation can be buggy\n");
-                return "penitum_mmx";
+                return "pentium_mmx";
             }
 #endif
             return value;
