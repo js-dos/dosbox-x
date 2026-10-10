@@ -245,6 +245,11 @@ void CPU_Core_Dynrec_Cache_Init(bool enable_cache);
 void CPU_Core_Dynrec_Cache_Close(void);
 void CPU_Core_Dynrec_Cache_Reset(void);
 #endif
+#if (C_DYNWASM)
+void CPU_Core_Dynwasm_Init(void);
+void CPU_Core_Dynwasm_Cache_Init(bool enable_cache);
+void CPU_Core_Dynwasm_Cache_Close(void);
+#endif
 
 int CPU_IsDynamicCore(void) {
 #if (C_DYNAMIC_X86)
@@ -2607,6 +2612,13 @@ void CPU_SET_CRX(Bitu cr,Bitu value) {
 						mainMenu.get_item("mapper_dynamic").check(true).refresh_item(mainMenu);
 					}
 #endif
+#if (C_DYNWASM)
+					/* only from the 386+ normal core, the other cpu types have their own cores */
+					if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CORE && cpudecoder == &CPU_Core_Normal_Run) {
+						CPU_Core_Dynwasm_Cache_Init(true);
+						cpudecoder=&CPU_Core_Dynwasm_Run;
+					}
+#endif
 					CPU_AutoDetermineMode<<=CPU_AUTODETERMINE_SHIFT;
 				} else {
 					cpu.pmode=false;
@@ -3639,6 +3651,9 @@ public:
 #if (C_DYNREC)
 		CPU_Core_Dynrec_Init();
 #endif
+#if (C_DYNWASM)
+		CPU_Core_Dynwasm_Init();
+#endif
 
 		MAPPER_AddHandler(CPU_ToggleAutoCycles,MK_nothing,0,"cycauto","Toggle auto cycles",&item);
 		item->set_text("Auto cycles");
@@ -3887,6 +3902,10 @@ public:
 		} else if ((core == "dynamic" && GetDynamicType()==2) || core == "dynamic_rec") {
 			cpudecoder=&CPU_Core_Dynrec_Run;
 #endif
+#if (C_DYNWASM)
+		} else if (core == "dynamic") {
+			cpudecoder=&CPU_Core_Dynwasm_Run;
+#endif
 		} else {
 			strcpy(core_mode,"normal");
 			cpudecoder=&CPU_Core_Normal_Run;
@@ -3898,6 +3917,9 @@ public:
 #endif
 #if (C_DYNREC)
 		CPU_Core_Dynrec_Cache_Init((core == "dynamic" && GetDynamicType()==2) || (core == "dynamic_rec"));
+#endif
+#if (C_DYNWASM)
+		CPU_Core_Dynwasm_Cache_Init(core == "dynamic");
 #endif
 
 		CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
@@ -4264,6 +4286,9 @@ void CPU_ShutDown(Section* sec) {
 #endif
 #if (C_DYNREC)
 	CPU_Core_Dynrec_Cache_Close();
+#endif
+#if (C_DYNWASM)
+	CPU_Core_Dynwasm_Cache_Close();
 #endif
 	delete test;
 }
