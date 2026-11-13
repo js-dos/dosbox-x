@@ -95,35 +95,16 @@ static double FROUND(double in){
 #define BIAS64 1023
 
 static double FPU_FLD80(PhysPt addr,FPU_Reg_80 &raw) {
-	struct {
-		int16_t begin;
-		FPU_Reg eind;
-	} test;
-	test.eind.l.lower = mem_readd(addr);
-	test.eind.l.upper = (int32_t)mem_readd(addr+4);
-	test.begin = (int16_t)mem_readw(addr+8);
-   
-	int64_t exp64 = (((test.begin&0x7fff) - (int64_t)BIAS80));
-	int64_t blah = ((exp64 >0)?exp64:-exp64)&0x3ff;
-	int64_t exp64final = ((exp64 >0)?blah:-blah) +BIAS64;
-
-	int64_t mant64 = (test.eind.ll >> 11) & LONGTYPE(0xfffffffffffff);
-	int64_t sign = (test.begin&0x8000)?1:0;
-	FPU_Reg result;
-	result.ll = (sign <<63)|(exp64final << 52)| mant64;
-
-	if(test.eind.l.lower == 0 && (uint32_t)test.eind.l.upper == (uint32_t)0x80000000UL && (test.begin&0x7fff) == 0x7fff) {
-		//Detect INF and -INF (score 3.11 when drawing a slur.)
-		result.d = sign?-HUGE_VAL:HUGE_VAL;
-	}
-
-	/* store the raw value. */
-	raw.raw.l = (uint64_t)test.eind.ll;
-	raw.raw.h = (uint16_t)test.begin;
-
-	return result.d;
-
-	//mant64= test.mant80/2***64    * 2 **53 
+	raw.raw.l = (uint64_t)mem_readd(addr) | ((uint64_t)mem_readd(addr+4) << 32);
+	raw.raw.h = mem_readw(addr+8);
+	const unsigned exponent = raw.raw.h & 0x7fffu;
+	double value;
+	if (exponent == 0x7fffu)
+		value = raw.raw.l == ULONGTYPE(0x8000000000000000) ? HUGE_VAL : NAN;
+	else
+		value = ldexp(static_cast<double>(raw.raw.l),
+		              static_cast<int>(exponent ? exponent : 1) - BIAS80 - 63);
+	return (raw.raw.h & 0x8000u) ? -value : value;
 }
 
 static void FPU_ST80(PhysPt addr,Bitu reg,FPU_Reg_80 &raw,bool use80) {
@@ -197,11 +178,19 @@ static void FPU_FLD_I64(PhysPt addr,Bitu store_to) {
 	blah.l.lower = mem_readd(addr);
 	blah.l.upper = (int32_t)mem_readd(addr+4);
 	fpu.regs[store_to].d = static_cast<double>(blah.ll);
-	// store the signed 64-bit integer in the 80-bit format mantissa with faked exponent.
-	// this is needed for DOS and Windows games that use the Pentium fast memcpy trick, using FLD/FST to copy 64 bits at a time.
-	// I wonder if that trick is what helped spur Intel to make the MMX extensions :)
-	fpu.regs_80[store_to].raw.l = (uint64_t)blah.ll;
-	fpu.regs_80[store_to].raw.h = ((blah.ll/*sign bit*/ >> (uint64_t)63) ? 0x8000u : 0x0000u) + FPU_Reg_80_exponent_bias + 63u; // FIXME: Verify this is correct!
+	const bool negative = blah.ll < 0;
+	uint64_t magnitude = negative ? 0 - (uint64_t)blah.ll : (uint64_t)blah.ll;
+	uint16_t exponent = 0;
+	if (magnitude) {
+		exponent = FPU_Reg_80_exponent_bias + 63u;
+		while (!(magnitude & ULONGTYPE(0x8000000000000000))) {
+			magnitude <<= 1;
+			--exponent;
+		}
+	}
+	// Keep all integer bits in a valid extended value across stores and FSAVE/FRSTOR.
+	fpu.regs_80[store_to].raw.l = magnitude;
+	fpu.regs_80[store_to].raw.h = exponent | (negative ? 0x8000u : 0u);
 	fpu.use80[store_to] = true;
 }
 
@@ -271,14 +260,28 @@ static void FPU_FST_I32(PhysPt addr) {
 	mem_writed(addr,(val < 2147483648.0 && val >= -2147483648.0)?static_cast<int32_t>(val):0x80000000);
 }
 
+static bool FPU_ExactI64(const FPU_Reg_80 &raw, uint64_t &value) {
+	const int exponent = (raw.raw.h & 0x7fffu) - FPU_Reg_80_exponent_bias;
+	if (!raw.raw.l && (raw.raw.h & 0x7fffu) == 0) {
+		value = 0;
+		return true;
+	}
+	if (exponent < 0 || exponent > 63) return false;
+	const unsigned shift = 63 - exponent;
+	const uint64_t magnitude = raw.raw.l >> shift;
+	if ((magnitude << shift) != raw.raw.l) return false;
+	const bool negative = (raw.raw.h & 0x8000u) != 0;
+	if (magnitude > ULONGTYPE(0x7fffffffffffffff) + (negative ? 1u : 0u)) return false;
+	value = negative ? 0 - magnitude : magnitude;
+	return true;
+}
+
 static void FPU_FST_I64(PhysPt addr) {
 	FPU_Reg blah;
-	if (fpu.use80[TOP] && (fpu.regs_80[TOP].raw.h & 0x7FFFu) == (0x0000u + FPU_Reg_80_exponent_bias + 63u)) {
-		// FIXME: This works so far for DOS demos that use the "Pentium memcpy trick" to copy 64 bits at a time.
-		//        What this code needs to do is take the exponent into account and then clamp the 64-bit int within range.
-		//        This cheap hack is good enough for now.
-		mem_writed(addr,(uint32_t)(fpu.regs_80[TOP].raw.l));
-		mem_writed(addr+4,(uint32_t)(fpu.regs_80[TOP].raw.l >> (uint64_t)32));
+	uint64_t exact;
+	if (fpu.use80[TOP] && FPU_ExactI64(fpu.regs_80[TOP], exact)) {
+		mem_writed(addr,(uint32_t)exact);
+		mem_writed(addr+4,(uint32_t)(exact >> 32));
 	}
 	else {
 		double val = FROUND(fpu.regs[TOP].d);
@@ -306,12 +309,10 @@ static void FPU_FSTT_I32(PhysPt addr) {
 // WARNING: UNTESTED. Original contributed code only focused on the x86 FPU case.
 static void FPU_FSTT_I64(PhysPt addr) {
 	FPU_Reg blah;
-	if (fpu.use80[TOP] && (fpu.regs_80[TOP].raw.h & 0x7FFFu) == (0x0000u + FPU_Reg_80_exponent_bias + 63u)) {
-		// FIXME: This works so far for DOS demos that use the "Pentium memcpy trick" to copy 64 bits at a time.
-		//        What this code needs to do is take the exponent into account and then clamp the 64-bit int within range.
-		//        This cheap hack is good enough for now.
-		mem_writed(addr,(uint32_t)(fpu.regs_80[TOP].raw.l));
-		mem_writed(addr+4,(uint32_t)(fpu.regs_80[TOP].raw.l >> (uint64_t)32));
+	uint64_t exact;
+	if (fpu.use80[TOP] && FPU_ExactI64(fpu.regs_80[TOP], exact)) {
+		mem_writed(addr,(uint32_t)exact);
+		mem_writed(addr+4,(uint32_t)(exact >> 32));
 	}
 	else {
 		double val = fpu.regs[TOP].d; /* chop rounding mode */
