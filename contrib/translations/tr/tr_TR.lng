@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Turkish (Turkey)
 :DOSBOX-X:CODEPAGE:857
-:DOSBOX-X:VERSION:2025.05.03
+:DOSBOX-X:VERSION:2026.08.31
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Lines in this section will be run at startup.
@@ -27,7 +27,7 @@ DOSBox-X yapılandırma aracı
 Yapılandırma aracından çık
 .
 :MAPPER_EDITOR_EXIT
-Eşlem düzenleyiciden çık
+Eşlem düzenleyicisinden çık
 .
 :SAVE_MAPPER_FILE
 Eşlem dosyasını kaydet
@@ -50,8 +50,11 @@ Tamam
 :CLOSE
 Kapat
 .
+:THEME
+Tema
+.
 :DEBUGCMD
-Hata Ayıklayıcı Komutu
+Hata ayıklayıcısı komutu
 .
 :ADD
 Ekle
@@ -78,7 +81,7 @@ Yapılandırmayı kaydet
 Dil dosyasını kaydet
 .
 :SAVE_RESTART
-Kaydet/yeniden başl.
+Kaydet/Yen. başlat
 .
 :PASTE_CLIPBOARD
 Panoyu yapıştır
@@ -87,7 +90,7 @@ Panoyu yapıştır
 Geçmişi iliştir
 .
 :EXECUTE_NOW
-Şimdi çalıştır
+Şimdi yürüt
 .
 :ADDITION_CONTENT
 Ek içerik:
@@ -102,10 +105,10 @@ Düzenle: %s
 %s yardımı
 .
 :HELP_INFO
-Ayrıntılı yardım için aşağıdaki "Yardım" düğmesini tıklayın.
+Ayrıntılı yardım için aşağıdaki "Yardım" düğmesine tıklayın.
 .
 :SELECT_VALUE
-Özellik değerini seçin
+Özellik değerini seç
 .
 :CONFIGURATION_FOR
 %s yapılandırması
@@ -120,7 +123,7 @@ Ayarlar
 DOSBox-X günlükleme çıktısı
 .
 :CODE_OVERVIEW
-Kod genel bakış
+Koda genel bakış
 .
 :VISIT_HOMEPAGE
 Ana sayfayı ziyaret et
@@ -144,13 +147,13 @@ IDE denetimcisi ataması
 DOS komutları yardımı
 .
 :CURRENT_VOLUME
-Geçerli ses karıştıcı düzeyi
+Geçerli ses karıştıcısı düzeyi
 .
 :CURRENT_SBCONFIG
 Sound Blaster yapılandırması
 .
 :CURRENT_MIDICONFIG
-Geçerli MIDI yapılandırması
+Geçerli MIDI/OPL yapılandırması
 .
 :CREATE_IMAGE
 Boş disk kalıbı oluştur
@@ -165,7 +168,7 @@ Yazıcı listesi
 Giriş
 .
 :CONFIGURE_GROUP
-Yapılandırmak için bir ayar grubu seçin:
+Yapılandırmak için bir ayar grubu seç:
 .
 :SHOW_ADVOPT
 Gelişmiş seçenekler
@@ -180,13 +183,13 @@ Taşınabilir yapılandırma
 Kullanıcı yapılandır.
 .
 :CONFIG_SAVETO
-Kaydedilecek yapılandırma dosyası için bir ad girin:
+Kaydedilecek yapılandırma dosyası için bir ad gir:
 .
 :CONFIG_SAVEALL
-Tüm yapılandırma seçeneklerini (gelişmişler dahil) dosyaya kaydet
+Tüm yapılandırma seçeneklerini (gelişmişler de) dosyaya kaydet
 .
 :LANG_FILENAME
-Dil dosyası için bir ad girin:
+Dil dosyası için bir ad gir:
 .
 :LANG_LANGNAME
 Dil adı (isteğe bağlı):
@@ -215,13 +218,13 @@ Disk adı
 IDE konumu
 .
 :SWAP_SLOT
-Takas slotu
+Takas yuvası
 .
 :EMPTY_SLOT
-Boş slot
+Boş yuva
 .
 :SLOT
-Slot
+Yuva
 .
 :SELECT_EVENT
 Değiştirilecek olayı seçin.
@@ -350,7 +353,7 @@ Bu özellik çalışma zamanında değiştirilemez.
 
 .
 :PROGRAM_CONFIG_APPLY_RESTART
-ayarını uygulamak için şimdi yeniden başlatmak istiyor musunuz [Y/N]?
+ayarını uygulamak için şimdi yeniden başlatmak istiyor musunuz [E/H]?
 .
 :PROGRAM_CONFIG_HLP_POSINT
 pozitif tamsayı
@@ -373,7 +376,7 @@ Bu işleme güvenli kipte izin verilmez.
 
 .
 :PROGRAM_CONFIG_SECTION_ERROR
-%s mevcut değil.
+%s yok.
 
 .
 :PROGRAM_CONFIG_VALUE_ERROR
@@ -419,7 +422,7 @@ Halihazırda PS/2 kapısına takılı.
 
 .
 :PROGRAM_MOUSE_NOINSTALLED
-Sürücü yüklü değil.
+Sürücü kurulu değil.
 
 .
 :PROGRAM_MOUSE_HELP
@@ -455,11 +458,11 @@ Bulunan CD-ROM'lar: %d
 
 .
 :PROGRAM_MOUNT_NOT_FORMATTED
-Drive not formatted. Format it before accessing the drive.
+Sürücü biçimlendirilmemiş. Sürücüye erişmeden önce onu biçimlendirin.
 
 .
 :PROGRAM_MOUNT_UNSUPPORTED_EXT
-Unsupported extension %s: Mounted as raw IMG image.
+Bilinmeyen genişletme %s: Ham IMG kalıbı olarak bağlanmış.
 
 .
 :PROGRAM_IMGMOUNT_STATUS_FORMAT
@@ -491,7 +494,7 @@ Bu sürücü için konum 1 ile %d arasında olmalıdır.
 
 .
 :PROGRAM_MOUNT_ERROR_1
-%s dizini mevcut değil.
+%s dizini yok.
 
 .
 :PROGRAM_MOUNT_ERROR_2
@@ -542,9 +545,9 @@ MOUNT komutunun yalın bir örneği:
 ←[32;1mMOUNT c %s←[0m
 
 Bu komut, dizinin DOSBox-X içinde C: sürücüsü olarak davranmasını sağlar.
-Dizin ana makinede var olmalıdır. Eğer dizin adında boşluklar varsa dizini
-çift tırnak ile düzgünce alıntıladığınızdan emin olun;
-örneğin: %s
+  Dizin ana makinede var olmalıdır. Eğer dizin adında boşluklar varsa dizini
+  çift tırnak ile düzgünce alıntıladığınızdan emin olun; örneğin:
+%s
 
 MOUNT komutunun başka örnekleri:
 
@@ -555,7 +558,7 @@ MOUNT komutunun başka örnekleri:
 ←[32;1mMOUNT c %s -ro←[0m           - C: sürücüsünü saltokunur kipte bağla
 ←[32;1mMOUNT c %s -label TEST←[0m   - C: sürücüsünü TEST etiketiyle bağla
 ←[32;1mMOUNT c %s -nocachedir ←[0m  - C: sürücüsünü sürücüyü önbelleklemeden bağla
-←[32;1mMOUNT c %s -freesize 128←[0m - C: sürücüsünü 128MB boş alanla bağla
+←[32;1mMOUNT c %s -freesize 128←[0m - C: sürücüsünü 128 MB boş alanla bağla
 ←[32;1mMOUNT c %s -u←[0m            - C: sürücüsünü bağlı olsa bile yeniden bağla
 ←[32;1mMOUNT c %s -t overlay←[0m  - C: sürücüsünün üzerine başka dizin bindir
 ←[32;1mMOUNT c -u←[0m                        - unmount the C: drive
@@ -598,7 +601,8 @@ Bindirme, belirtilen sürücü ile uyumlu DEĞİL.
 
 .
 :PROGRAM_MOUNT_OVERLAY_MIXED_BASE
-Bindirme, altındaki sürücü ile aynı adresleme kullanılarak belirtilmelidir. Göreli ve mutlak yollar karıştırılamaz.
+Bindirme, altındaki sürücü ile aynı adresleme kullanılarak belirtilmelidir.
+Göreli ve mutlak yollar karıştırılamaz.
 .
 :PROGRAM_MOUNT_OVERLAY_SAME_AS_BASE
 Bindirilecek dizin altındaki sürücü ile aynı olamaz.
@@ -637,17 +641,17 @@ LOADFIX -f [-xms] [-ems]
   -xms        Geleneksel bellek yerine XMS'den ayırır
   -ems        Geleneksel bellek yerine EMS'den ayırır
   -{ram}      Ayrılacak bellek miktarını KB türünden belirtir
-              Geleneksel bellek için 64kb; XMS/EMS için 1MB ayrılır.
-  -a          En düşük 64KB belleği doldurmak için kendiliğinden bellek ayırır
+              Geleneksel bellek için 64 kb; XMS/EMS için 1 MB ayrılır.
+  -a          En düşük 64 KB belleği doldurmak için kendiliğinden bellek ayırır
   -f (or -d)  Daha önceden ayrılan belleği boşaltır
   {program}   Belirtilen programı çalıştırır
   {options}   Program seçenekleri (varsa)
 
 Örnekler:
-  ←[32;1mLOADFIX abc.exe←[0m      64KB geleneksel bellek ayırır ve abc.exe'yi çalıştırır
+  ←[32;1mLOADFIX abc.exe←[0m      64 KB geleneksel bellek ayırır ve abc.exe'yi çalıştırır
   ←[32;1mLOADFIX -a←[0m           Yeteri kadar geleneksel belleği ayırır
-  ←[32;1mLOADFIX -128←[0m         128KB geleneksel bellek ayırır
-  ←[32;1mLOADFIX -xms←[0m         1MB XMS belleği ayırır
+  ←[32;1mLOADFIX -128←[0m         128 KB geleneksel bellek ayırır
+  ←[32;1mLOADFIX -xms←[0m         1 MB XMS belleği ayırır
   ←[32;1mLOADFIX -f←[0m           Ayrılan geleneksel belleği boşaltır
 
 .
@@ -881,7 +885,7 @@ numarayı değiştirin:
 
 .
 :PROGRAM_BOOT_NOT_EXIST
-Önyükleme disk dosyası mevcut değil. Başarısız.
+Önyükleme disk dosyası yok. Başarısız.
 
 .
 :PROGRAM_BOOT_NOT_OPEN
@@ -924,7 +928,7 @@ yapar.
 
 .
 :PROGRAM_BOOT_IMAGE_MOUNTED
-Floppy image(s) already mounted.
+Disket kalıpları halihazırda bağlanmış.
 
 .
 :PROGRAM_BOOT_IMAGE_OPEN
@@ -945,7 +949,7 @@ Kullanılabilir PCjr kartuş komutları: %s
 Bir PCjr kartuş komutu bulunamadı
 .
 :PROGRAM_BOOT_BOOTING
-Booting from drive 
+Şu sürücüden önyükleniyor: 
 .
 :PROGRAM_LOADROM_HELP
 Carga el archivo de imagen ROM especificado para BIOS de video o IBM BASIC.
@@ -1120,22 +1124,25 @@ Disket, sabit disk ve optik disk sürücülerini bağlar.
  ←[32;1m-examples           Birkaç kulllanım örneği göster.←[0m
 .
 :PROGRAM_IMGMOUNT_EXAMPLE
-IMGMOUNT için birkaç kullanım örneği:
+IMGMOUNT'un bazı kullanım örnekleri:
 
-  ←[32;1mIMGMOUNT←[0m                       - bağlı FAT/ISO sürücü ve numaralarını göster
-  ←[32;1mIMGMOUNT C←[0m                     - ←[33;1mIMGMAKE.IMG←[0m sabit disk kalıbını C: olarak bağla
-  ←[32;1mIMGMOUNT C c:\image.img←[0m        - c:\image.img sabit disk kalıbını C: olarak bağla
+  ←[32;1mIMGMOUNT←[0m                       - bağlanmış FAT/ISO sürücülerini/numaralarını listele
+  ←[32;1mIMGMOUNT C←[0m                     - ←[33;1mIMGMAKE.IMG←[0m disk kalıbını C: olarak bağla
+  ←[32;1mIMGMOUNT C c:\image.img←[0m        - c:\image.img disk kalıbını C: olarak bağla
   ←[32;1mIMGMOUNT D c:\files\game.iso←[0m   - c:\files\game.iso CD kalıbını D: olarak bağla
-  ←[32;1mIMGMOUNT D cdaudio.cue←[0m         - cue/bin ikilisinin cue dosyasını CD sürücüsü olarak bağla
+  ←[32;1mIMGMOUNT D cdaudio.cue←[0m         - cue/bin çiftinin cue dosyasını CD sürücüsü olarak bağla
   ←[32;1mIMGMOUNT 0 dos.ima←[0m             - dos.ima disket kalıbını 0 numaralı sürücü olarak bağla
-                                   (←[33;1mBOOT A:←[0m önyüklenebilir ise sürücüden önyüklenecektir)
-  ←[32;1mIMGMOUNT A -ro dos.ima←[0m         - dos.ima diske sürücüsünü A: saltokunur olarak bağla
-  ←[32;1mIMGMOUNT A :dsk1.img dsk2.img←[0m  - dsk1.img ve dsk2.img disket kalıplarını A: sürücüsünde
-                                   "Disket değiştir" menü seçeneği ile değiştirilebilir olarak bağla
-                                   dsk1.img saltokunur olur (dsk2.img değil)
+                                   (←[33;1mBOOT A:←[0m önyüklenebilirse sürücüden önyüklenir)
+  ←[32;1mIMGMOUNT A -ro dos.ima←[0m         - dos.ima disket kalıbını saltokunur A: olarak bağla
+  ←[32;1mIMGMOUNT A :dsk1.img dsk2.img←[0m  - dsk1.img ve dsk2.img disket kalıplarını A: olarak
+                                   bağla; A:, "Disketi takas et" menü seçeneğiyle dsk1.img saltokunur
+                                   olarak takas edilebilirler (ancak dsk2.img ile değil)
   ←[32;1mIMGMOUNT A -bootcd D←[0m           - önyüklenebilir A: disketini D: CD sürücüsünden bağla
-  ←[32;1mIMGMOUNT C -t ram -size 10000←[0m  - C: sabit disk sürücüsünü 10MB'lık bir RAM sürücüsü olarak bağla
-  ←[32;1mIMGMOUNT A -u←[0m                  - daha önceden bağlanan A: sürücüsünün bağlantısını kes
+  ←[32;1mIMGMOUNT C -t ram -size 10000←[0m  - C: sabit diskini 10 MB'lik RAM sürücüsü olarak bağla
+  ←[32;1mIMGMOUNT D d.img -o partidx=4←[0m  - d.img'nin 1. mantıksal bölüntüsünü D: olarak bağla
+  ←[32;1mIMGMOUNT C disk.img -u←[0m         - disk.img disk kalıbını C: olarak bağlamayı zorla,
+                                   gerekirse sürücünün önceden bağlantısını kes
+  ←[32;1mIMGMOUNT A -u←[0m                  - daha önceden bağlanmış A: sürücüsünün bağlantısını kes
 
 .
 :PROGRAM_IMGMAKE_SYNTAX
@@ -1147,14 +1154,14 @@ Kullanım: ←[34;1mIMGMAKE [dosya] [-t tür] [[-size boyut] | [-chs geometri]] 
     ←[33;1mDisket şablonları←[0m (adlar KB veya fd=fd_1440 cinsinden disket boyutuna tekabül eder):
      fd_160 fd_180 fd_200 fd_320 fd_360 fd_400 fd_720 fd_1200 fd_1440 fd_2880
     ←[33;1mSabit disk şablonları:←[0m
-     hd_250: 250MB kalıp, hd_520: 520MB kalıp, hd_1gig: 1GB kalıp
-     hd_2gig: 2GB kalıp, hd_4gig: 4GB kalıp, hd_8gig: 8GB kalıp
-     hd_st251: 40MB kalıp, hd_st225: 20MB kalıp (eski sürücü geometrisi)
+     hd_250: 250 MB kalıp, hd_520: 520 MB kalıp, hd_1gig: 1 GB kalıp
+     hd_2gig: 2 GB kalıp, hd_4gig: 4 GB kalıp, hd_8gig: 8 GB kalıp
+     hd_st251: 40 MB kalıp, hd_st225: 20 MB kalıp (eski sürücü geometrisi)
     ←[33;1mÖzel sabit disk kalıpları:←[0m hd (-size veya -chs gerektirir)
   -size: Özel sabit disk kalıbının MB türünden boyutu.
   -chs: Silindir (1-1023), kafa (1-255), sektör (1-63) türünden disk geometrisi.
   -nofs: Boş bir kalıp oluşturulması gerekiyorsa bu parametreyi ekleyin.
-  -force: Mevcut kalıp dosyasının üzerine yazmayı zorla.
+  -force: Var olan kalıp dosyasının üzerine yazmayı zorla.
   -bat: Bu kalıp için gerekli içinde IMGMOUNT olan bir .bat dosyası oluştur.
   -fat: FAT dosya sistemi türü (12, 16, or 32).
   -spc: Küme başına sektör geçersiz kıl. 2'nin bir üssü olmalıdır.
@@ -1167,14 +1174,15 @@ Kullanım: ←[34;1mIMGMAKE [dosya] [-t tür] [[-size boyut] | [-chs geometri]] 
 :PROGRAM_IMGMAKE_EXAMPLE
 IMGMAKE için birkaç kullanım örneği:
 
-  ←[32;1mIMGMAKE -t fd←[0m                   - 1,44MB ←[33;1mIMGMAKE.IMG←[0m disket kalıbı oluştur
-  ←[32;1mIMGMAKE -t fd_1440 -force←[0m       - ←[33;1mIMGMAKE.IMG←[0m diye bir disket kalıbı oluşturmayı zorla
-  ←[32;1mIMGMAKE dos.img -t fd_2880←[0m      - dos.img diye 2,88MB'lık bir disket kalıbı oluştur
-  ←[32;1mIMGMAKE c:\disk.img -t hd -size 50←[0m      - c:\disk.img diye 50MB'lık bir HDD kalıbı oluştur
-  ←[32;1mIMGMAKE c:\disk.img -t hd_520 -nofs←[0m     - 520MB'lık boş bir HDD kalıbı oluştur
-  ←[32;1mIMGMAKE c:\disk.img -t hd_2gig -fat 32←[0m  - 2GB'lık bir FAT32 HDD kalıbı oluştur
-  ←[32;1mIMGMAKE c:\disk.img -t hd -chs 130,2,17←[0m - belirtilen CHS'nin bir HDD kalıbını oluştur
-  ←[32;1mIMGMAKE c:\disk.img -source a←[0m           - fiziksel sürücü A:'dan kalıp oku
+  ←[32;1mIMGMAKE -t fd←[0m                   - 1,44 MB'lik bir disket kalıbı oluştur ←[33;1mIMGMAKE.IMG←[0m
+  ←[32;1mIMGMAKE -t fd_1440 -force←[0m       - bir disket kalıbı oluşturmayı zorla ←[33;1mIMGMAKE.IMG←[0m
+  ←[32;1mIMGMAKE dos.img -t fd_2880←[0m      - dos.img adında bir 2,88 MB'lik disket kalıbı oluştur
+  ←[32;1mIMGMAKE new.vhd -t vhd -size 520←[0m- new.vhd adında 520 MB'lik bir Devingen VHD oluştur
+  ←[32;1mIMGMAKE c:\disk.img -t hd -size 50←[0m      - c:\disk.img olarak 50 MB'lik disk kalıbı oluştur
+  ←[32;1mIMGMAKE c:\disk.img -t hd_520 -nofs←[0m     - 520 MB'lik boş disk kalıbı oluştur
+  ←[32;1mIMGMAKE c:\disk.img -t hd_2gig -fat 32←[0m  - 2 GB'lik bir FAT32 disk kalıbı oluştur
+  ←[32;1mIMGMAKE c:\disk.img -t hd -chs 130,2,17←[0m - belirtilen CHS'nin bir disk kalıbını oluştur
+  ←[32;1mIMGMAKE c:\disk.img -source a←[0m           - fiziksel A: sürücüsünden kalıp oku
 
 .
 :PROGRAM_IMGMAKE_FLREAD
@@ -1188,7 +1196,7 @@ Disk geometrisi: %d silindir, %d kafa, %d sektör, %d kilobayt
 
 .
 :PROGRAM_IMGMAKE_FILE_EXISTS
-"%s" dosyası halihazırda mevcut. Üzerine yazmak için "-force" kullanın.
+"%s" dosyası halihazırda var. Üzerine yazmak için "-force" kullanın.
 
 .
 :PROGRAM_IMGMAKE_CANNOT_WRITE
@@ -1209,7 +1217,7 @@ Kalıp dosyası için yeterli boş alan yok. %llu bayt daha gerekli.
 Disket okunamıyor.
 .
 :PROGRAM_IMGMAKE_BADSIZE
-Wrong -size or -chs arguments.
+Yanlış -size veya -chs argümanları.
 
 .
 :PROGRAM_KEYB_INFO
@@ -1217,29 +1225,29 @@ Wrong -size or -chs arguments.
 
 .
 :PROGRAM_KEYB_INFO_LAYOUT
-%i kod sayfası %s dizilimi için yüklendi
+%i kod sayfası %s yerleşimi için yüklendi
 
 .
 :PROGRAM_KEYB_SHOWHELP
 Klavyeyi belirli bir dil için yapılandırır.
 
 Usage: ←[32;1mKEYB←[0m [klavye dizilimi kimliği [kod sayfası numarası [kod sayfası dosyası]]]
-  layout ID        Yüklenecek düzen veya klavye dosyasının (.kl) adı
+  layout ID        Yüklenecek yerleşim veya klavye dosyasının (.kl) adı
   codepage number  Yüklenecek kod sayfası sayısı
   codepage file    Belirtilen kod sayfası bilgilerini içeren .cpi/.cpx dosyası
   (.kl, .cpi/.cpx dosyaları dosbox-x dizininin altına yerleştirilecektir yürütülebilir dosya var.)
 
 Some examples:
-  ←[32;1mKEYB←[0m          Şu anda yüklü kod sayfasını görüntüle.
-  ←[32;1mKEYB tr←[0m       Türkçe (TR-Q) dizilimini uygun kod sayfası ile yükle.
-  ←[32;1mKEYB tr440←[0m    Türkçe (TR-F) dizilimini uygun kod sayfası ile yükle.
-  ←[32;1mKEYB tr 857←[0m   Türkçe (TR-Q) dizilimin 857 kod sayfası ile yükle.
-  ←[32;1mKEYB tr 857 mycp.cpi←[0m Yukarıdakinin aynısı, mycp.cpi dosyası ile.
-  ←[32;1mKEYB tr_mod 857←[0m      tr_mod.kl'den klavye düzenini yükleyin, kod sayfası 857'yi kullanın.
+  ←[32;1mKEYB←[0m          Şu anda yüklü kod sayfasını görüntüle
+  ←[32;1mKEYB tr←[0m       Türkçe (TR-Q) yerleşimini uygun kod sayfası ile yükle
+  ←[32;1mKEYB tr440←[0m    Türkçe (TR-F) yerleşimini uygun kod sayfası ile yükle
+  ←[32;1mKEYB tr 857←[0m   Türkçe (TR-Q) yerleşimini 857 kod sayfası ile yükle
+  ←[32;1mKEYB tr 857 mycp.cpi←[0m Yukarıdakinin aynısı, mycp.cpi dosyası ile
+  ←[32;1mKEYB tr_mod 857←[0m      tr_mod.kl'den klavye yerleşimini yükle, kod sayfası 857'yi kullan
 
 .
 :PROGRAM_KEYB_NOERROR
-%s klavye dizilimi %i kod sayfası için yüklendi
+%s klavye yerleşimi, %i kod sayfası için yüklendi
 
 .
 :PROGRAM_KEYB_FILENOTFOUND
@@ -1252,43 +1260,43 @@ Klavye dosyası %s geçersiz
 
 .
 :PROGRAM_KEYB_LAYOUTNOTFOUND
-Şu kod sayfası için %s içinde bir dizilim bulunamadı: %i
+Şu kod sayfası için %s içinde bir yerleşim bulunamadı: %i
 
 .
 :PROGRAM_KEYB_INVCPFILE
-%s dizilimi için geçersiz veya olmayan kod sayfası dosyası
+%s yerleşimi için geçersiz veya olmayan kod sayfası dosyası
 
 
 .
 :INT21_6523_YESNO_CHARS
-yn
+eh
 .
 :PROGRAM_LABEL_HELP
-Creates, changes, or deletes the volume label of a drive.
+Bir sürücünün etiketini oluşturur, değiştirir veya siler.
 
 LABEL [drive:][label]
 
-  [drive:]○Specifies the drive letter
-  [label]○Specifies the volume label
+  [drive:]○Sürücü harfini belirtir
+  [label]○Disk bölümü etiketini belirtir
 
 .
 :PROGRAM_LABEL_DELETE
-Delete the volume label (Y/N)? 
+Disk bölümü etiketi silinsin mi (E/H)? 
 .
 :PROGRAM_LABEL_TOOLONG
-Label is too long (more than 11 characters).
+Etiket pek uzun (11 karakterden fazla).
 
 .
 :PROGRAM_LABEL_BADCHARS
-Label has invalid characters.
+Etikette geçersiz karakterler var.
 
 .
 :PROGRAM_LABEL_VOLUMEIS
-Volume in drive %c is %s
+%c sürücüsündeki disk bölümü %s
 
 .
 :PROGRAM_LABEL_NOLABEL
-Volume in drive %c has no label
+%c sürücüsündeki disk bölümünün etiketi yok
 
 .
 :PROGRAM_MODE_USAGE
@@ -1308,108 +1316,111 @@ Geçersiz parametre(ler).
 
 .
 :PROGRAM_VHDMAKE_WRITERR
-Could not write to new VHD image "%s", aborting.
+Yeni "%s" VHD kalıbına yazılamadı, iptal ediliyor.
 
 .
 :PROGRAM_VHDMAKE_REMOVEERR
-Could not erase file "%s"
+"%s" dosyası silinemedi
 
 .
 :PROGRAM_VHDMAKE_RENAME
-You'll have to manually rename the newly created VHD image.
+Yeni oluşturulmuş VHD kalıbını elle yeniden adlandırmanız gerekecek.
 
 .
 :PROGRAM_VHDMAKE_SUCCESS
-New VHD image successfully created. You can mount it with ←[34;1mIMGMOUNT←[0m.
+Yeni VHD kalıbı başarıyla oluşturuldu. Onu, ←[34;1mIMGMOUNT←[0m ile bağlayabilirsiniz.
 
 .
 :PROGRAM_VHDMAKE_ERROPEN
-Error, could not open image file "%s".
+Hata, "%s" kalıp dosyası açılamadı.
 
 .
 :PROGRAM_VHDMAKE_BADSIZE
-Bad VHD size specified, aborting!
+Hatalı VHD büyüklüğü belirtildi, iptal ediliyor!
 
 .
 :PROGRAM_VHDMAKE_FNEEDED
-A pre-existing VHD image can't be silently overwritten without -f option!
+Var olan bir VHD kalıbının üzerine -f olmadan sessizce yazılamaz!
 
 .
 :PROGRAM_VHDMAKE_BADPARENT
-The parent VHD image "%s" can't be opened for linking, aborting!
+Üst VHD kalıbı "%s", bağlantılama için açılamıyor, iptal ediliyor!
 
 .
 :PROGRAM_VHDMAKE_NOINFO
-Couldn't query info for "%s".
+"%s" için bilgi sorgulanamadı.
 
 .
 :PROGRAM_VHDMAKE_BLOCKSTATS
-with %d/%d blocks allocated.
+ ayrılmış %d/%d blok ile.
 
 .
 :PROGRAM_VHDMAKE_INFO
-VHD "%s" type is %s.
-Its virtual size is %.02f MB
+VHD "%s" türü %s.
+Onun sanal büyüklüğü %.02f MB
 
 .
 :PROGRAM_VHDMAKE_CANTMERGE
-%s is not a Differencing disk, can't merge!
+%s bir fark diski değil, birleştirilemiyor!
 
 .
 :PROGRAM_VHDMAKE_MERGEREPORT
-%d sectors in %d blocks from "%s" merged into "%s".
+%d/%d dilim/blok, "%s" konumundan "%s" içine birleştirildi.
 
 .
 :PROGRAM_VHDMAKE_MERGENODELETE
-Couldn't remove snapshot "%s", you'll have to do it yourself!
+"%s" anlık görüntüsü kaldırılamadı, bunu sizin yapmanız gerekecek!
 
 .
 :PROGRAM_VHDMAKE_MERGEOKDELETE
-Snapshot VHD merged and deleted.
+VHD anlık görüntüsü birleştirildi ve silindi.
 
 .
 :PROGRAM_VHDMAKE_MERGEFAILED
-Failure while merging, aborted!
+Birleştirme sırasında hata, iptal edildi!
+
 .
 :PROGRAM_VHDMAKE_MERGEWARNCORRUPTION
-Parent "%s" contents could be corrupted!
+Üst öge "%s" içeriği hasar görmüş olabilir!
 
 .
 :PROGRAM_VHDMAKE_ABSPATH_WIN
-Warning: an absolute path to parent limits portability to Windows.
-Please prefer a path relative to differencing image file!
+Uyarı: Üst ögeye olan mutlak bir yol Windows'a olan taşınabilirliği sınırlar.
+Lütfen fark kalıbına göreceli olan bir yolu tercih edin!
 
 .
 :PROGRAM_VHDMAKE_ABSPATH_UX
-ERROR: an absolute path to parent inhibits portability.
-Use a path relative to differencing image file!
+HATA: Üst ögeye olan mutlak yol, taşınabilirliği engeller.
+Fark kalıbına göreceli olan bir yol kullanın!
 
 .
 :PROGRAM_VHDMAKE_HELP
-Creates Dynamic or Differencing VHD images, or converts raw images
-into Fixed VHD.
-←[32;1mVHDMAKE←[0m [-f] new.vhd size[BKMGT]
-←[32;1mVHDMAKE←[0m ←[34;1m-convert←[0m raw.hdd new.vhd
-←[32;1mVHDMAKE←[0m [-f] ←[34;1m-link←[0m parent.vhd new.vhd
+Devingen veya farksal VHD kalıpları oluşturur veya ham kalıpları sabit VHD
+olarak dönüştürür; VHD kalıpları hakkında bilgi gösterir ve onları birleştirir.
+←[32;1mVHDMAKE←[0m [-f] yeni.vhd boyut[BKMGT]
+←[32;1mVHDMAKE←[0m ←[34;1m-convert←[0m ham.hdd yeni.vhd
+←[32;1mVHDMAKE←[0m [-f] ←[34;1m-link←[0m üst-öge.vhd yeni.vhd
 ←[32;1mVHDMAKE←[0m ←[34;1m-merge←[0m delta.vhd
 ←[32;1mVHDMAKE←[0m ←[34;1m-info←[0m a.vhd
- -c | -convert  convert a raw hd image to Fixed VHD, renaming it to new.vhd
- -l | -link     create a new Differencing VHD new.vhd and link it to the
-                pre-existing parent image parent.vhd
- -f | -force    force overwriting a pre-existing image file
- -i | -info     show useful information about a.vhd image
- -m | -merge    merge differencing delta.vhd to its parent
- new.vhd        name of the new Dynamic VHD image to create
- size           disk size (eventually with size unit, Bytes is implicit)
-When converting a raw disk image to Fixed VHD, it has to be partitioned with
-MBR scheme and formatted with FAT format.
-When creating a Dynamic VHD, its size must range from 3 MB to 2040 GB.
-The Dynamic VHD created is not partitioned nor formatted: to directly mount to
-a drive letter with ←[34;1mIMGMOUNT←[0m, please consider using ←[34;1mIMGMAKE←[0m instead.
-A merged snapshot VHD is automatically deleted if merge is successful.
+ -c | -convert  ham bir disk kalıbını sabit VHD olarak dönüştürür,
+                  yeni.vhd olarak yeniden adlandırır
+ -l | -link     yeni bir farksal new.vhd oluşturur ve onu var olan üst öge
+                 üst-öge.vhd'ye bağlantılar
+ -f | -force    var olan bir kalıp dosyasının üzerine yazmayı zorla
+ -i | -info     bir a.VHD kalıbı hakkında yararlı bilgiler göster
+ -m | -merge    farksal delta.vhd kalıbını üst ögesine birleştir
+ yeni.vhd       oluşturulacak yeni devingen VHD kalıbının adı
+ boyut          disk büyüklüğü (bayt ima edilir)
+Ham bir disk kalıbını sabit VHD'ye dönüştürürken MBR şeması ile bölüntülenmeli
+ ve FAT ile biçimlendirilmelidir.
+Devingen bir VHD oluştururken büyüklüğü 3 MB ile 2040 GB arasında olmalıdır.
+Oluşturulan devingen VHD ne bölüntülenmiş ne de biçimlendirilmiştir; doğrudan
+  bir sürücü harfine ←[34;1mIMGMOUNT←[0m ile bağlamak için lütfen←[34;1mIMGMAKE←[0m
+  kullanmayı düşünün.
+Birleştirilmiş bir anlık görüntü VHD, birleştirme başarılıysa doğrudan silinir.
 .
 :SHELL_CMD_TREE_ERROR
-Bir alt dizin mevcut değil
+Var olan alt dizinler yok
 
 .
 :SHELL_CMD_VOL_TREE
@@ -1510,14 +1521,14 @@ Belirtilen tarih doğru değil.
 Geçerli tarih: 
 .
 :SHELL_CMD_DATE_SETHLP
-Değiştirmek için 'date %s' yazın.
+Değiştirmek için "date %s" yazın.
 
 .
 :SHELL_CMD_DATE_HELP_LONG
 DATE [[/T] [/H] [/S] | tarih]
   tarih:      Ayarlanacak yeni tarih
   /S:         Ana makine tarih ve zamanını DOS zamanı olarak kullan
-  /F:         DOSBox-X dahili zamanına geç (/S'in karşıtı)
+  /F:         DOSBox-X içsel zamanına geç (/S'in karşıtı)
   /T:         Yalnızca tarihi görüntüle
   /H:         Ana makine ile eşitle
 
@@ -1534,7 +1545,7 @@ Belirtilen zaman doğru değil.
 Geçerli zaman: 
 .
 :SHELL_CMD_TIME_SETHLP
-Değiştirmek için 'time %s' yazın.
+Değiştirmek için "time %s" yazın.
 
 .
 :SHELL_CMD_TIME_HELP_LONG
@@ -1545,7 +1556,7 @@ TIME [[/T] [/H] | zaman]
 
 .
 :SHELL_CMD_MKDIR_EXIST
-Dizin halihazırda mevcut - %s
+Dizin halihazırda var - %s
 
 .
 :SHELL_CMD_MKDIR_ERROR
@@ -1557,10 +1568,10 @@ Geçersiz yol, dizin değil veya dizin boş değil - %s
 
 .
 :SHELL_CMD_RMDIR_FULLTREE_CONFIRM
-Delete directory "%s" and all its subdirectories? (Y/N)?
+"%s" dizini ve tüm alt dizinleri silinsin mi? (E/H)?
 .
 :SHELL_CMD_RMDIR_SINGLE_CONFIRM
-Delete file "%s" (Y/N)?
+"%s" dosyası silinsin mi (E/H)?
 .
 :SHELL_CMD_RENAME_ERROR
 Yeniden adlandırılamıyor - %s
@@ -1579,11 +1590,11 @@ Silinemiyor - %s
 
 .
 :SHELL_CMD_DEL_CONFIRM
-Delete %s (Y/N)?
+%s silinsin mi (E/H)?
 .
 :SHELL_CMD_DEL_SURE
 Dizindeki tüm dosyalar silinecek!
-Emin misiniz [Y/N]?
+Emin misiniz [E/H]?
 .
 :SHELL_SYNTAXERROR
 Sözdizim hatası
@@ -1626,7 +1637,7 @@ Dosya bulunamadı - %s
 
 .
 :SHELL_CMD_FILE_EXISTS
-%s dosyası halihazırda mevcut.
+%s dosyası halihazırda var.
 
 .
 :SHELL_CMD_DIR_INTRO
@@ -1647,24 +1658,24 @@ Listelenen toplam dosyalar:
 
 .
 :SHELL_EXECUTE_DRIVE_NOT_FOUND
-%c sürücüsü mevcut değil!
+%c sürücüsü yok!
 Onu öncelikle ←[31mmount←[0m yapmalısınız. Ek bilgi için ←[1;33mintro←[0m veya ←[1;33mintro mount←[0m yazın.
 
 .
 :SHELL_EXECUTE_DRIVE_ACCESS_CDROM
-DOSBox-X'e %c CD-ROM sürücünüze erişim vermek istediğinize emin misiniz [Y/N]?
+DOSBox-X'e %c CD-ROM sürücünüze erişim vermek istediğinize emin misiniz [E/H]?
 .
 :SHELL_EXECUTE_DRIVE_ACCESS_FLOPPY
-DOSBox-X'e %c disket sürücünüze erişim vermek istediğinize emin misiniz [Y/N]?
+DOSBox-X'e %c disket sürücünüze erişim vermek istediğinize emin misiniz [E/H]?
 .
 :SHELL_EXECUTE_DRIVE_ACCESS_REMOVABLE
-DOSBox-X'e %c sürücünüze erişim vermek istediğinize emin misiniz [Y/N]?
+DOSBox-X'e %c sürücünüze erişim vermek istediğinize emin misiniz [E/H]?
 .
 :SHELL_EXECUTE_DRIVE_ACCESS_NETWORK
-DOSBox-X'e %c ağ sürücünüze erişim vermek istediğinize emin misiniz [Y/N]?
+DOSBox-X'e %c ağ sürücünüze erişim vermek istediğinize emin misiniz [E/H]?
 .
 :SHELL_EXECUTE_DRIVE_ACCESS_FIXED
-DOSBox-X'e %c sabit diskinize erişim vermek istediğinize emin misiniz [Y/N]?
+DOSBox-X'e %c sabit diskinize erişim vermek istediğinize emin misiniz [E/H]?
 .
 :SHELL_EXECUTE_ILLEGAL_COMMAND
 Hatalı komut veya dosya adı - "%s"
@@ -1691,7 +1702,7 @@ Kopyalama hatası - %s
 
 .
 :SHELL_CMD_COPY_CONFIRM
-%s üzerine yazılsın mı (Yes/No/All)?
+%s üzerine yazılsın mı (Evet/Hayır/Tümü)?
 .
 :SHELL_CMD_COPY_NOSPACE
 Yetersiz disk alanı - %s
@@ -1702,7 +1713,8 @@ Kopyalama hatası - %s
 
 .
 :SHELL_CMD_COPY_NOSELF
-File cannot be copied onto itself♪
+Dosya kendi üzerine kopyalanamaz
+
 
 .
 :SHELL_CMD_SUBST_DRIVE_LIST
@@ -1755,7 +1767,7 @@ Kabuk komutları için ←[32mHELP←[37m, kısa bir giriş için ←[32mINTRO�
 .
 :SHELL_STARTUP_TEXT2_PC98
 ←[33mYapılandırma aracı←[37m'nı aracını başlatmak için ←[31mhost+C←[37m kullanın. Ana makine düğmesi ←[32mF11←[37m'dir.    
-←[33mEşlem düzenleyici←[37m'yi etkinleştirmek için ←[31mhost+M←[37m kullanın.    
+←[33mEşlem düzenleyicisi←[37m'ni etkinleştirmek için ←[31mhost+M←[37m kullanın.  
 Pencereli ve tam ekran kipi arasında geçiş yapmak için ←[31mhost+F←[37m kullanın.      
 Öykünülen CPU hızını ayarlamak için ←[31mhost+artı←[37m ve ←[31mhost+eksi←[37m kullanın.   
 .
@@ -1782,11 +1794,11 @@ Komutların listesini görmek için ←[32mHELP←[37m, kısa bir giriş için �
 .
 :SHELL_STARTUP_TEXT2
 -←[31mF11←[37m+←[31mF←[37m←[37m kestirmesini kullanarak pencereli/tam ekran kip arasında geçiş yapın.
--←[31mF11←[37m+←[31mC←[37m←[37m ←[33mYapılandırma aracı←[37m'nı, ←[31mF11←[37m+←[31mM←[37m←[37m ←[33mEşlem düzenleyici←[37m'yi çalıştırır.        
+-←[31mF11←[37m+←[31mC←[37m←[37m ←[33mYapılandırma aracı←[37m'nı, ←[31mF11←[37m+←[31mM←[37m←[37m ←[33mEşlem düzenleyicisi←[37m'ni çalıştırır.      
 -←[31mF11←[37m+←[31martı←[37m←[37m veya ←[31mF11←[37m+←[31meksi←[37m←[37m düğmeleri ile öykünme hızını artırın veya azaltın.  
 .
 :SHELL_STARTUP_DOSV
-←[32mDOS/V mode←[37m is now active. Try also ←[32mTTF CJK mode←[37m for a general DOS emulation.
+←[32mDOS/V kipi←[37m şimdi etkin. Genel DOS öykünmesi için ←[32mTTF CJK kipini←[37m deneyin.
 .
 :SHELL_STARTUP_CGA
 Kompozit CGA kipi desteklenmektedir. ←[31mCtrl+F8←[37m kullanarak kompozit çıkışı açın/kapatın.
@@ -1898,7 +1910,7 @@ DOSBox-X komut yardımını gösterir.
 HELP [/A or /ALL]
 HELP [komut]
 
-   /A veya /ALL   Desteklenen tüm dahili komutları listeler.
+   /A veya /ALL   Desteklenen tüm içsel komutları listeler.
    [komut]        Belirli bir komut için yardımı gösterir.
 
 ←[0mÖrn., ←[37;1mHELP COPY←[0m veya ←[37;1mCOPY /?←[0m COPY komutu için yardımı gösterir.
@@ -2121,7 +2133,7 @@ toplu-iş-ayarları  Toplu iş dosyası tarafından gerektirilen herhangi bir ko
 
 .
 :SHELL_CMD_SUBST_HELP
-Bir sürücüye bir dahili dizin atar.
+Bir sürücüye bir içsel dizin atar.
 
 .
 :SHELL_CMD_SUBST_HELP_LONG
@@ -2145,7 +2157,7 @@ LOADHIGH        [sürücü:][yol]dosyaadı [parametreler]
 
 .
 :SHELL_CMD_CHOICE_HELP
-Seçeneklerden birini seçmek için kullanıcının tuşa basmasını bekler.
+Seçeneklerden birini seçmek için kullanıcının düğmeye basmasını bekler.
 
 .
 :SHELL_CMD_CHOICE_HELP_LONG
@@ -2165,22 +2177,21 @@ Dosya özniteliklerini görüntüler veya değiştirir.
 
 .
 :SHELL_CMD_ATTRIB_HELP_LONG
-ATTRIB [+R | -R] [+A | -A] [+S | -S] [+H | -H] [sürücü:][yol][dosyaadı] [/S]
+ATTRIB [+R | -R] [+A | -A] [+S | -S] [+H | -H] [sürücü:][yol][dosya-adı] [/S]
 
   +   Bir öznitelik ayarlar.
   -   Bir özniteliği temizler.
-  R   Saltokunur dosya özniteliği.
-  A   Arşiv dosyası özniteliği.
-  S   Sistem dosyası özniteliği.
-  H   Gizli dosya özniteliği.
-
-  [sürücü:][yol][dosyaadı]
-      ATTRIB'in işleyeceği dosya veya dizinleri belirtir.
+  R   Saltokunur dosya özniteliği
+  A   Arşiv dosyası özniteliği
+  S   Sistem dosyası özniteliği
+  H   Gizli dosya özniteliği
+  [sürücü:][yol][dosya-ado]
+      ATTRIB'in işlemesi için dosyaları veya dizini belirtir.
   /S  Belirtilen yoldaki tüm dizinlerdeki dosyaları işler.
 
 .
 :SHELL_CMD_PATH_HELP
-Çalıştırılabilir dosyalar için bir yol ayarlar veya görüntüler.
+Yürütülebilir dosyalar için bir yol ayarlar veya görüntüler.
 
 .
 :SHELL_CMD_PATH_HELP_LONG
@@ -2193,7 +2204,7 @@ Geçerli yolu görüntülemek için parametresiz PATH yazın.
 .
 :SHELL_CMD_PUSHD_HELP
 Geçerli dizini POPD komutuyla kullanılabilmesi için depolar,
-           sonra belirtilen dizine geçer.
+  sonra belirtilen dizine geçer.
 
 .
 :SHELL_CMD_PUSHD_HELP_LONG
@@ -2361,7 +2372,7 @@ CTTY aygıt
 
 .
 :SHELL_CMD_MORE_HELP
-Bir kezde tek ekranlık çıktı görüntüler.
+Tek kerede bir ekranlık çıktı görüntüler.
 
 .
 :SHELL_CMD_MORE_HELP_LONG
@@ -2383,19 +2394,20 @@ Programı ses ve video yakalaması ile çalıştırır.
 
 .
 :SHELL_CMD_DXCAPTURE_HELP_LONG
-DX-CAPTURE [/V|/-V] [/A|/-A] [/M|/-M] [komut] [seçenekler]
+DX-CAPTURE [/V|/-V] [/A|/-A] [/M|/-M] [/O|/-O] [komut] [seçenekler]
 
-Ses veya video yakalamasını başlatır, programı çalıştırır ve program çıktığında yakalamayı kendiliğinden durdurur.
-
+Video veya ses yakalamasını başlatır, program çalıştırır ve program çıktığında
+kendiliğinden yakalamayı durdurur. Video için /V, ses için /A for audio, çok
+izli ses için /M ve OPL FM (DROv2 biçimi) için /O kullanın.
 .
 :SHELL_CMD_DEBUGBOX_HELP
-Programı çalıştırır ve giriş noktasında hata ayıklayıcıya geçer.
+Programı çalıştırır ve giriş noktasında hata ayıklayıcısına geçer.
 
 .
 :SHELL_CMD_DEBUGBOX_HELP_LONG
 DEBUGBOX [komut] [seçenekler]
 
-Hata ayıklayıcıya başlatmak için parametresiz DEBUGBOX yazın.
+Hata ayıklayıcısını başlatmak için parametresiz DEBUGBOX yazın.
 
 .
 :SHELL_CMD_COMMAND_HELP
@@ -2423,6 +2435,9 @@ Hızlı program başlat...
 .
 :MENU:mapper_shutdown
 DOSBox-X'ten çık
+.
+:MENU:mapper_capkeyboard
+Klavyeyi yakala
 .
 :MENU:mapper_capmouse
 Fareyi yakala
@@ -2455,7 +2470,7 @@ Yarıda kesmeler etkinken durdur
 Yapılandırma aracı
 .
 :MENU:mapper_mapper
-Eşlem düzenleyici
+Eşlem düzenleyicisi
 .
 :MENU:mapper_fullscr
 Tam ekrana gir/çık
@@ -2515,112 +2530,112 @@ CPU hızını öykün
 8088 XT 4.77MHz (~240 çevrim)
 .
 :MENU:cpu286-8
-286 8MHz (~750 çevrim)
+286 8 MHz (~750 çevrim)
 .
 :MENU:cpu286-12
-286 12MHz (~1510 çevrim)
+286 12 MHz (~1510 çevrim)
 .
 :MENU:cpu286-25
-286 25MHz (~3300 çevrim)
+286 25 MHz (~3300 çevrim)
 .
 :MENU:cpu386-25
-386DX 25MHz (~4595 çevrim)
+386DX 25 MHz (~4595 çevrim)
 .
 :MENU:cpu386-33
-386DX 33MHz (~6075 çevrim)
+386DX 33 MHz (~6075 çevrim)
 .
 :MENU:cpu486-33
-486DX 33MHz (~12010 çevrim)
+486DX 33 MHz (~12010 çevrim)
 .
 :MENU:cpu486-66
-486DX2 66MHz (~23880 çevrim)
+486DX2 66 MHz (~23880 çevrim)
 .
 :MENU:cpu486-100
-486DX4 100MHz (~33445 çevrim)
+486DX4 100 MHz (~33445 çevrim)
 .
 :MENU:cpu486-133
-486DX5 133MHz (~47810 çevrim)
+486DX5 133 MHz (~47810 çevrim)
 .
 :MENU:cpu586-60
-Pentium 60MHz (~31545 çevrim)
+Pentium 60 MHz (~31545 çevrim)
 .
 :MENU:cpu586-66
-Pentium 66MHz (~35620 çevrim)
+Pentium 66 MHz (~35620 çevrim)
 .
 :MENU:cpu586-75
-Pentium 75MHz (~43500 çevrim)
+Pentium 75 MHz (~43500 çevrim)
 .
 :MENU:cpu586-90
-Pentium 90MHz (~52000 çevrim)
+Pentium 90 MHz (~52000 çevrim)
 .
 :MENU:cpu586-100
-Pentium 100MHz (~60000 çevrim)
+Pentium 100 MHz (~60000 çevrim)
 .
 :MENU:cpu586-120
-Pentium 120MHz (~74000 çevrim)
+Pentium 120 MHz (~74000 çevrim)
 .
 :MENU:cpu586-133
-Pentium 133MHz (~80000 çevrim)
+Pentium 133 MHz (~80000 çevrim)
 .
 :MENU:cpu586-166
-Pentium 166MHz MMX (~97240 çevrim)
+Pentium 166 MHz MMX (~97240 çevrim)
 .
 :MENU:cpuak6-166
-AMD K6 166MHz (~110000 çevrim)
+AMD K6 166 MHz (~110000 çevrim)
 .
 :MENU:cpuak6-200
-AMD K6 200MHz (~130000 çevrim)
+AMD K6 200 MHz (~130000 çevrim)
 .
 :MENU:cpuak6-300
-AMD K6-2 300MHz (~193000 çevrim)
+AMD K6-2 300 MHz (~193000 çevrim)
 .
 :MENU:cpuath-600
-AMD Athlon 600MHz (~306000 çevrim)
+AMD Athlon 600 MHz (~306000 çevrim)
 .
 :MENU:cpu686-866
-Pentium III 866MHz EB (~407000 çevrim)
+Pentium III 866 MHz EB (~407000 çevrim)
 .
 :MENU:VideoMenu
 Video
 .
 :MENU:VideoFrameskipMenu
-Çerçeve atlama
+Kare atla
 .
 :MENU:frameskip_0
 Kapalı
 .
 :MENU:frameskip_1
-1 çerçeve
+1 kare
 .
 :MENU:frameskip_2
-2 çerçeve
+2 kare
 .
 :MENU:frameskip_3
-3 çerçeve
+3 kare
 .
 :MENU:frameskip_4
-4 çerçeve
+4 kare
 .
 :MENU:frameskip_5
-5 çerçeve
+5 kare
 .
 :MENU:frameskip_6
-6 çerçeve
+6 kare
 .
 :MENU:frameskip_7
-7 çerçeve
+7 kare
 .
 :MENU:frameskip_8
-8 çerçeve
+8 kare
 .
 :MENU:frameskip_9
-9 çerçeve
+9 kare
 .
 :MENU:frameskip_10
-10 çerçeve
+10 kare
 .
 :MENU:VideoRatioMenu
-en boy oranı
+En-boy oranı
 .
 :MENU:video_ratio_1_1
 1:1
@@ -2641,28 +2656,28 @@ en boy oranı
 18:10
 .
 :MENU:video_ratio_original
-orijinal oran
+Özgün oran
 .
 :MENU:video_ratio_set
 Oranı ayarla
 .
 :MENU:VideoPreventCaptureMenu
-Screen capture control
+Ekran yakalama denetimi
 .
 :MENU:prevcap_none
-Allow
+İzin ver
 .
 :MENU:prevcap_blank
-Show as blank
+Boş olarak göster
 .
 :MENU:prevcap_invisible
-Make invisible
+Görünmez yap
 .
 :MENU:VideoScalerMenu
 Ölçekleyici
 .
 :MENU:scaler_set_none
-Hiçbiri
+Yok
 .
 :MENU:scaler_set_normal2x
 Normal 2X
@@ -2749,13 +2764,13 @@ xBRZ
 xBRZ İkidoğrulu
 .
 :MENU:center_window
-Center window
+Pencereyi ortala
 .
 :MENU:set_titletext
 Başlık çubuğu metnini ayarla...
 .
 :MENU:set_transparency
-Şeffaflığı ayarla...
+Saydamlığı ayarla...
 .
 :MENU:refresh_rate
 Yenileme hızını ayarla...
@@ -2782,7 +2797,7 @@ OpenGL mükemmel
 TrueType yazıtipi
 .
 :MENU:output_gamelink
-Game Link
+Oyun bağlantısı
 .
 :MENU:doublescan
 Çift tarama
@@ -2992,7 +3007,7 @@ Ses karıştırıcısı düzeyini göster
 Sound Blaster yapılandırmasını göster
 .
 :MENU:midi_info
-MIDI aygıt yapılandırmasını göster
+MIDI/OPL aygıt yapılandırmasını göster
 .
 :MENU:DOSMenu
 DOS
@@ -3052,10 +3067,10 @@ Uzun dosya adı öykünmesini devre dışı bırak
 PC-98 PIT ana saat
 .
 :MENU:dos_pc98_pit_4mhz
-4MHz/8MHz PIT ana saat
+4 MHz/8 MHz PIT ana saat
 .
 :MENU:dos_pc98_pit_5mhz
-5MHz/10MHz PIT ana saat
+5 MHz/10 MHz PIT ana saat
 .
 :MENU:DOSEMSMenu
 Genişletilmiş bellek (EMS)
@@ -3112,7 +3127,7 @@ MPEG-TS + H.264
 Kaydetme/yükleme seçenekleri
 .
 :MENU:saveslotmenu
-Kayıt slotu seç
+Kayıt yuvası seç
 .
 :MENU:enable_autosave
 Kendiliğinden durum kaydetmesini etkinleştir
@@ -3124,7 +3139,7 @@ Durum kaydedilirken bildirim yapma
 Durum yüklenirken uyarı verme
 .
 :MENU:removestate
-Slottaki durumu kaldır
+Yuvadaki durumu kaldır
 .
 :MENU:refreshslot
 Ekran durumunu yenile
@@ -3133,7 +3148,7 @@ Ekran durumunu yenile
 Son kendiliğinden kaydedilen slotu seç
 .
 :MENU:usesavefile
-Slota kaydetme yerine dosyaya kaydetme kullan
+Yuvaya kaydetme yerine dosyaya kaydetme kullan
 .
 :MENU:autosavecfg
 Kendiliğinden kaydetme ayarları...
@@ -3235,7 +3250,7 @@ DOSBox-X hakkında
 Günlükleme konsolunu göster
 .
 :MENU:clear_console
-Clear logging console
+Günlükleme konsolunu temizle
 .
 :MENU:disable_logging
 Günlük çıkışını devre dışı bırak
@@ -3262,13 +3277,13 @@ Hata ayıklayıcı seçeneğil: Normal kipte çalış
 Hata ayıklayıcı seçeneğil: İzlemeyi çalıştır
 .
 :MENU:video_debug_overlay
-Video debug overlay
+Video hata ayıklama bindirmesi
 .
 :MENU:HelpCommandMenu
 DOS komutları
 .
 :MENU:DebugMenu
-Hata Ayıklama
+Hata ayıkla
 .
 :MENU:HelpDebugMenu
 Günlükleme konsolu
@@ -3346,7 +3361,7 @@ MIDI çıktısı kaydet
 FM (OPL) çıktısı kaydet
 .
 :MENU:mapper_capnetrf
-Record network traffic
+Ağ trafiğini kaydet
 .
 :MENU:mapper_video
 Videoyu AVI olarak kaydet
@@ -3355,7 +3370,7 @@ Videoyu AVI olarak kaydet
 Ekran görüntüsü al
 .
 :MENU:mapper_rawscrshot
-Take raw screenshot
+Ham ekran görüntüsü al
 .
 :MENU:mapper_volup
 Ses düzeyini artır
@@ -3499,7 +3514,7 @@ DOS ekranındaki tüm metni kopyala
 DOS pano aygıt erişimini etkinleştir
 .
 :MENU:clipboard_dosapi
-Uygulamalar için DOS pano API'ını etkinleştir
+Uygulamalar için DOS pano API'sini etkinleştir
 .
 :MENU:clipboard_biospaste
 Pano yapıştırması için BIOS işlevini kullan
@@ -3607,7 +3622,7 @@ IDE disk veya CD durumunu göster
 ABD klavye dizilimi kullan
 .
 :MAPPER:capnetrf
-Record Network traffic
+Ağ trafiğini kaydet
 .
 :MAPPER:caprawopl
 FM/OPL çıktısı kaydet
@@ -3694,600 +3709,857 @@ CPU: Yalın çekirdek
 Menü çubuğunu aç/kapa
 .
 :PROGRAM_FLAGSAVE_UNFLAGALL
-All files unflagged for saving.
+Tüm dosyaların bayrağı kaydedilmemeleri için kaldırıldı.
 
 .
 :PROGRAM_FLAGSAVE_UNFLAGGED
-File %s unflagged for saving.
+%s dosyasının bayrağı kaydedilmemesi için kaldırıldı.
 
 .
 :PROGRAM_FLAGSAVE_FLAGGED
-File already flagged for saving - %s
+Dosya halihazırda kaydedilmesi için bayraklandı - %s
 
 .
 :PROGRAM_FLAGSAVE_TOOMANY
-Too many files to flag for saving.
+Kaydetme için pek fazla dosya bayraklanması gerekiyor.
 
 .
 :PROGRAM_FLAGSAVE_SAVED
-File %s flagged for saving
+%s dosyası kaydedilmesi için bayraklandı
 
 .
 :PROGRAM_FLAGSAVE_LIST
-Files flagged for saving:
+Kaydedilmeleri için bayraklanan dosyalar:
 .
 :PROGRAM_FLAGSAVE_HLP
-Marks or flags files to be saved for the save state feature.
+Durumu kaydet özelliği için dosyaları imler veya bayrak koyar.
 
-FLAGSAVE [file(s) [/F] [/R]] [/U]
+FLAGSAVE [dosya(lar) [/F] [/R]] [/U]
 
-  file(s)     Specifies one or more files to be flagged for saving.
-  /F          Forces to flag the file(s) even if they are not found.
-  /R          Removes flags from the specified file(s).
-  /U          Removes flags from all flagged files.
+  dosya(lar)  Kayıt için bir veya daha fazla dosyaya bayrak koyar.
+  /F          Bulunamasalar bile dosyalara bayrak koymayı zorlar.
+  /R          Belirtilen dosyalardan bayrakları kaldırır.
+  /U          Tüm bayrak koyulan dosyalardan bayrakları kaldırır.
 
-Type FLAGSAVE without a parameter to list flagged files.
+Bayrak koyulan dosyaları listelemek için parametresiz FLAGSAVE yazın.
 
 .
 :PROGRAM_INT2FDBG_NOT_SET
-INT 2Fh hook has not been set.
+INT 2Fh kancası ayarlanmamış.
 
 .
 :PROGRAM_INT2FDBG_ALREADY
-INT 2Fh hook has already been set.
+INT 2Fh kancası halihazırda ayarlı.
 
 .
 :PROGRAM_INT2FDBG_HELP
-Hooks INT 2Fh for debugging purposes.
+Hata ayıklama amaçlı olarak INT 2Fh kancalarını kurar.
 
-INT2FDBG [option]
-  /I      Installs hook
+INT2FDBG [seçenek]
+  /I      Kancayı kurar
   
-It will hook INT 2Fh at the top of the call chain for debugging information.
+Hata ayıklama bilgisi için çağrı zincirinin en üstüne INT 2Fh kancasını kurar.
 
-Type INT2FDBG without a parameter to show the current hook status.
+Şu anki kanca durumunu görmek için parametresiz INT2FDBG yazın.
 .
 :PROGRAM_SET80x25
-Changes to 80x25 text mode.
+80 x 25 metin kipine geçer.
 .
 :PROGRAM_SET80x43
-Changes to 80x43 text mode.
+80 x 43 metin kipine geçer.
 .
 :PROGRAM_SET80x50
-Changes to 80x50 text mode.
+80 x 50 metin kipine geçer.
 .
 :PROGRAM_SET80x60
-Changes to 80x60 text mode.
+80 x 60 metin kipine geçer.
 .
 :PROGRAM_SET132x25
-Changes to 132x25 text mode.
+132 x 25 metin kipine geçer.
 .
 :PROGRAM_SET132x43
-Changes to 132x43 text mode.
+132 x 43 metin kipine geçer.
 .
 :PROGRAM_SET132x50
-Changes to 132x50 text mode.
+132 x 50 metin kipine geçer.
 .
 :PROGRAM_SET132x60
-Changes to 132x60 text mode.
+132 x 60 metin kipine geçer.
 .
 :PROGRAM_RESCAN_HELP
-Rescans for changes on mounted drives made on the host by clearing caches.
+Önbellekleri temizleyerek makinedeki bağlı sürücüleri değişiklikler için tarar.
 
 RESCAN [/A] [/Q]
-RESCAN [drive:] [/Q]
+RESCAN [sürücü:] [/Q]
 
-  [/A]     Rescan all drives
-  [/Q]     Enable quiet mode
-  [drive:] The drive to rescan
+  [/A]      Tüm sürücüleri yeniden tara
+  [/Q]      Sessiz kipi etkinleştir
+  [sürücü:] Yeniden taranacak sürücü
 
-Type RESCAN with no parameters to rescan the current drive.
+Geçerli sürücüyü yeniden taramak için parametresiz RESCAN yazın.
 
 .
 :PROGRAM_CFGTOOL_HELP
-Starts DOSBox-X's graphical configuration tool.
+DOSBox-X'in grafiksel yapılandırma aracını başlatır.
 
 CFGTOOL
 
-Note: You can also use CONFIG command for command-line configurations.
+Not: Komut satırı yapılandırması için ayrıca CONFIG komutunu kullanabilirsiniz.
 .
 :PROGRAM_IMGSWAP_HELP
-Swaps floppy, hard drive and optical disc images.
+Disket, sabit ve optik sürücü kalıplarını takas eder.
 
 ←[32;1mIMGSWAP←[0m ←[37;1mdrive←[0m ←[36;1m[position]←[0m
- ←[37;1mdrive←[0m               Drive letter to swap the image.
- ←[36;1m[position]←[0m          Disk position to swap to.
+ ←[37;1msürücü←[0m               Kalıbın takas edileceği sürücü harfi.
+ ←[36;1m[konum]←[0m          Takas edilecek disk konumu.
 .
 :PROGRAM_INTRO_HELP
-A full-screen introduction to DOSBox-X.
+DOSBox-X'e bir tam ekran giriş kılavuzu.
 
 INTRO [/RUN] [CDROM|MOUNT|USAGE|WELCOME]
 .
 :PROGRAM_IMGMOUNT_NOT_ASSIGNED
-BIOS disk index does not have an image assigned.
+BIOS disk indeksine atalı bir kalıp yok.
 .
 :PROGRAM_IMGMOUNT_INVALID_NUMBER
-Invalid mount number.
+Geçersiz bağlantı numarası.
 .
 :PROGRAM_IMGMOUNT_INVALID_FSTYPE
-Invalid fstype.
+Geçersiz fstype.
 .
 :PROGRAM_IMGMOUNT_INVALID_SIZE
-Invalid size parameter.
+Geçersiz boyut parametresi.
 .
 :PROGRAM_IMGMOUNT_NOT_MOUNTED_NUMBER
-Drive number %d is not mounted.
+%d sürücü numarası bağlı değil.
 .
 :PROGRAM_IMGMOUNT_UMOUNT_USAGE
-Incorrect IMGMOUNT unmount usage.
+Geçersiz IMGMOUNT bağlantı kesme kullanımı.
 .
 :PROGRAM_IMGMOUNT_INVALID_LETTER
-Invalid drive letter.
+Geçersiz sürücü harfi.
 .
 :PROGRAM_IMGMOUNT_CHOOSE_LETTER
-Partitions cannot be mounted in conflict with the standard INT 13h hard disk
-allotment. Choose a different drive letter to mount to.
+Bölüntüler, standart INT 13h sabit disk ayrımı ile çakıştıklarında bağlanamaz.
+Bağlamak için farklı bir sürücü harfi seçin.
 .
 :PROGRAM_ELTORITO_LETTER
-El Torito emulation requires a proper CD-ROM drive letter.
+El Torito öykünmesi düzgün bir CD-ROM sürücü harfi gerektirir.
 .
 :PROGRAM_ELTORITO_DRIVE_EXISTS
-El Torito CD-ROM drive specified already exists as a non-CD-ROM device
-.
+Belirtilen El Torito CD-ROM sürücüsü halihazırda CD-ROM dıyı bir aygıt olarak
+var.
+
 :PROGRAM_ELTORITO_NOT_CDDRIVE
-El Torito CD-ROM drive specified is not actually a CD-ROM drive.
+Belirtilen El Torito CD-ROM sürücüsü aslında bir CD-ROM sürücüsü değil.
 .
 :PROGRAM_ELTORITO_REQUIRE_FLOPPY
-El Torito emulation must be used with -t floppy at this time.
+El Torito öykünmesi bu sefer -t disketi ile kullanılmalı.
 .
 :PROGRAM_ELTORITO_NO_BOOT_RECORD
-El Torito CD-ROM boot record not found.
+El Torito CD-ROM önyükleme kaydı bulunamadı.
 .
 :PROGRAM_ELTORITO_ENTRY_UNREADABLE
-El Torito entries unreadable.
+El Torito girdileri okunabilir değil.
 .
 :PROGRAM_ELTORITO_NO_BOOTABLE_FLOPPY
-El Torito bootable floppy not found.
+El Torito önyüklenebilir disketi bulunamadı.
 .
 :PROGRAM_ELTORITO_BOOTABLE_SECTION
-Unable to locate bootable section
+Önyüklenebilir bölüm bulunamadı.
 .
 :PROGRAM_ELTORITO_BOOTSECTOR
-El Torito boot sector unreadable
+El Torito önyükleme dilimi okunabilir değil.
 .
 :PROGRAM_IMGMAKE_ALIGNMENT
-Invalid alignment
+Geçersiz hizalama
 .
 :PROGRAM_IMGMAKE_PARTOFS
-Invalid -partofs
+Geçersiz -partofs
 .
 :PROGRAM_IMGMAKE_FAT
-Invalid -fat option. Must be 12, 16, or 32
+Geçersiz -fat seçeneği. 12, 16 veya 32 olmalıdır.
 .
 :PROGRAM_IMGMAKE_FATCOPIES
-Invalid -fatcopies option
+Geçersiz -fatcopies seçeneği
 .
 :PROGRAM_IMGMAKE_SPC
-Invalid -spc option, out of range
+Geçersiz -spc seçeneği, erim dışında
 .
 :PROGRAM_IMGMAKE_SPC2
-Invalid -spc option, must be a power of 2
+Geçersiz -spc seçeneği, 2'nin bir üssü olmalı
 .
 :PROGRAM_IMGMAKE_ROOTDIR
-Invalid -rootdir option
+Geçersiz -rootdir seçeneği
 .
 PROGRAM_IMGMAKE_BOOTSECT
-Invalid bootsector position
+Geçersiz önyükleme dilimi konumu
 .
 PROGRAM_IMGMAKE_VOLUME_ALIGN
-Sanity check failed: Volume size not aligned
+Düzgünlük denetimi başarısız: Disk bölümü büyüklüğü hizalı değil
 .
 :PROGRAM_IMGMAKE_FAT_ALIGN
-Sanity check failed: FAT tables not aligned
+Düzgünlük denetimi başarısız: FAT tabloları hizalı değil
 .
 :PROGRAM_IMGMAKE_SECTPERFAT
-Error: Generated filesystem has more than 256 sectors per FAT and is not FAT32
+Hata: Üretilen dosya sisteminde FAT başına 256 dilimden fazla var ve FAT32 değil
 .
 :PROGRAM_IMGMAKE_VOLSIZE
-Sanity check failed: Volume size not aligned
+Düzgünlük denetimi başarısız: Disk bölümü büyüklüğü hizalı değil
 .
 :PROGRAM_IMGMAKE_CLUSTERS
-Error: Generated filesystem has too few clusters given the parameters
+Hata: Üretilen dosya sisteminde parametrelere göre pek az küme var
 .
 :PROGRAM_IMGMAKE_CLUSTERCOUNT
-Warning: Cluster count is too high given the volume size. 
-         Reporting a smaller sector count.
+Uyarı: Küme boyutu verilen disk bölümü büyüklüğüne göre pek yüksek.
+         Daha küçük bir dilim sayısı bildiriliyor.
 .
 :PROGRAM_IMGMAKE_CLUSTER_ALIGN
-Sanity check failed: First cluster not aligned
+Düzgünlük denetimi başarısız: İlk küme hizalanmamış
 .
 :PROGRAM_IMGMAKE_CLUSTER_SIZE
-WARNING: Cluster sizes >= 64KB are not compatible with MS-DOS and SCANDISK
+UYARI: 64 KB'den büyük küme boyutları MS-DOS ve SCANDISK ile uyumlu değildir
 .
 :PROGRAM_BOOT_UNSUPPORTED
-Unsupported boot mode
+Desteklenmeyen önyükleme kipi
 .
 :PROGRAM_MOUNT_OVERLAY_REPLACE
-Existing overlay has been replaced with new overlay.
+Var olan bindirme yenisiyle değiştirildi.
 .
 :PROGRAM_LOADFIX_EMS_FREE
-EMS handle %u: unable to free
+EMS tutacı %u: Boşaltılamıyor
 .
 :PROGRAM_LOADFIX_XMS_FREE
-XMS handle %u: unable to free
+XMS tutacı %u: Boşaltılamıyor
 .
 :PROGRAM_LOADFIX_EMS_ALLOC
-EMS block allocated (%uKB)
+Ayrılan EMS bloku (%u KB)
 .
 :PROGRAM_LOADFIX_EMS_ALLOCERROR
-Unable to allocate EMS block
+EMS bloku ayrılamıyor
 .
 PROGRAM_LOADFIX_NOEMS
-EMS not active
+EMS etkin değil
 .
 :PROGRAM_LOADFIX_XMS_ALLOC
-XMS block allocated (%uKB)
+Ayrılan XMS bloku (%u KB)
 .
 :PROGRAM_LOADFIX_XMS_ALLOCERROR
-Unable to allocate XMS block
+XML bloku ayrılamıyor
 .
 :PROGRAM_LOADFIX_NOXMS
-XMS not active
+XMS etkin değil
 .
 :PROGRAM_LOADFIX_NOALLOC
-Lowest MCB is above 64KB, nothing allocated
+En düşük MCB 64 KB'den yüksek, bir şey ayrılmadı
 .
 :PROGRAM_BOOT_SWAP_ALREADY
-Multiple disk images specified and another drive is already connected to the swap list
+Birden çok disk kalıbı belirtildi ve başka bir sürücü halihazırda takas
+listesinde kayıtlı
 .
 :PROGRAM_BOOT_NOT_SPECIFIED
-No images specified
+Belirtilen kalıp yok
 .
 :PROGRAM_BOOT_IS_PC88
-The D88 image appears to target PC-88 and cannot be booted.
+D88 kalıbı PC-88'i hedefliyor gibi görünüyor ve önyüklenemez.
 .
 :PROGRAM_BOOT_BPS_TOOLARGE
-Bytes/sector too large
+Bayt/dilim pek büyük
 .
 :PROGRAM_BOOT_DRIVE_READERROR
-Error reading drive
+Sürücü okunurken hata
 .
 :PROGRAM_START_HELP_WIN
-Starts a separate window to run a specified program or command.
+Belirli bir komutu veya programı çalıştırmak için ayrı bir pencere başlatır.
 
-START [+|-|_] command [arguments]
+START [+|-|_] komut [argümanlar]
 
-  [+|-|_]: To maximize/minimize/hide the program.
-  The options /MAX, /MIN, /HID are also accepted.
-  command: The command, program or file to start.
-  arguments: Arguments to pass to the application.
+  [+|-|_]:    Programı büyüt/küçült/gizle.
+                /MAX, /MIN, /HID seçenekleri de kabul edilir.
+  komut:      Başlatılacak komut, program veya dosya.
+  argümanlar: Uygulamaya geçirilecek argümanlar.
   
-START opens the Windows command prompt automatically to run these commands
-and wait for a key press before exiting (specified by "startincon" option):
+START, bu komutları çalıştırmak için Windows komut istemini kendiliğinden açar
+  ve çıkmadan önce bir düğme basımını bekler ("startincon" seçeneği ile):
 %s
 
-Note: The path specified in this command is the path on the host system.
+Not: Bu komutta belirtilen yol, ana makine sistemindeki yoldur.
 .
 :PROGRAM_START_HELP
-Starts a separate window to run a specified program or command.
+Belirli bir programı veya komutu çalıştırmak için ayrı bir pencere başlatır.
 
-START /OPEN file
-START command [arguments]
+START /OPEN dosya
+START komut [argümanlar]
 
-  /OPEN: To open a file or URL with the associated program.
-  file: The file or URL to open with the associated program.
-  command: The command or program to start or run.
-  arguments: Arguments to pass to the application.
+  /OPEN:      İlişkili programla dosya veya URL açmak için kullanın.
+  dosya:      İlişkili programla açılacak dosya veya URL.
+  komut:      Başlatılacak veya çalıştırılacak komut veya program.
+  argümanlar: Uygulamaya geçirilecek argümanlar.
   
-Note: The path specified in this command is the path on the host system.
+Not: Bu komutta belirtilen yol, ana makine sistemindeki yoldur.
 .
 :PROGRAM_START_COMPLETED
-The command execution is completed.
+Komut yürütmesi tamamlandı.
 .
 :PROGRAM_START_COMMAND
-Starting %s...
+%s başlatılıyor...
 .
 :PROGRAM_START_CTRLC
-(Press Ctrl+C to exit immediately)
+(Hemen çıkmak için Ctrl+C kısayolunu kullanın)
 .
 :PROGRAM_START_HOST_ERROR
-Error: START cannot launch application to run on your current host system.
+Hata: START, geçerli makinenizde çalıştırmak üzere uygulamayı başlatamıyor.
 .
 :PROGRAM_START_LAUNCH_ERROR
-Error: START could not launch application.
+Hata: START, uygulamayı başlatamadı.
 .
 :PROGRAM_IMGMOUNT_ELTORITO_NO_FILE
-Do not specify files when mounting floppy drives from El Torito bootable CDs
+El Torito önyüklenebilir CD'lerinden disketleri bağlarken dosyaları belirtme
 .
 :PROGRAM_IMGMOUNT_RAMDRIVE_NO_FILE
-Do not specify files when mounting RAM drives
+RAM sürücülerini bağlarken dosyaları belirtme
 .
 :PROGRAM_IMGMOUNT_INVALID_SECTORSIZE
-Sector size must be larger than 512 bytes and evenly divide the image cluster size of %lu bytes.
+Dilim boyutu 512 bayttan daha büyük ve %lu baytlık kalıp kümesini kalansız
+  bölmelidir.
 .
 :PROGRAM_IMGMOUNT_OPEN_ERROR
-Unable to open '%s'
+"%s" açılamıyor
 .
 :PROGRAM_IMGMOUNT_QCOW2_INVALID
-qcow2 image '%s' is not supported
+qcow2 kalıbı "%s" desteklenmiyor
 .
 :PROGRAM_IMGMOUNT_GEOMETRY_ERROR
-Unable to detect geometry
+Geometri algılanamıyor
 .
 :PROGRAM_IMGMOUNT_DOS_VERSION
-Mounting this image file requires a reported DOS version of %u.%u or higher.
+Bu kalıbı bağlamak için bildirilen DOS sürümü %u.%u veya daha yüksek olmalıdır.
 %s
 .
 :PROGRAM_IMGMOUNT_INVALID_FLOPPYSIZE
-Floppy size not recognized
+Disket büyüklüğü tanınamadı
 .
 :PROGRAM_IMGMOUNT_MULTIPLE_USED
-Multiple images given and another drive already uses multiple images
+Çoklu kalıp verildi ve başka sürücü halihazırda birden çok kalıp kullanıyor.
 .
 :PROGRAM_IMGMOUNT_MULTIPLE_NOTSUPPORTED
-Multiple disk images not supported for that drive
+Bu sürücü için birden çok disk kalıbı desteklenmiyor.
 .
 :PROGRAM_IMGMOUNT_HD_FDPOSITION
-Cannot mount hard drive in floppy position.
+Disket konumuna sabit disk bağlanamıyor.
 .
 :PROGRAM_IMGMOUNT_FD_HDPOSITION
-Cannot mount floppy in hard drive position.
+Sabit disk konumuna disket bağlanamıyor.
 .
 :PROGRAM_ELTORITO_ISOMOUNT
-El Torito bootable CD: -fs iso mounting not supported
+El Torito önyüklenebilir CD'si: -fs ISO bağlama desteklenmiyor
 .
 :PROGRAM_MODE_STATUS
-Status for device CON:
+Aygıt CON'u için durum:
 ----------------------
-Columns=%d
-Lines=%d
+Sütun = %d
+Satır = %d
 .
 :PROGRAM_MODE_NOTSUPPORTED
 
-Code page operation not supported on this device
+Bu aygıtta kod sayfası işlemi desteklenmiyor
 .
 :PROGRAM_MODE_RATE_DELAY
-Rate and delay must be specified together
+Hız ve gecikme birlikte belirtilmelidir
 .
 :PROGRAM_UTF8_HELP
-Converts UTF-8 text to view in the current code page.
+UTF-8 metni geçerli kod sayfasında görüntülemek üzere dönüştürür.
 
-UTF8 < [drive:][path]filename
-command-name | UTF8
+UTF8 < [sürücü:][yol]dosya-adı
+komut-adı | UTF8
 .
 :PROGRAM_UTF8_NO_TEXT
-No input text found.
+Girdi metni bulunamadı.
 .
 :PROGRAM_UTF8_INVALIDCP
-Invalid code page for text conversion.
+Metin dönüşümü için geçersiz kod sayfası.
 .
 :PROGRAM_UTF8_NOT_UTF8
-The input text is UTF-16.
+Girdi metni UTF-16.
 .
 :PROGRAM_UTF8_CONVERSION_ERROR
-An error occurred during text conversion.
+Metin dönüştürme sırasında bir hata oluştu.
 .
 :PROGRAM_UTF16_HELP
-Converts UTF-16 text to view in the current code page.
+UTF-16 metni geçerli kod sayfasında görüntülemek üzere dönüştürür.
 
-UTF16 [/BE|/LE] < [drive:][path]filename
-command-name | UTF16 [/BE|/LE]
+UTF16 [/BE|/LE] < [sürücü:][yol]dosya-adı
+komut-adı | UTF16 [/BE|/LE]
 
-  /BE  Use UTF-16 Big Endian
-  /LE  Use UTF-16 Little Endian
+  /BE  UTF-16 büyük son haneli kullan
+  /LE  UTF-16 küçük son haneli kullan
 .
 :PROGRAM_VTEXT_HELP
-Changes V-text mode for the DOS/V emulation.
+DOS-V öykünmesi için V-text kipini değiştirir.
 
-VTEXT [mode]
+VTEXT [kip]
 
-  [mode] can be 0, 1, 2, for no V-text, V-text 1, and V-text 2 respectively.
+  [kip]; V-text yok, V-text 1 ve V-text 2 dönüşümü için 0, 1, 2 olabilir.
 
-Type VTEXT without a parameter to show the current V-text mode status.
+Geçerli V-text kipi durumunu görmek için parametresiz VTEXT yazın.
 .
 :PROGRAM_NMITEST_HELP
-Generates a non-maskable interrupt (NMI).
+Bir maskelenemez yarıda kesme üretir (NMI).
 
 NMITEST
 
-Note: This is a debugging tool to test if the interrupt handler works properly.
+Not: Bu, yarıda kesme işleyicisini sınayan bir hata ayıklama aracıdır.
 .
 :PROGRAM_NMITEST_GENERATE_NMI
-Generating a non-maskable interrupt (NMI)...
+Maskelenemez yarıda kesme (NMI) üretiliyor...
 .
 :PROGRAM_CAPMOUSE_HELP
-Captures or releases the mouse inside DOSBox-X.
+DOSBox-X içinde fareyi yakalar veya bırakır.
 
 CAPMOUSE [/C|/R]
 
-  /C Capture the mouse
-  /R Release the mouse
+  /C Fareyi yakala
+  /R Fareyi bırak
 .
 :PROGRAM_CAPMOUSE_MOUSE
-Mouse 
+Fare 
 .
 :PROGRAM_CAPMOUSE_CURRENTLY
-is currently 
+şu anda 
 .
 :PROGRAM_CAPMOUSE_CAPTURED
-captured
+yakalandı
 .
 :PROGRAM_CAPMOUSE_RELEASED
-released
+bırakıldı
 .
 :PROGRAM_AUTOTYPE_HELP
-Performs scripted keyboard entry into a running DOS program.
+Çalışan bir DOS programına önceden ayarlanmış bir klavye girişi yapar.
 
-AUTOTYPE [-list] [-w WAIT] [-p PACE] button_1 [button_2 [...]]
+AUTOTYPE [-list] [-w WAIT] [-p PACE] düğme_1 [düğme_2 [...]]
 
-Where:
-  -list:   prints all available button names.
-  -w WAIT: seconds before typing begins. Two second default; max of 30.
-  -p PACE: seconds between each keystroke. Half-second default; max of 10.
+Kullanım:
+  -list:   Tüm kullanılabilir düğme adlarını yazdırır.
+  -w SAN:  Yazma başlamadan önceki bekleme saniyesi. Öntanımlı 2, en çok 30.
+  -p HIZ:  Her bir düğme basımı arasındaki saniye. Öntanımlı yarım, en çok 10.
   
-  The sequence is comprised of one or more space-separated buttons.
-  Autotyping begins after WAIT seconds, and each button is entered
-  every PACE seconds. The , character inserts an extra PACE delay.
+  Sekans, bir veya birden çok boşlukla ayrılmış düğmeden oluşur.
+  Kendiliğinden yazma SAN sonrası başlar ve her bir düğme HIZ ile girilir. ","
+  karakteri ek bir HIZ gecikmesi ekler.
   
-Some examples:
+Bazı örnekler:
   ←[32;1mAUTOTYPE -w 1 -p 0.3 up enter , right enter←[0m
   ←[32;1mAUTOTYPE -p 0.2 f1 kp_8 , , enter←[0m
   ←[32;1mAUTOTYPE -w 1.3 esc enter , p l a y e r enter←[0m
 .
 :PROGRAM_AUTOTYPE_NO_BINDINGS
-AUTOTYPE: The mapper has no key bindings
+AUTOTYPE: Eşlemleyicide bir düğme bağıntısı yok
 .
 :PROGRAM_AUTOTYPE_CLAMP_VALUE
-AUTOTYPE: bounding %s value of %.2f to %.2f
+AUTOTYPE: Sınır %s değeri %.2f ila %.2f arasında
 .
 :PROGRAM_AUTOTYPE_INVALID_VALUE
-AUTOTYPE: %s value '%s' is not a valid floating point number
+AUTOTYPE: %s değeri "%s", geçerli bir kayan noktalı değer değil
 .
 :PROGRAM_ADDKEY_HELP
-Generates artificial keypresses.
+Yapay düğme basımları üretir.
 
-ADDKEY [pmsec] [key]
+ADDKEY [pmsan] [düğme]
 
-For example, the command below types "dir" followed by ENTER after 1 second:
+Örneğin, aşağıdaki komut, 1 saniye sonra ardından ENTER gelen bir "dir" yazar:
 
 ADDKEY p1000 d i r enter
 
-You could also try AUTOTYPE command instead of this command to perform
-scripted keyboard entry into a running DOS program.
+Çalışan bir DOS programına önceden ayarlanmış klavye girişleri yapmak için
+  bu komut yerine ayrıca AUTOTYPE programını kullanmayı da deneyebilirsiniz.
 .
 :PROGRAM_SETCOLOR_HELP
-Views or changes the text-mode color scheme settings.
+Metin kipi renk şeması ayarlarını görüntüler veya değiştirir.
 
-SETCOLOR [color# [value]]
+SETCOLOR [renk# [değer]]
 
-For example:
+Örneğin:
 
    ←[32;1mSETCOLOR 0 (50,50,50)←[0m
-Change Color #0 to the specified color value
+Renk #0 değerini belirtilen renk değerine değiştirir
 
    ←[32;1mSETCOLOR 7 -←[0m
-Return Color #7 to the default color value
+Renk #7 değerini öntanımlı renk değerine döndürür
 
    ←[32;1mSETCOLOR 3 +←[0m
-Return Color #3 to the preset color value
+Renk #3 değerini önayar renk değerine döndürür
 
    ←[32;1mSETCOLOR MONO←[0m
-Display current MONO mode status
+Geçerli MONO durumunu görüntüler
 
-To change the current background and foreground colors, use COLOR command.
+Geçerli arka ve ön plan renklerini değiştirmek için COLOR komutunu kullanın.
 .
 :PROGRAM_SETCOLOR_STATUS
-MONO mode status: %s (video mode %d)
+MONO kipi durumu: %s (video kipi %d)
 
 .
 :PROGRAM_SETCOLOR_ACTIVE
-active
+etkin
 .
 :PROGRAM_SETCOLOR_INACTIVE
-inactive
+pasif
 .
 :PROGRAM_SETCOLOR_UNAVAILABLE
-unavailable
+kullanılamıyor
 .
 :PROGRAM_SETCOLOR_MONO_MODE7
-MONO mode status => active (video mode 7)
+MONO kipi durumu => etkin (video kipi 7)
 .
 :PROGRAM_SETCOLOR_MONO_MODE3
-MONO mode status => inactive (video mode 3)
+MONO kipi durumu => pasif (video kipi 3)
 .
 :PROGRAM_SETCOLOR_MONO_FAIL
-Failed to change MONO mode
+MONO kipi değiştirilemedi
 .
 :PROGRAM_SETCOLOR_MONO_SYNTAX
-Must be + or - for MONO: %s
+MONO için + veya - olmalı: %s
 .
 :PROGRAM_SETCOLOR_COLOR
-Color %d: (%d,%d,%d) or #%02x%02x%02x
+Renk %d: (%d,%d,%d) veya #%02x%02x%02x
 
 .
 :PROGRAM_SETCOLOR_INVALID_NUMBER
-Invalid color number - %s
+Geçersiz renk adı - %s
 .
 :PROGRAM_SETCOLOR_INVALID_VALUE
-Invalid color value - %s
+Geçersiz renk değeri - %s
 .
 :PROGRAM_SETCOLOR_NOT_SUPPORTED
-Changing color scheme is not supported for the current video mode.
+Geçerli video kipinde renk şemasını değiştirme desteklenmiyor.
 .
 :PROGRAM_BOOT_UNKNOWN_BOOTHAX
-Unknown boothax mode
+Bilinmeyen boothax kipi
 .
 :PROGRAM_BOOT_SPECIFY_FILE
-Must specify BIOS image to boot
+Önyüklenecek BIOS kalıbı belirtilmelidir
 .
 :PROGRAM_BOOT_BIOS_OPEN_ERROR
-Unable to open BIOS image
+BIOS kalıbı açılamıyor
 .
 :PROGRAM_BIOSTEST_SPECIFY_FILE
-Must specify BIOS file to load.
+Yüklenecek BIOS dosyası belirtilmelidir.
 .
 :PROGRAM_BIOSTEST_OPEN_ERROR
-Can't open a file
+Bir dosya açılamıyor
 .
 :PROGRAM_BIOSTEST_TOO_LARGE
-BIOS File too large
+BIOS dosyası pek büyük
 .
 :PROGRAM_DELTREE_HELP
-Deletes a directory and all the subdirectories and files in it.
+Bir dizini ve içindeki tüm alt dizinleri ve dosyaları siler.
 
-To delete one or more files and directories:
-DELTREE [/Y] [drive:]path [[drive:]path[...]]
+Bir veya birden çok dosyayı veya dizini silmek için:
+DELTREE [/Y] [sürücü:]yol [[sürücü:]yol[...]]
 
-  /Y              Suppresses prompting to confirm you want to delete
-                  the subdirectory.
-  [drive:]path    Specifies the name of the directory you want to delete.
+  /Y              Alt dizini silmek istediğinize dair olan ek onayı susturur..
+  [sürücü:]yol    Silmek istediğiniz dizinin adını belirtir.
 
-Note: Use DELTREE cautiously. Every file and subdirectory within the
-specified directory will be deleted.
+Not: DELTREE komutunu dikkatlice kullanın. Belirtilen dizindeki her bir dosya
+  ve alt dizin silinecektir.
 
 .
 :PROGRAM_TREE_HELP
-Graphically displays the directory structure of a drive or path.
+Bir sürücünün veya yolun dizin yapısını grafiksel olarak görüntüler.
 
-TREE [drive:][path] [/F] [/A]
+TREE [sürücü:][yol] [/F] [/A]
 
-  /F   Displays the names of the files in each directory.
-  /A   Uses ASCII instead of extended characters.
+  /F   Her bir dizindeki dosyaların adını görüntüler.
+  /A   Genişletilmiş karakterler yerine ASCII kullanır.
 
 .
 :PROGRAM_TITLE_HELP
-Sets the window title for the DOSBox-X window.
+DOSBox-X penceresi için olan pencere başlığını ayarlar.
 
-TITLE [string]
+TITLE [dizi]
 
-  string       Specifies the title for the DOSBox-X window.
+  dizi        DOSBox-X penceresi için olan başlığı ayarlar.
 
 .
 :PROGRAM_COLOR_HELP
-Sets the default console foreground and background colors.
+Öntanımlı konsol ön ve arka plan renklerini ayarlar.
 
-COLOR [attr]
+COLOR [öznitelik]
 
-  attr        Specifies color attribute of console output
+  öznitelik   Konsol çıktısının renk özniteliğini belirtir.
   
-Color attributes are specified by TWO hex digits -- the first
-corresponds to the background; the second to the foreground.
-Each digit can be any of the following values:
+Renk öznitelikleri İKİ adet onaltılık rakamla belirtilir - ilki arka plana,
+  ikincisi de ön plana aittir. Her bir rakam, aşağıdaki değerlerden biri
+  olabilir:
 
-    0 = Black       8 = Gray
-    1 = Blue        9 = Light Blue
-    2 = Green       A = Light Green
-    3 = Aqua        B = Light Aqua
-    4 = Red         C = Light Red
-    5 = Purple      D = Light Purple
-    6 = Yellow      E = Light Yellow
-    7 = White       F = Bright White
+    0 = Siyah       8 = Gri
+    1 = Mavi        9 = Açık Mavi
+    2 = Yeşil       A = Açık Yeşil
+    3 = Camgöbeği   B = Açık Camgöbeği
+    4 = Kırmızı     C = Açık Kırmızı
+    5 = Mor         D = Açık Mor
+    6 = Sarı        E = Açık Sarı
+    7 = Beyaz       F = Parlak Beyaz
 
-If no argument is given, this command restores the original color.
+Bir argüman verilmemişse bu komut özgün rengi geri yükler.
 
-The COLOR command sets ERRORLEVEL to 1 if an attempt is made to execute
-the COLOR command with a foreground and background color that are the same.
+COLOR komutunu aynı ön ve arka plan rengi ile yürütmeye çalışırsanız COLOR
+  komutu ERRORLEVEL'i 1 olarak ayarlar.
 
-Example: "COLOR fc" produces light red on bright white.
+Örnek: "COLOR fc", parlak beyazın üzerine açık kırmızı üretir.
 
 .
+:PROGRAM_SWITCH_LANG
+Etkin kod sayfasını %d olarak değiştirdini.
+Bu kod sayfası için olan %s dil dosyasını yüklemek istiyor musunuz?
+.
+:PROGRAM_ALREADY_MOUNTED
+%s: sürücüsü halihazırda bağlanmış. Önce bağlantısını kesip yeniden deneyin.
+.
+:PROGRAM_DRIVE_NO_EXIST
+Sistemde %s: sürücüsü yok.
+.
+:PROGRAM_DRIVE_WARN
+DOSBox-X'e gerçekten %s sürücünüz %s erişimini vermek istiyor musunuz?
+.
+:DRIVE_TYPE_FLOPPY
+disket
+.
+:DRIVE_TYPE_REMOVABLE
+kaldırılabilir
+.
+:DRIVE_TYPE_NETWORK
+ağ
+
+:DRIVE_TYPE_HARD
+sabit
+.
+:DRIVE_TYPE_LOCAL
+yerel
+.
+:DRIVE_TYPE_CDROM
+CD-ROM
+.
+:PROGRAM_CDDRIVE_WARN
+CD sürücüsü %s, şu anda şu kalıpla bağlanmış:
+
+%s
+
+CD kalıbını şimdi değiştirmek istiyor musunuz?
+.
+:PROGRAM_CDMOUNT_ERROR
+Seçili CD kalıbı yüklenemedi.
+.
+:ELTORITO_IMAGE
+El Torito disket kalıbı
+.
+:RAM_FLOPPY_IMAGE
+RAM disket kalıbı
+.
+:PROGRAM_FLOPPY_WARN
+Disket sürücüsü %s, şu anda şu kalıpla bağlanmış:
+
+%s
+
+Disket sürücüsü kalıbını şimdi değiştirmek istiyor musunuz?
+.
+:PROGRAM_FLOPPYMOUNT_ERROR
+Seçili disket kalıbıyla bağlama yapılamadı.
+.
+:PROGRAM_MOUNT_MORE_IMAGES
+Daha fazla kalıp dosyası bağlamak istiyor musunuz?
+.
+:PROGRAM_MOUNT_PATH_TOOLONG
+Bağlanacak dosyalar için olan yol pek uzun.
+.
+:PROGRAM_BOOT_FAILED
+%s: sürücüsü önyüklenemedi.
+.
+:PROGRAM_MOUNT_FAILED
+%s: sürücüsü bağlanamadı.
+.
+:PROGRAM_MOUNT_IMAGE
+%s, %s: sürücüsüne bağlandı
+%s %s
+.
+:ARCHIVE
+arşiv
+.
+:DISK_IMAGE
+disk kalıbı
+.
+:READONLY_MODE
+Saltokunur kip
+.
+:PROGRAM_MOUNT_SELECT_DRIVE
+%s: sürücüsünü %s olarak bağlamak üzere bir sürücü/dizin seçin
+.
+:PROGRAM_MOUNT_CDROM_SUPPORT
+Bir dizini CD-ROM olarak bağlamak, sınırlı destek verir.
+.
+:PROGRAM_MOUNT_NOT_MOUNTED
+%s: sürücüsü henüz bağlı değil.
+.
+:PROGRAM_PROGRAM_ALREADY
+Başka bir program halihazırda çalışıyor.
+.
+:PROGRAM_SHELL_ALREADY
+Başka bir kabuk halihazırda çalışıyor.
+.
+:PROGRAM_MOUNT_SUCCESS
+%s sürücüsü şuraya bağlandı:
+%s
+.
+:PROGRAM_WARN_QUICKLAUNCH
+Tez başlat, DOSBox-X'te kendiliğinden C sürücüsünü bağlar.
+C sürücüsü halihazırda bağlanmış. Sürdürmek istiyor musunuz?
+.
+:PROGRAM_NO_EXECUTABLE
+Yürütülebilir dosya bulunamadı.
+.
+:PROGRAM_EXEC_FINISHED
+Program yürütmeyi bitirdi. %s sürücüsünün bağlantısını kesmek istiyor musunuz?
+.
+:PROGRAM_ASK_CHCP
+%c: sürücüsüne düzgünce erişmek için %d kod sayfasının kurulu olması gerekir.
+
+Geçerli kod sayfasını %d olarak değiştirmek istiyor musunuz?
+.
+:PROGRAM_CHANGING_CODEPAGE
+Kod sayfası değiştiriliyor...
+.
+:IMAGEMOUNT_CHANGE_DOSVER
+Bu tür bir disk kalıbını bağlamak için bildirilen DOS sürümünün %s veya daha
+  yüksek olması gerekir. Bildirilen DOS sürümünü kendiliğinden %s olarak
+  değiştirmek ve disk kalıbını bağlamak istiyor musunuz?
+.
+:MENU_DRIVE_NOTEXIST
+Sürücü yok veya disk kalıbından bağlanmış.
+.
+:MENU_SAVE_IMAGE_FAILED
+Disk kalıbı kaydedilemedi.
+.
+:MENU_JP_CPONLY
+Bu işlev yalnızca Japonca kod sayfası (932) için kullanılabilir.
+.
+:MENU_CH_CPONLY
+Bu işlev yalnızca Çince kod sayfaları (936, 950, or 951) için kullanılabilir.
+.
+:MENU_GLIDE_ERROR
+Glide geçişi etkinleştirilemiyor. Glide sarmalayıcısı kurulumunu denetleyin.
+.
+:MENU_HIGH_INTENSITY_ERROR
+Geçerli video kipi için yüksek yoğunluk desteklenmiyor.
+.
+:MENU_SAVE_FILE_ERROR
+Dosyaya kaydedilemiyor: %s
+.
+:MENU_INT2F_SUCCESS
+INT 2Fh kancası başarıyla ayarlandı.
+.
+:MENU_INT2F_ALREADY_SET
+INT 2Fh kancası halihazırda ayarlanmıştı.
+.
+:QUIT_DISABLED
+Bununla DOSBox-X'ten çıkma desteklenmiyor.
+.
+:QUIT_CONFIRM
+Bu, DOSBox-X'ten çıkacaktır.
+Emin misiniz?
+.
+:QUIT_GUEST_DISABLED
+Bir misafir sistem çalışırken DOSBox-X'ten çıkamazsınız.
+.
+:QUIT_GUEST_CONFIRM
+Şu anda bir misafir sistem çalıştırıyorsunuz.
+Yine de çıkmak istediğinizden emin misiniz?
+.
+:QUIT_FILE_OPEN_DISABLED
+Bir veya birden çok dosya açıkken DOSBox-X'ten çıkamazsınız.
+.
+:QUIT_FILE_OPEN_CONFIRM
+Şu anda DOSBox-X'ten çıkmak güvenli olmayabilir; çünkü bir veya daha fazla
+  dosya açık.
+Yine de çıkmak istediğinizden emin misiniz?
+.
+:QUIT_PROGRAM_DISABLED
+Bir program veya oyun açıkken DOSBox-X'ten çıkamazsınız.
+.
+:QUIT_PROGRAM_CONFIRM
+Şu anda bir program veya oyun çalıştırıyorsunuz.
+Yine de çıkmak istediğinizden emin misiniz??
+.
+:LANG_JP_INCOMPATIBLE
+Japonca PC-98 veya JEGA/AX sistemiyle uyumsuz bir dil dosyası belirttiniz.
+
+Bu makine türü için bu dil dosyasını kullanmak istediğinizden emin misiniz?
+.
+:LANG_DOSV_INCOMPATIBLE
+Geçerli DOS/V ile uyumsuz bir kod sayfası kullanan bir dil dosyası belirttiniz.
+
+Bu makine türü için bu dil dosyasını kullanmak istediğinizden emin misiniz?
+.
+:LANG_CHANGE_CP
+Belirtilen dil dosyası %d kod sayfasını kullanıyor. Bu kod sayfasına geçiş
+  yapmak istiyor musunuz?
+.
+:SCALER_LOAD_WARN
+Bu ölçekleyici düzgünce çalışmayabilir veya istenmeyen sonuçlar doğurabilir:
+
+%s
+
+Ölçekleyiciyi yüklemeyi zorlamak istiyor musunuz?
+.
+:PIXEL_SHADER_WARN
+Bu piksel gölgelendiricisine gerek olmayabilir veya istenmeyen sonuçlar
+  doğurabilir:
+
+%s
+
+Piksel gölgelendiricisini yine de yüklemek istiyor musunuz?
+
+(Piksel gölgelendiricisi ayarına "forced" iliştirerek bu iletiyi görmeden
+  gölgelendiriciyi yüklemeyi zorlayabilirsiniz.)
+.
+:PIXEL_SHADER_LOADED
+Yüklenen piksel gölgelendiricisi - %s
+.
+:MAPPEREDITOR_NOT_AVAILABLE
+Eşlem düzenleyicisi şu anda kullanılamıyor.
+.
+:OPL_REC_COMPLETED
+Ham OPL çıktısı dosyaya kaydedildi:
+
+%s
+.
+:OPL_CAPTURE_FAILED
+Ham OPL çıktısı yakalanamıyor; çünkü ESFM yerel kipi şu anda ham OPL çıktısını
+  desteklemeyen geçerli uygulama tarafından kullanılıyor.
+.
+:TTF_DBCS_ONLY
+Bu işlev yalnızca Çince/Japonca/Korece kod sayfaları için kullanılabilirdir.
+.
+:SAVE_FAILED
+Geçerli durum kaydedilemedi.
+.
+:SAVE_CORRUPTED
+Kaydedilen durum hasarlı! Program çalışmayabilir.
+.
+:SAVE_SCREENSHOT
+Ekran görüntüsü dosyaya kaydedildi:
+
+%s
+.
+:HELP_ABOUT_VERSION
+DOSBox-X sürüm %s (%s %s %s bit)%s
+.
+:HELP_ABOUT_UPDATED
+Yapım zamanı: %s
+.
+:HELP_ABOUT_COPYRIGHT
+Telif hakkı %s-%s %s
+.
+:HELP_ABOUT_MAINTAINER
+Proje bakımcısı: %s
+.
+:HELP_ABOUT_HOMEPAGE
+DOSBox-X ana sayfası: %s

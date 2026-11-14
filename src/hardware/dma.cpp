@@ -398,6 +398,13 @@ Bitu DmaController::ReadControllerReg(Bitu reg,Bitu /*len*/) {
 	case 0xc:		/* Clear Flip/Flip (apparently most motherboards will treat read OR write as reset) */
 		flipflop=false;
 		break;
+	case 0xf:		/* Multiple Mask register, undocumented read back */
+		ret=0;
+		for (uint8_t ct=0;ct<4;ct++) {
+			chan=GetChannel(ct);
+			if (chan->masked) ret |= 1u << ct;
+		}
+		return ret;
 	default:
 		LOG(LOG_DMACONTROL,LOG_NORMAL)("Trying to read undefined DMA port %x",(int)reg);
 		break;
@@ -444,10 +451,10 @@ Bitu DmaChannel::Read(Bitu want, uint8_t * buffer) {
     /* You cannot read a DMA channel configured for writing (to memory) */
     if (transfer_mode != DMAT_READ) {
         LOG(LOG_DMACONTROL,LOG_WARN)("BUG: Attempted DMA channel read when DMA channel is configured by guest for writing (to memory)");
-        char psp_name[9];
+        std::string psp_name;
         DOS_MCB psp_mcb(dos.psp()-1);
-        psp_mcb.GetFileName(psp_name);
-        if (strcmp(psp_name, "DIAGNOSE")) // Wengier: Hack for Creative DIAGNOSE.EXE tool for now until the DMA recording function is implemented
+        psp_name = psp_mcb.GetFileName();
+        if (psp_name != "DIAGNOSE") // Wengier: Hack for Creative DIAGNOSE.EXE tool for now until the DMA recording function is implemented
             return 0;
     }
 

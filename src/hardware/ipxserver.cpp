@@ -19,6 +19,7 @@
 
 #include "dosbox.h"
 
+#if !defined(OSFREE)
 #if C_IPX
 
 #include "dosbox.h"
@@ -233,7 +234,6 @@ bool IPX_StartServer(uint16_t portnum) {
 	uint16_t i;
 
 	if(!SDLNet_ResolveHost(&ipxServerIp, NULL, portnum)) {
-	
 		//serverSocketSet = SDLNet_AllocSocketSet(SOCKETTABLESIZE);
 		ipxServerSocket = SDLNet_UDP_Open(portnum);
 		if(!ipxServerSocket) return false;
@@ -246,4 +246,6 @@ bool IPX_StartServer(uint16_t portnum) {
 	return false;
 }
 
-#endif
+#endif // C_IPX
+#endif // !defined(OSFREE)
+

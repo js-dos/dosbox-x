@@ -27,6 +27,7 @@
 #include "support.h"
 #include "control.h"
 #include "setup.h"
+#include <emscripten/emscripten.h>
 
 extern bool enable_slave_pic;
 
@@ -326,6 +327,18 @@ static Bitu MPU401_ReadData(Bitu port,Bitu iolen) {
 static void MPU401_WriteData(Bitu port,Bitu val,Bitu iolen) {
 	(void)iolen;//UNUSED
 	(void)port;//UNUSED
+/*
+#ifdef __EMSCRIPTEN__
+    EM_ASM_({
+        var b = $0;
+        if (typeof postMessage === 'function') {
+            postMessage({ type: 'MPU401 WriteData Byte', data: b });
+        }
+        console.log('[MPU401 WriteData Byte (Worker)]:', b.toString(16).toUpperCase());
+    }, val);
+#endif
+*/
+
 	if (mpu.mode==M_UART) {MIDI_RawOutByte((uint8_t)val);return;}
 	switch (mpu.state.command_byte) {	/* 0xe# command data */
 		case 0x00:
@@ -644,7 +657,6 @@ static void MPU401_Reset(void) {
 	mpu.clock.clock_to_host=false;
 	mpu.clock.cth_rate=60;
 	mpu.clock.cth_counter=0;
-	ClrQueue();
 	mpu.state.req_mask=0;
 	mpu.condbuf.counter=0;
 	mpu.clock.cth_savecount=0;
@@ -849,6 +861,16 @@ void MIDI_OnSectionPropChange(Section *x) {
 }
 
 void MPU401_Init() {
+
+#ifdef __EMSCRIPTEN__
+    EM_ASM({
+        if (typeof postMessage === 'function') {
+            postMessage({ type: 'DOS_INIT', message: '>>> Initializing MPU401 emulation <<<' });
+        }
+    console.log('>>> Initializing MPU401 emulation <<<');
+    });
+#endif
+
 	LOG(LOG_MISC,LOG_DEBUG)("Initializing MPU401 emulation");
 
 	AddVMEventFunction(VM_EVENT_RESET,AddVMEventFunctionFuncPair(MPU401_Reset));

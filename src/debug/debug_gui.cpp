@@ -34,6 +34,7 @@
 #include "control.h"
 #include "menu.h"
 #include "debug.h"
+#include "debug_mcp.h"
 #include "debug_inc.h"
 #include "pic.h"
 
@@ -42,8 +43,8 @@
 
 using namespace std;
 
-bool log_int21 = false;
-bool log_fileio = false;
+extern bool log_int21;
+extern bool log_fileio;
 extern bool logging_con;
 
 static bool has_LOG_Init = false;
@@ -54,7 +55,7 @@ bool logBuffSuppressConsole = false;
 bool logBuffSuppressConsoleNeedUpdate = false;
 
 int debuggerrun = 0;
-int log_dev_con = 0;
+extern int log_dev_con;
 
 _LogGroup loggrp[LOG_MAX]={{"",LOG_NORMAL},{nullptr,LOG_NORMAL}};
 FILE* debuglog = NULL;
@@ -62,7 +63,11 @@ FILE* debuglog = NULL;
 #if C_DEBUG
 static bool logBuffHasDiscarded = false;
 
+#ifdef EMSCRIPTEN
+#include <jsdos-curses.h>
+#else
 #include <curses.h>
+#endif
 
 #include <list>
 #include <string>
@@ -588,12 +593,31 @@ void DEBUG_FlushInput(void) {
 }
 
 void DBGUI_StartUp(void) {
-	mainMenu.get_item("show_console").check(true).enable(false).refresh_item(mainMenu);
-	mainMenu.get_item("clear_console").check(false).enable(false).refresh_item(mainMenu);
+        if (mainMenu.item_exists("show_console")) {
+            mainMenu.get_item("show_console").check(true).enable(false).refresh_item(mainMenu);
+        }
+        if (mainMenu.item_exists("clear_console")) {
+            mainMenu.get_item("clear_console").check(false).enable(false).refresh_item(mainMenu);
+        }
 
 	LOG(LOG_MISC,LOG_DEBUG)("DEBUG GUI startup");
 	/* Start the main window */
-	dbg.win_main=initscr();
+
+#ifdef WIN32
+    typedef BOOL(WINAPI* AttachConsoleProc)(DWORD);
+
+    HMODULE kernel = GetModuleHandle(TEXT("kernel32.dll"));
+    AttachConsoleProc pAttachConsole =
+        (AttachConsoleProc)GetProcAddress(kernel, "AttachConsole");
+
+    if(!pAttachConsole || !pAttachConsole(ATTACH_PARENT_PROCESS))
+        AllocConsole();
+    freopen("CONIN$", "r", stdin);
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+#endif
+
+    dbg.win_main=initscr();
 
 #ifdef WIN32
     /* Tell Windows 10 we DON'T want a thin tall console window that fills the screen top to bottom.
@@ -614,7 +638,21 @@ void DBGUI_StartUp(void) {
 	scrollok(stdscr,false);
 	nodelay(dbg.win_main,true);
 	keypad(dbg.win_main,true);
-	#ifndef WIN32
+	#ifdef WIN32
+	/* After ncurses' initscr/cbreak/keypad have configured the console input mode,
+	   re-apply ENABLE_VIRTUAL_TERMINAL_INPUT so the terminal host (Windows Terminal,
+	   ConPTY, modern conhost) stops intercepting keys like F11 (fullscreen toggle)
+	   and forwards them to the application instead. */
+	#ifndef ENABLE_VIRTUAL_TERMINAL_INPUT
+	#define ENABLE_VIRTUAL_TERMINAL_INPUT 0x0200
+	#endif
+	{
+		HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+		DWORD dwInMode = 0;
+		if (GetConsoleMode(hIn, &dwInMode))
+			SetConsoleMode(hIn, dwInMode | ENABLE_VIRTUAL_TERMINAL_INPUT);
+	}
+	#else
 	touchwin(dbg.win_main);
 	#endif
 	old_cursor_state = curs_set(0);
@@ -633,6 +671,13 @@ void DBGUI_StartUp(void) {
 int debugPageCounter = 0;
 int debugPageStopAt = 0;
 
+#if C_DEBUG
+static bool agent_output_capture_active = false;
+static std::string agent_output_capture;
+static int agent_saved_debug_page_counter = 0;
+static int agent_saved_debug_page_stop_at = 0;
+#endif
+
 bool DEBUG_IsPagingOutput(void) {
     return debugPageStopAt > 0;
 }
@@ -641,6 +686,12 @@ void DEBUG_DrawInput(void);
 
 void DEBUG_BeginPagedContent(void) {
 #if C_DEBUG
+	if (
+# if defined(C_DOSBOX_AGENT)
+		agent_output_capture_active ||
+#endif
+		DEBUG_MCP_IsCapturingOutput())
+		return;
 	int maxy, maxx; getmaxyx(dbg.win_out,maxy,maxx);
 
     debugPageCounter = 0;
@@ -650,6 +701,12 @@ void DEBUG_BeginPagedContent(void) {
 
 void DEBUG_EndPagedContent(void) {
 #if C_DEBUG
+	if (
+# if defined(C_DOSBOX_AGENT)
+		agent_output_capture_active ||
+#endif
+		DEBUG_MCP_IsCapturingOutput())
+		return;
     debugPageCounter = 0;
     debugPageStopAt = 0;
     DEBUG_DrawInput();
@@ -661,6 +718,29 @@ extern bool gfx_in_mapper;
 bool in_debug_showmsg = false;
 
 bool IsDebuggerActive(void);
+
+#if C_DEBUG && defined(C_DOSBOX_AGENT)
+bool DEBUG_AgentBeginOutputCapture(void)
+{
+    if (agent_output_capture_active)
+        return false;
+    agent_saved_debug_page_counter = debugPageCounter;
+    agent_saved_debug_page_stop_at = debugPageStopAt;
+    debugPageCounter = 0;
+    debugPageStopAt = 0;
+    agent_output_capture.clear();
+    agent_output_capture_active = true;
+    return true;
+}
+
+std::string DEBUG_AgentEndOutputCapture(void)
+{
+    agent_output_capture_active = false;
+    debugPageCounter = agent_saved_debug_page_counter;
+    debugPageStopAt = agent_saved_debug_page_stop_at;
+    return agent_output_capture;
+}
+#endif
 
 void DEBUG_ShowMsg(char const* format,...) {
 	bool stderrlog = false;
@@ -702,6 +782,17 @@ void DEBUG_ShowMsg(char const* format,...) {
 
     /* remove newlines if present */
     while (len > 0 && buf[len-1] == '\n') buf[--len] = 0;
+
+#if C_DEBUG
+# if defined(C_DOSBOX_AGENT)
+    if (agent_output_capture_active) {
+        if (!agent_output_capture.empty())
+            agent_output_capture += '\n';
+        agent_output_capture += buf;
+    }
+# endif
+	DEBUG_MCP_CaptureMessage(buf);
+#endif
 
 #if C_DEBUG
 	if (dbg.win_out != NULL)
@@ -950,7 +1041,7 @@ void LOG::EarlyInit(void) {
 	loggrp[LOG_INT10].front="INT10";
 	loggrp[LOG_SB].front="SBLASTER";
 	loggrp[LOG_DMACONTROL].front="DMA_CONTROL";
-	
+
 	loggrp[LOG_FPU].front="FPU";
 	loggrp[LOG_CPU].front="CPU";
 	loggrp[LOG_PAGING].front="PAGING";
@@ -972,7 +1063,7 @@ void LOG::EarlyInit(void) {
 
 	loggrp[LOG_IO].front="IO";
 	loggrp[LOG_PCI].front="PCI";
-	
+
 	loggrp[LOG_VOODOO].front="SST";
 
 	do_LOG_stderr = control->opt_earlydebug;

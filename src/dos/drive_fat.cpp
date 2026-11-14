@@ -20,11 +20,38 @@
  * set tabstop=8 | set softtabstop=8 | set shiftwidth=8 | set expandtab
  *
  */
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+/* TASK FOR THIS CODE [DOSBox-X]
+ *
+ * This code could be simplified AND with performance optimizations if
+ * this code were to use the file object for all file allocation chains,
+ * including directories.
+ *
+ * Reduce the seek/read/write functions of the allocation chain to an
+ * optimized set of core functions everyone else uses, and then directory
+ * management can just call that and focus on the task of working with
+ * directory entries and long filenames.
+ *
+ * For non-FAT32 partitions, there would be support for the root directory,
+ * which is NOT a file allocation chain.
+ *
+ * Another optimization that perhaps MS-DOS does, is that the file object
+ * would cache the location of it's dirent (cluster and offset into cluster)
+ * so that when updating file size, date, etc. it wouldn't do a full dirent
+ * lookup every time.
+ *
+ * Hopefully this can be done without breaking things --J.C.
+ */
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <vector>
+
+#include "dos_system.h"
 #include "dosbox.h"
 #include "dos_inc.h"
 #include "drives.h"
@@ -32,13 +59,26 @@
 #include "cross.h"
 #include "bios.h"
 #include "bios_disk.h"
+#include "imagedisk_d88.h"
+#include "imagedisk_eltorito.h"
+#include "imagedisk_int13.h"
+#include "imagedisk_nfd.h"
+#include "imagedisk_teledisk.h"
+#include "imagedisk_vfd.h"
 #include "qcow2_disk.h"
 #include "bitop.h"
 #include "callback.h"
 #include "regs.h"
 
-#include <algorithm>
 
+#if defined(__linux__) && !defined(__GLIBC__)
+// musl libc does not need 64 suffix to work with files > 2 GiB
+#define fopen64 fopen
+#define fseeko64 fseeko
+#define ftello64 ftello
+#endif
+
+#if !defined(OSFREE)
 #define IMGTYPE_FLOPPY          0
 #define IMGTYPE_ISO             1
 #define IMGTYPE_HDD             2
@@ -46,7 +86,9 @@
 #define FAT12                   0
 #define FAT16                   1
 #define FAT32                   2
+#endif
 
+#if !defined(OSFREE)
 static uint16_t dpos[256];
 static uint32_t dnum[256];
 extern bool wpcolon, force_sfn;
@@ -56,11 +98,93 @@ extern char * DBCS_upcase(char * str), sfn[DOS_NAMELENGTH_ASCII];
 extern bool gbk, isDBCSCP(), isKanji1_gbk(uint8_t chr), shiftjis_lead_byte(int c);
 extern bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/);
 extern bool CodePageHostToGuestUTF16(char *d/*CROSS_LEN*/,const uint16_t *s/*CROSS_LEN*/);
-extern bool wild_match(const char* haystack, char* needle);
 bool systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
-extern bool dos_kernel_disabled;
-std::string formatString(const char* format, ...);
 
+extern bool int13_enable_48bitLBA;
+
+#endif
+
+char* removeTrailingSpaces(char* str) {
+	char* end = str + strlen(str) - 1;
+	while (end >= str && *end == ' ') end--;
+    /* NTS: The loop will exit with 'end' one char behind the last ' ' space character.
+     *      So to ASCIIZ snip off the space, step forward one and overwrite with NUL.
+     *      The loop may end with 'end' one char behind 'ptr' if the string was empty ""
+     *      or nothing but spaces. This is OK because after the step forward, end >= str
+     *      in all cases. */
+	*(++end) = '\0';
+	return str;
+}
+
+char* removeLeadingSpaces(char* str) {
+	size_t len = strlen(str);
+	size_t pos = strspn(str," ");
+	memmove(str,str + pos,len - pos + 1);
+	return str;
+}
+
+char* trimString(char* str) {
+	return removeTrailingSpaces(removeLeadingSpaces(str));
+}
+
+#if !defined(OSFREE)
+bool filename_not_8x3(const char *n) {
+        bool lead;
+        unsigned int i;
+
+        i = 0;
+        lead = false;
+        while (*n != 0) {
+                if (*n == '.') break;
+                if ((*n&0xFF)<=32||*n==127||*n=='"'||*n=='+'||*n=='='||*n==','||*n==';'||*n==':'||*n=='<'||*n=='>'||((*n=='['||*n==']'||*n=='|'||*n=='\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*n=='?'||*n=='*') return true;
+                if (lead) lead = false;
+                else if ((IS_PC98_ARCH && shiftjis_lead_byte(*n&0xFF)) || (isDBCSCP() && isKanji1_gbk(*n&0xFF))) lead = true;
+                i++;
+                n++;
+        }
+        if (!i || i > 8) return true;
+        if (*n == 0) return false; /* made it past 8 or less normal chars and end of string: normal */
+
+        /* skip dot */
+        assert(*n == '.');
+        n++;
+
+        i = 0;
+        lead = false;
+        while (*n != 0) {
+                if (*n == '.') return true; /* another '.' means LFN */
+                if ((*n&0xFF)<=32||*n==127||*n=='"'||*n=='+'||*n=='='||*n==','||*n==';'||*n==':'||*n=='<'||*n=='>'||((*n=='['||*n==']'||*n=='|'||*n=='\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*n=='?'||*n=='*') return true;
+                if (lead) lead = false;
+                else if ((IS_PC98_ARCH && shiftjis_lead_byte(*n&0xFF)) || (isDBCSCP() && isKanji1_gbk(*n&0xFF))) lead = true;
+                i++;
+                n++;
+        }
+        if (i > 3) return true;
+
+        return false; /* it is 8.3 case */
+}
+#else
+bool filename_not_8x3(const char *n) {
+	return false;
+}
+#endif
+
+/* Assuming an LFN call, if the name is not strict 8.3 uppercase, return true.
+ * If the name is strict 8.3 uppercase like "FILENAME.TXT" there is no point making an LFN because it is a waste of space */
+bool filename_not_strict_8x3(const char *n) {
+#if !defined(OSFREE)
+        if (filename_not_8x3(n)) return true;
+        bool lead = false;
+        for (unsigned int i=0; i<strlen(n); i++) {
+                if (lead) lead = false;
+                else if ((IS_PC98_ARCH && shiftjis_lead_byte(n[i]&0xFF)) || (isDBCSCP() && isKanji1_gbk(n[i]&0xFF))) lead = true;
+                else if (n[i]>='a' && n[i]<='z') return true;
+        }
+#endif
+        return false; /* it is strict 8.3 upper case */
+}
+
+#if !defined(OSFREE)
 int PC98AutoChoose_FAT(const std::vector<_PC98RawPartition> &parts,imageDisk *loadedDisk) {
         for (size_t i=0;i < parts.size();i++) {
                 const _PC98RawPartition &pe = parts[i];
@@ -84,7 +208,9 @@ int PC98AutoChoose_FAT(const std::vector<_PC98RawPartition> &parts,imageDisk *lo
 
         return -1;
 }
+#endif
 
+#if !defined(OSFREE)
 int MBRAutoChoose_FAT(const std::vector<partTable::partentry_t> &parts,imageDisk *loadedDisk,uint8_t use_ver_maj=0,uint8_t use_ver_min=0) {
         uint16_t n=1;
         const char *msg;
@@ -154,56 +280,9 @@ int MBRAutoChoose_FAT(const std::vector<partTable::partentry_t> &parts,imageDisk
 
         return -1;
 }
+#endif
 
-bool filename_not_8x3(const char *n) {
-        bool lead;
-        unsigned int i;
-
-        i = 0;
-        lead = false;
-        while (*n != 0) {
-                if (*n == '.') break;
-                if ((*n&0xFF)<=32||*n==127||*n=='"'||*n=='+'||*n=='='||*n==','||*n==';'||*n==':'||*n=='<'||*n=='>'||((*n=='['||*n==']'||*n=='|'||*n=='\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*n=='?'||*n=='*') return true;
-                if (lead) lead = false;
-                else if ((IS_PC98_ARCH && shiftjis_lead_byte(*n&0xFF)) || (isDBCSCP() && isKanji1_gbk(*n&0xFF))) lead = true;
-                i++;
-                n++;
-        }
-        if (!i || i > 8) return true;
-        if (*n == 0) return false; /* made it past 8 or less normal chars and end of string: normal */
-
-        /* skip dot */
-        assert(*n == '.');
-        n++;
-
-        i = 0;
-        lead = false;
-        while (*n != 0) {
-                if (*n == '.') return true; /* another '.' means LFN */
-                if ((*n&0xFF)<=32||*n==127||*n=='"'||*n=='+'||*n=='='||*n==','||*n==';'||*n==':'||*n=='<'||*n=='>'||((*n=='['||*n==']'||*n=='|'||*n=='\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*n=='?'||*n=='*') return true;
-                if (lead) lead = false;
-                else if ((IS_PC98_ARCH && shiftjis_lead_byte(*n&0xFF)) || (isDBCSCP() && isKanji1_gbk(*n&0xFF))) lead = true;
-                i++;
-                n++;
-        }
-        if (i > 3) return true;
-
-        return false; /* it is 8.3 case */
-}
-
-/* Assuming an LFN call, if the name is not strict 8.3 uppercase, return true.
- * If the name is strict 8.3 uppercase like "FILENAME.TXT" there is no point making an LFN because it is a waste of space */
-bool filename_not_strict_8x3(const char *n) {
-        if (filename_not_8x3(n)) return true;
-        bool lead = false;
-        for (unsigned int i=0; i<strlen(n); i++) {
-                if (lead) lead = false;
-                else if ((IS_PC98_ARCH && shiftjis_lead_byte(n[i]&0xFF)) || (isDBCSCP() && isKanji1_gbk(n[i]&0xFF))) lead = true;
-                else if (n[i]>='a' && n[i]<='z') return true;
-        }
-        return false; /* it is strict 8.3 upper case */
-}
-
+#if !defined(OSFREE)
 void GenerateSFN(char *lfn, unsigned int k, unsigned int &i, unsigned int &t);
 /* Generate 8.3 names from LFNs, with tilde usage (from ~1 to ~999999). */
 char* fatDrive::Generate_SFN(const char *path, const char *name) {
@@ -230,9 +309,11 @@ char* fatDrive::Generate_SFN(const char *path, const char *name) {
                 if(!getFileDirEntry(fullname, &fileEntry, &dirClust, &subEntry,/*dirOk*/true)) return sfn;
                 k++;
         }
-        return NULL;
+        return nullptr;
 }
+#endif
 
+#if !defined(OSFREE)
 class fatFile : public DOS_File {
         public:
                 fatFile(const char* name, uint32_t startCluster, uint32_t fileLen, fatDrive *useDrive);
@@ -240,10 +321,10 @@ class fatFile : public DOS_File {
                 bool Write(const uint8_t * data,uint16_t * size) override;
                 bool Seek(uint32_t * pos,uint32_t type) override;
                 bool Close() override;
-                uint16_t GetInformation(void) override;
-                void Flush(void) override;
-                bool UpdateDateTimeFromHost(void) override;
-                uint32_t GetSeekPos(void) override;
+                uint16_t GetInformation() override;
+                void Flush() override;
+                bool UpdateDateTimeFromHost() override;
+                uint32_t GetSeekPos() override;
                 uint32_t firstCluster;
                 uint32_t seekpos = 0;
                 uint32_t filelength;
@@ -256,9 +337,12 @@ class fatFile : public DOS_File {
 
                 bool modified = false;
                 bool loadedSector = false;
+                fatDrive::clusterChainMemory file_ccm;
                 fatDrive *myDrive;
 };
+#endif
 
+#if !defined(OSFREE)
 void time_t_to_DOS_DateTime(uint16_t &t,uint16_t &d,time_t unix_time) {
         struct tm time;
         time.tm_isdst = -1;
@@ -293,7 +377,9 @@ void time_t_to_DOS_DateTime(uint16_t &t,uint16_t &d,time_t unix_time) {
         t = ((unsigned int)tm->tm_hour << 11u) + ((unsigned int)tm->tm_min << 5u) + ((unsigned int)tm->tm_sec >> 1u);
         d = (((unsigned int)tm->tm_year - 80u) << 9u) + (((unsigned int)tm->tm_mon + 1u) << 5u) + (unsigned int)tm->tm_mday;
 }
+#endif
 
+#if !defined(OSFREE)
 /* IN - char * filename: Name in regular filename format, e.g. bob.txt */
 /* OUT - char * filearray: Name in DOS directory format, eleven char, e.g. bob     txt */
 static void convToDirFile(const char *filename, char *filearray) {
@@ -316,17 +402,21 @@ static void convToDirFile(const char *filename, char *filearray) {
                 }
         }
 }
+#endif
 
+#if !defined(OSFREE)
 fatFile::fatFile(const char* /*name*/, uint32_t startCluster, uint32_t fileLen, fatDrive *useDrive) : firstCluster(startCluster), filelength(fileLen), myDrive(useDrive) {
-	uint32_t seekto = 0;
-	open = true;
 	memset(&sectorBuffer[0], 0, sizeof(sectorBuffer));
+	open = true;
 	
 	if(filelength > 0) {
+		uint32_t seekto = 0;
 		Seek(&seekto, DOS_SEEK_SET);
 	}
 }
+#endif
 
+#if !defined(OSFREE)
 void fatFile::Flush(void) {
 	if (loadedSector) {
 		myDrive->writeSector(currentSector, sectorBuffer);
@@ -345,7 +435,7 @@ void fatFile::Flush(void) {
 		else {
 			uint16_t ct,cd;
 
-			time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd,::time(NULL));
+			time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd,::time(nullptr));
 
 			tmpentry.modTime = ct;
 			tmpentry.modDate = cd;
@@ -356,7 +446,9 @@ void fatFile::Flush(void) {
 		newtime = false;
 	}
 }
+#endif
 
+#if !defined(OSFREE)
 bool fatFile::Read(uint8_t * data, uint16_t *size) {
 	if ((this->flags & 0xf) == OPEN_WRITE) {	// check if file opened in write-only mode
 		DOS_SetError(DOSERR_ACCESS_DENIED);
@@ -369,7 +461,7 @@ bool fatFile::Read(uint8_t * data, uint16_t *size) {
 	}
 
 	if (!loadedSector) {
-		currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+		currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 		if(currentSector == 0) {
 			/* EOC reached before EOF */
 			*size = 0;
@@ -391,7 +483,7 @@ bool fatFile::Read(uint8_t * data, uint16_t *size) {
 		data[sizecount++] = sectorBuffer[curSectOff++];
 		seekpos++;
 		if(curSectOff >= myDrive->getSectorSize()) {
-			currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+			currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 			if(currentSector == 0) {
 				/* EOC reached before EOF */
 				//LOG_MSG("EOC reached before EOF, seekpos %d, filelen %d", seekpos, filelength);
@@ -409,19 +501,24 @@ bool fatFile::Read(uint8_t * data, uint16_t *size) {
 	*size =sizecount;
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 	if ((this->flags & 0xf) == OPEN_READ) {	// check if file opened in read-only mode
 		DOS_SetError(DOSERR_ACCESS_DENIED);
 		return false;
 	}
 
-    direntry tmpentry = {};
+	direntry tmpentry = {};
 	uint16_t sizedec, sizecount;
 	sizedec = *size;
 	sizecount = 0;
 
 	if(seekpos < filelength && *size == 0) {
+		//TODO
+		file_ccm = fatDrive::clusterChainMemory();
+
 		/* Truncate file to current position */
 		if(firstCluster != 0) myDrive->deleteClustChain(firstCluster, seekpos);
 		if(seekpos == 0) firstCluster = 0;
@@ -439,6 +536,9 @@ bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 			if(firstCluster == 0) goto finalizeWrite; // out of space
 			myDrive->allocateCluster(firstCluster, 0);
 			filelength = clustSize;
+
+			//TODO
+			file_ccm = fatDrive::clusterChainMemory();
 		}
 
 		/* round up */
@@ -446,15 +546,16 @@ bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 		filelength -= filelength % clustSize;
 
 		/* add clusters until the file length is correct */
+		/* use cluster memory so that each call to appendCluster can work efficiently without re-reading the entire allocation chain per call */
 		while(filelength < seekpos) {
-			if(myDrive->appendCluster(firstCluster) == 0) goto finalizeWrite; // out of space
+			if(myDrive->appendCluster(firstCluster,/*in*/&file_ccm,/*out*/&file_ccm) == 0) goto finalizeWrite; // out of space
 			filelength += clustSize;
 		}
 		assert(filelength < (seekpos+clustSize));
 
 		/* limit file length to seekpos, then bail out if write count is zero */
 		modified = true;
-		if(filelength > seekpos) filelength = seekpos;
+		filelength = std::min(filelength, seekpos);
 		if(*size == 0) goto finalizeWrite;
 	}
 
@@ -465,7 +566,11 @@ bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 				firstCluster = myDrive->getFirstFreeClust();
 				if(firstCluster == 0) goto finalizeWrite; // out of space
 				myDrive->allocateCluster(firstCluster, 0);
-				currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+
+				//TODO
+				file_ccm = fatDrive::clusterChainMemory();
+
+				currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 				if (currentSector == 0) {
 					/* I guess allocateCluster() didn't work after all. This check is necessary to prevent
 					 * this condition from treating the BOOT SECTOR as a file. */
@@ -476,21 +581,22 @@ bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 				loadedSector = true;
 			}
 			if (!loadedSector) {
-				currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+				currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 				if(currentSector == 0) {
 					/* EOC reached before EOF - try to increase file allocation */
-					myDrive->appendCluster(firstCluster);
+					myDrive->appendCluster(firstCluster, &file_ccm);
+
 					/* Try getting sector again */
-					currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+					currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 					if(currentSector == 0) {
 						/* No can do. lets give up and go home.  We must be out of room */
 						goto finalizeWrite;
 					}
 				}
 				curSectOff = seekpos % myDrive->getSectorSize();
-					myDrive->readSector(currentSector, sectorBuffer);
-					loadedSector = true;
-				}
+				myDrive->readSector(currentSector, sectorBuffer);
+				loadedSector = true;
+			}
 			filelength = seekpos+1;
 		}
 		--sizedec;
@@ -501,13 +607,14 @@ bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 			if(loadedSector) myDrive->writeSector(currentSector, sectorBuffer);
 			loadedSector = false;
 
-			currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+			currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 			if(currentSector == 0) {
-			    if (sizedec == 0) goto finalizeWrite;
+				if (sizedec == 0) goto finalizeWrite;
 				/* EOC reached before EOF - try to increase file allocation */
-				myDrive->appendCluster(firstCluster);
+				myDrive->appendCluster(firstCluster, &file_ccm);
+
 				/* Try getting sector again */
-				currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+				currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 				if(currentSector == 0) {
 					/* No can do. lets give up and go home.  We must be out of room */
 					goto finalizeWrite;
@@ -520,6 +627,14 @@ bool fatFile::Write(const uint8_t * data, uint16_t *size) {
 	}
 	if(curSectOff>0 && loadedSector) myDrive->writeSector(currentSector, sectorBuffer);
 
+	/* FIXME: MS-DOS as far as I know does not update the dirent until you flush or close.
+	 *        You can verify this by writing a program to create a file, write data to it,
+	 *        then reboot the system without flushing or closing the file. The allocation
+	 *        chain will be there but the dirent will have the file size set to whatever
+	 *        it was when first created/opened, which should be zero. SCANDISK will helpfully
+	 *        point this out, and either update the file size or truncate the file to the
+	 *        dirent's size and write the extra data to those FILE*.CHK files in the root
+	 *        directory. --J.C. */
 finalizeWrite:
 	myDrive->directoryBrowse(dirCluster, &tmpentry, (int32_t)dirIndex);
 	tmpentry.entrysize = filelength;
@@ -534,7 +649,9 @@ finalizeWrite:
 	*size =sizecount;
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool fatFile::Seek(uint32_t *pos, uint32_t type) {
 	int32_t seekto=0;
 	
@@ -552,9 +669,9 @@ bool fatFile::Seek(uint32_t *pos, uint32_t type) {
 	}
 //	LOG_MSG("Seek to %d with type %d (absolute value %d)", *pos, type, seekto);
 
-	if(seekto<0) seekto = 0;
+	seekto = std::max(seekto, 0);
 	seekpos = (uint32_t)seekto;
-	currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos);
+	currentSector = myDrive->getAbsoluteSectFromBytePos(firstCluster, seekpos, &file_ccm);
 	if (currentSector == 0) {
 		/* not within file size, thus no sector is available */
 		loadedSector = false;
@@ -566,8 +683,13 @@ bool fatFile::Seek(uint32_t *pos, uint32_t type) {
 	*pos = seekpos;
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool fatFile::Close() {
+	//TODO
+	file_ccm = fatDrive::clusterChainMemory();
+
 	/* Flush buffer */
 	if (loadedSector) myDrive->writeSector(currentSector, sectorBuffer);
 
@@ -583,7 +705,7 @@ bool fatFile::Close() {
 		else {
 			uint16_t ct,cd;
 
-			time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd,::time(NULL));
+			time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd,::time(nullptr));
 
 			tmpentry.modTime = ct;
 			tmpentry.modDate = cd;
@@ -594,12 +716,14 @@ bool fatFile::Close() {
 
 	return false;
 }
+#endif
 
-uint16_t fatFile::GetInformation(void) {
+#if !defined(OSFREE)
+uint16_t fatFile::GetInformation() {
 	return 0;
 }
 
-bool fatFile::UpdateDateTimeFromHost(void) {
+bool fatFile::UpdateDateTimeFromHost() {
 	return true;
 }
 
@@ -607,7 +731,7 @@ uint32_t fatFile::GetSeekPos() {
 	return seekpos;
 }
 
-uint32_t fatDrive::getClustFirstSect(uint32_t clustNum) {
+uint32_t fatDrive::getClustFirstSect(uint32_t clustNum)  const {
 	if (unformatted) return 0;
 	return ((clustNum - 2) * BPB.v.BPB_SecPerClus) + firstDataSector;
 }
@@ -634,20 +758,20 @@ uint32_t fatDrive::getClusterValue(uint32_t clustNum) {
 	fatsectnum = BPB.v.BPB_RsvdSecCnt + (fatoffset / BPB.v.BPB_BytsPerSec) + partSectOff;
 	fatentoff = fatoffset % BPB.v.BPB_BytsPerSec;
 
-    if (BPB.is_fat32()) {
-        if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v32.BPB_FATSz32 + partSectOff)) {
-            LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to read cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
-            return 0;
-        }
-    }
-    else {
-        if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v.BPB_FATSz16 + partSectOff)) {
-            LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to read cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
-            return 0;
-        }
-    }
+	if (BPB.is_fat32()) {
+		if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v32.BPB_FATSz32 + partSectOff)) {
+			LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to read cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
+			return 0;
+		}
+	}
+	else {
+		if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v.BPB_FATSz16 + partSectOff)) {
+			LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to read cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
+			return 0;
+		}
+	}
 
-    assert((BPB.v.BPB_BytsPerSec * (Bitu)2) <= sizeof(fatSectBuffer));
+	assert((BPB.v.BPB_BytsPerSec * (Bitu)2) <= sizeof(fatSectBuffer));
 
 	if(curFatSect != fatsectnum) {
 		/* Load two sectors at once for FAT12 */
@@ -698,20 +822,20 @@ void fatDrive::setClusterValue(uint32_t clustNum, uint32_t clustValue) {
 	fatsectnum = BPB.v.BPB_RsvdSecCnt + (fatoffset / BPB.v.BPB_BytsPerSec) + partSectOff;
 	fatentoff = fatoffset % BPB.v.BPB_BytsPerSec;
 
-    if (BPB.is_fat32()) {
-        if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v32.BPB_FATSz32 + partSectOff)) {
-            LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to write cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
-            return;
-        }
-    }
-    else {
-        if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v.BPB_FATSz16 + partSectOff)) {
-            LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to write cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
-            return;
-        }
-    }
+	if (BPB.is_fat32()) {
+		if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v32.BPB_FATSz32 + partSectOff)) {
+			LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to write cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
+			return;
+		}
+	}
+	else {
+		if (fatsectnum >= (BPB.v.BPB_RsvdSecCnt + BPB.v.BPB_FATSz16 + partSectOff)) {
+			LOG(LOG_DOSMISC,LOG_ERROR)("Attempt to write cluster entry from FAT that out of range (outside the FAT table) cluster %u",(unsigned int)clustNum);
+			return;
+		}
+	}
 
-    assert((BPB.v.BPB_BytsPerSec * (Bitu)2) <= sizeof(fatSectBuffer));
+	assert((BPB.v.BPB_BytsPerSec * (Bitu)2) <= sizeof(fatSectBuffer));
 
 	if(curFatSect != fatsectnum) {
 		/* Load two sectors at once for FAT12 */
@@ -791,25 +915,25 @@ bool fatDrive::getEntryName(const char *fullname, char *entname) {
 void fatDrive::UpdateBootVolumeLabel(const char *label) {
 	if (unformatted) return;
 
-    FAT_BootSector bootbuffer = {};
+	FAT_BootSector bootbuffer = {};
 
-    if (BPB.v.BPB_BootSig == 0x28 || BPB.v.BPB_BootSig == 0x29) {
-        unsigned int i = 0;
-        char upcasebuf[12] = {0};
-        const char *upcaseptr = upcasebuf;
+	if (BPB.v.BPB_BootSig == 0x28 || BPB.v.BPB_BootSig == 0x29) {
+		unsigned int i = 0;
+		char upcasebuf[12] = {0};
+		const char *upcaseptr = upcasebuf;
 
-        loadedDisk->Read_AbsoluteSector(0+partSectOff,&bootbuffer);
+		loadedDisk->Read_AbsoluteSector(0+partSectOff,&bootbuffer);
 
-        strncpy(upcasebuf, label, 11);
-        DBCS_upcase(upcasebuf);
-        // initial 0xe5 substituted to 0x05 in the same way as other SFN
-        // even though this is in BPB and 0xe5 shouldn't matter
-        if (upcasebuf[0] == (char)0xe5) upcasebuf[0] = 0x05;
-        while (i < 11 && *upcaseptr != 0) bootbuffer.bpb.v.BPB_VolLab[i++] = *upcaseptr++;
-        while (i < 11)                    bootbuffer.bpb.v.BPB_VolLab[i++] = ' ';
+		strncpy(upcasebuf, label, 11);
+		DBCS_upcase(upcasebuf);
+		// initial 0xe5 substituted to 0x05 in the same way as other SFN
+		// even though this is in BPB and 0xe5 shouldn't matter
+		if (upcasebuf[0] == (char)0xe5) upcasebuf[0] = 0x05;
+		while (i < 11 && *upcaseptr != 0) bootbuffer.bpb.v.BPB_VolLab[i++] = *upcaseptr++;
+		while (i < 11)                    bootbuffer.bpb.v.BPB_VolLab[i++] = ' ';
 
-        loadedDisk->Write_AbsoluteSector(0+partSectOff,&bootbuffer);
-    }
+		loadedDisk->Write_AbsoluteSector(0+partSectOff,&bootbuffer);
+	}
 }
 
 void fatDrive::SetLabel(const char *label, bool /*iscdrom*/, bool /*updatable*/) {
@@ -856,11 +980,13 @@ nextfile:
 	readSector(tmpsector,sectbuf);
 	dirPos++;
 
+#if !defined(OSFREE)
 	if (dos.version.major >= 7 || uselfn) {
 		/* skip LFN entries */
 		if ((sectbuf[entryoffset].attrib & 0x3F) == 0x0F)
 			goto nextfile;
 	}
+#endif
 
 	if (*label != 0) {
 		/* adding a volume label */
@@ -881,7 +1007,7 @@ nextfile:
 				while (j < 11)            sectbuf[entryoffset].entryname[j++] = ' ';
 			}
             uint16_t ct, cd;
-            time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd, ::time(NULL));
+            time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd, ::time(nullptr));
             sectbuf[entryoffset].modTime = ct;
             sectbuf[entryoffset].modDate = cd;
             sectbuf[entryoffset].accessDate = cd;
@@ -1074,8 +1200,8 @@ uint8_t fatDrive::readSector(uint32_t sectnum, void * data) {
 	uint32_t head = sectnum / loadedDisk->sectors;
 	uint32_t sector = sectnum % loadedDisk->sectors + 1L;
 #endif
-	return loadedDisk->Read_Sector(head, cylinder, sector, data);
-}	
+	return (uint8_t)loadedDisk->Read_Sector(head, cylinder, sector, data);
+}
 
 uint8_t fatDrive::writeSector(uint32_t sectnum, void * data) {
 	if (absolute) return Write_AbsoluteSector(sectnum, data);
@@ -1093,7 +1219,7 @@ uint8_t fatDrive::writeSector(uint32_t sectnum, void * data) {
 	uint32_t head = sectnum / loadedDisk->sectors;
 	uint32_t sector = sectnum % loadedDisk->sectors + 1L;
 #endif
-	return loadedDisk->Write_Sector(head, cylinder, sector, data);
+	return (uint8_t)loadedDisk->Write_Sector(head, cylinder, sector, data);
 }
 
 uint32_t fatDrive::getSectorCount(void) {
@@ -1144,7 +1270,7 @@ uint32_t fatDrive::getAbsoluteSectFromChain(uint32_t startClustNum, uint32_t log
 
 	uint32_t currentClust = startClustNum;
 
-	if (ccm != NULL && ccm->current_cluster_no >= 2) {
+	if (ccm != NULL && ccm->current_cluster_no >= 2 && targClust != 0/*never for the first cluster, there is no point*/) {
 		/* If the cluster index is the same as last time or farther down, avoid re-reading the
 		 * entire allocation chain again and start from where we last read from. If the
 		 * cluster index is going back from current, then re-read the entire allocation chain again.
@@ -1156,26 +1282,31 @@ uint32_t fatDrive::getAbsoluteSectFromChain(uint32_t startClustNum, uint32_t log
 		}
 	}
 
+	if (ccm != NULL) {
+		ccm->current_cluster_no = currentClust;
+		ccm->current_cluster_index = indxClust;
+	}
+
 	while(indxClust<targClust) {
 		const uint32_t testvalue = getClusterValue(currentClust);
-		++indxClust;
 
 		if (iseofFAT(testvalue)) {
-			if (indxClust!=targClust) LOG(LOG_MISC,LOG_DEBUG)("FAT: Seek past allocation chain");
+			if ((indxClust+1u)!=targClust) LOG(LOG_MISC,LOG_DEBUG)("FAT: Seek past allocation chain wantedClusterIndex=%u targetClusterIndex=%u",(unsigned int)indxClust+1u,(unsigned int)targClust);
 			return 0;
 		}
 
 		currentClust = testvalue;
-	}
+		indxClust++;
 
-	assert(indxClust<=targClust);
-
-	if (ccm != NULL) {
-		ccm->current_cluster_index = currentClust;
-		ccm->current_cluster_no = indxClust;
+		/* remember where we are so append is fast */
+		if (ccm != NULL) {
+			ccm->current_cluster_no = currentClust;
+			ccm->current_cluster_index = indxClust;
+		}
 	}
 
 	/* this should not happen! */
+	assert(indxClust<=targClust);
 	assert(currentClust != 0);
 
 	return (getClustFirstSect(currentClust) + sectClust);
@@ -1261,12 +1392,19 @@ void fatDrive::deleteClustChain(uint32_t startCluster, uint32_t bytePos) {
 	}
 }
 
-uint32_t fatDrive::appendCluster(uint32_t startCluster) {
+uint32_t fatDrive::appendCluster(uint32_t startCluster,clusterChainMemory *ccm,clusterChainMemory *ccm_out) {
 	if (unformatted) return 0;
 	if (startCluster < 2) return 0; /* do not corrupt the FAT media ID. The file has no chain. Do nothing. */
 
 	uint32_t currentClust = startCluster;
+	uint32_t indxClust = (uint32_t)0;
 	uint32_t eofClust = 0;
+
+	/* instead of re-reading the entire FAT chain, start from chain memory */
+	if (ccm && ccm->current_cluster_no >= 2) {
+		currentClust = ccm->current_cluster_no;
+		indxClust = ccm->current_cluster_index;
+	}
 
 	switch(fattype) {
 		case FAT12:
@@ -1282,6 +1420,12 @@ uint32_t fatDrive::appendCluster(uint32_t startCluster) {
 			abort();
 	}
 
+	/* remember where we are so append is fast */
+	if (ccm_out != NULL) {
+		ccm_out->current_cluster_no = currentClust;
+		ccm_out->current_cluster_index = indxClust;
+	}
+
 	while (1) {
 		uint32_t testvalue = getClusterValue(currentClust);
 		if (testvalue == 0) {
@@ -1294,6 +1438,13 @@ uint32_t fatDrive::appendCluster(uint32_t startCluster) {
 		}
 
 		currentClust = testvalue;
+		indxClust++;
+
+		/* remember where we are so append is fast */
+		if (ccm_out != NULL) {
+			ccm_out->current_cluster_no = currentClust;
+			ccm_out->current_cluster_index = indxClust;
+		}
 	}
 
 	uint32_t newClust = getFirstFreeClust();
@@ -1301,7 +1452,19 @@ uint32_t fatDrive::appendCluster(uint32_t startCluster) {
 
 	if(!allocateCluster(newClust, currentClust)) return 0;
 
-	zeroOutCluster(newClust);
+	// MS-DOS and the Windows 95/98/ME FAT driver are known NOT to zero out newly allocated clusters
+	// for files (but it probably does for directories---not verified).
+	//
+	// Back in the day my favorite method to recover random blocks of deleted data on Windows 98
+	// was to create a file, lseek() out to some offset, write ONE byte, and let Windows 98 create
+	// the allocation chain which would then contain whatever random data was left behind AND the
+	// one byte I wrote.
+	//
+	// Windows XP takes the time and effort to zero out clusters when extending the file.
+	// The trick doesn't work anymore. --J.C.
+	//
+	// Caller zeros the cluster if needed. The directory handling code already calls zeroOutCluster().
+	// This function's job is to extend the allocation chain not zero clusters.
 
 	return newClust;
 }
@@ -1345,22 +1508,18 @@ fatDrive::~fatDrive() {
 
 FILE * fopen_lock(const char * fname, const char * mode, bool &readonly);
 fatDrive::fatDrive(const char* sysFilename, uint32_t bytesector, uint32_t cylsector, uint32_t headscyl, uint32_t cylinders, std::vector<std::string>& options) {
-	FILE *diskfile;
-	uint32_t filesize;
-	unsigned char bootcode[256];
-
 	if(!dos_kernel_disabled && imgDTASeg == 0) {
 		imgDTASeg = DOS_GetMemory(4,"imgDTASeg");
 		imgDTAPtr = RealMake(imgDTASeg, 0);
 		imgDTA    = new DOS_DTA(imgDTAPtr);
 	}
 
-	std::vector<std::string>::iterator it = std::find(options.begin(), options.end(), "readonly");
-	bool roflag = it!=options.end();
-	readonly = wpcolon&&strlen(sysFilename)>1&&sysFilename[0]==':';
-	const char *fname=readonly?sysFilename+1:sysFilename;
-	diskfile = fopen_lock(fname, readonly||roflag?"rb":"rb+", readonly);
+	const bool roflag = std::find(options.begin(), options.end(), "readonly") != options.end();
+	readonly = wpcolon && strlen(sysFilename) > 1 && sysFilename[0] == ':';
+	const char *fname = readonly ? sysFilename + 1 : sysFilename;
+	FILE *diskfile = fopen_lock(fname, readonly || roflag ? "rb" : "rb+", readonly);
 	if (!diskfile) {created_successfully = false;return;}
+
 	opts.bytesector = bytesector;
 	opts.cylsector = cylsector;
 	opts.headscyl = headscyl;
@@ -1373,55 +1532,57 @@ fatDrive::fatDrive(const char* sysFilename, uint32_t bytesector, uint32_t cylsec
 	// where stdio buffering can cause loss of data.
 	setbuf(diskfile,NULL);
 
-	QCow2Image::QCow2Header qcow2_header = QCow2Image::read_header(diskfile);
+	// size in KB, filled in by whichever image loader below claims the file.
+	uint64_t filesize;
 
-	if (qcow2_header.magic == QCow2Image::magic && (qcow2_header.version == 2 || qcow2_header.version == 3)){
+	QCow2Image::QCow2Header qcow2_header = QCow2Image::read_header(diskfile);
+	if (qcow2_header.magic == QCow2Image::magic && (qcow2_header.version == 2 || qcow2_header.version == 3)) {
 		uint32_t cluster_size = 1u << qcow2_header.cluster_bits;
-		if ((bytesector < 512) || ((cluster_size % bytesector) != 0)){
+		if ((bytesector < 512) || ((cluster_size % bytesector) != 0)) {
+			fclose(diskfile);
 			created_successfully = false;
 			return;
 		}
 		filesize = (uint32_t)(qcow2_header.size / 1024L);
-		loadedDisk = new QCow2Disk(qcow2_header, diskfile, fname, filesize, bytesector, (filesize > 2880));
+		loadedDisk = new QCow2Disk(qcow2_header, diskfile, fname, qcow2_header.size, bytesector, (filesize > 2880));
+		loadedDisk->sector_size = bytesector;
+		loadedDisk->sectors = cylsector;
+		loadedDisk->heads = headscyl;
+		loadedDisk->cylinders = cylinders;
+
+		uint64_t LBA = loadedDisk->getLBA();
+		if(!int13_enable_48bitLBA && (LBA > 0x0FFFFFFF))
+			LOG_MSG("Warning: Disk size (%lf GB) exceeds 128GB limit for 28-bit LBA. You may need to enable 48-bit LBA support.", (double)LBA * 512.0 / (1024.0 * 1024 * 1024));
 	}
-	else{
+	else {
+		unsigned char bootcode[256];
 		fseeko64(diskfile, 0L, SEEK_SET);
-		assert(sizeof(bootcode) >= 256);
-		size_t readResult = fread(bootcode,256,1,diskfile); // look for magic signatures
-		if (readResult != 1) {
+		if (fread(bootcode,sizeof(bootcode),1,diskfile) != 1) { // look for magic signatures
 			LOG(LOG_IO, LOG_ERROR) ("Reading error in fatDrive constructor\n");
+			fclose(diskfile);
+			created_successfully = false;
 			return;
 		}
 
-		const char *ext = strrchr(sysFilename,'.');
-		bool is_hdd = false;
-		if((ext != NULL) && (!strcasecmp(ext, ".hdi") || !strcasecmp(ext, ".nhd"))) is_hdd = true;
+		fseeko64(diskfile, 0L, SEEK_END);
+		const uint64_t rawsize = (uint64_t)ftello64(diskfile);
+		filesize = rawsize / 1024L;
 
-		if (ext != NULL && !strcasecmp(ext, ".d88")) {
-			fseeko64(diskfile, 0L, SEEK_END);
-			filesize = (uint32_t)(ftello64(diskfile) / 1024L);
-			loadedDisk = new imageDiskD88(diskfile, fname, filesize, false);
-		}
-		else if (!memcmp(bootcode,"VFD1.",5)) { /* FDD files */
-			fseeko64(diskfile, 0L, SEEK_END);
-			filesize = (uint32_t)(ftello64(diskfile) / 1024L);
-			loadedDisk = new imageDiskVFD(diskfile, fname, filesize, false);
-		}
-		else if (!memcmp(bootcode,"T98FDDIMAGE.R0\0\0",16)) {
-			fseeko64(diskfile, 0L, SEEK_END);
-			filesize = (uint32_t)(ftello64(diskfile) / 1024L);
-			loadedDisk = new imageDiskNFD(diskfile, fname, filesize, false, 0);
-		}
-		else if (!memcmp(bootcode,"T98FDDIMAGE.R1\0\0",16)) {
-			fseeko64(diskfile, 0L, SEEK_END);
-			filesize = (uint32_t)(ftello64(diskfile) / 1024L);
-			loadedDisk = new imageDiskNFD(diskfile, fname, filesize, false, 1);
-		}
-		else {
-			fseeko64(diskfile, 0L, SEEK_END);
-			filesize = (uint32_t)(ftello64(diskfile) / 1024L);
-			loadedDisk = new imageDisk(diskfile, fname, filesize, (is_hdd | (filesize > 2880)));
-		}
+		const char *ext = strrchr(sysFilename,'.');
+		const bool is_hdd = (ext != NULL) && (!strcasecmp(ext, ".hdi") || !strcasecmp(ext, ".nhd"));
+
+		if (ext != NULL && !strcasecmp(ext, ".d88"))
+			loadedDisk = new imageDiskD88(diskfile, fname, (uint32_t)filesize, false);
+		else if (!memcmp(bootcode, "TD\0", 3))
+			loadedDisk = new imageDiskTeledisk(diskfile, fname, (uint32_t)filesize, false);
+		else if (!memcmp(bootcode,"VFD1.",5)) /* FDD files */
+			loadedDisk = new imageDiskVFD(diskfile, fname, (uint32_t)filesize, false);
+		else if (!memcmp(bootcode,"T98FDDIMAGE.R0\0\0",16))
+			loadedDisk = new imageDiskNFD(diskfile, fname, (uint32_t)filesize, false, 0);
+		else if (!memcmp(bootcode,"T98FDDIMAGE.R1\0\0",16))
+			loadedDisk = new imageDiskNFD(diskfile, fname, (uint32_t)filesize, false, 1);
+		else
+			loadedDisk = new imageDisk(diskfile, fname, rawsize, (is_hdd | (rawsize > 2880 * 1024)));
 	}
 
 	fatDriveInit(sysFilename, bytesector, cylsector, headscyl, cylinders, filesize, options);
@@ -1472,7 +1633,7 @@ uint8_t fatDrive::Read_AbsoluteSector(uint32_t sectnum, void * data) {
             uint32_t ssect = (sectnum * c) + physToLogAdj;
 
             while (c-- != 0) {
-                if (loadedDisk->Read_AbsoluteSector(ssect++,data) != 0)
+                if (loadedDisk->Read_AbsoluteSector(ssect++,data) != Int13Status::NoError)
                     return 0x05;
 
                 data = (void*)((char*)data + lsz);
@@ -1495,7 +1656,7 @@ uint8_t fatDrive::Write_AbsoluteSector(uint32_t sectnum, void * data) {
             uint32_t ssect = (sectnum * c) + physToLogAdj;
 
             while (c-- != 0) {
-                if (loadedDisk->Write_AbsoluteSector(ssect++,data) != 0)
+                if (loadedDisk->Write_AbsoluteSector(ssect++,data) != Int13Status::NoError)
                     return 0x05;
 
                 data = (void*)((char*)data + lsz);
@@ -1557,6 +1718,58 @@ void fatDrive::UpdateDPB(unsigned char dos_drive) {
             // other fields, not implemented
         }
     }
+}
+
+static bool IsFloppyBPBSane(const FAT_BootSector::bpb_union_t& bpb)
+{
+    switch(bpb.v.BPB_Media) {
+    case 0xF0:
+    case 0xF8:
+    case 0xF9:
+    case 0xFC:
+    case 0xFD:
+    case 0xFE:
+    case 0xFF:
+        break;
+    default:
+        return false;
+    }
+
+    uint32_t bytes =
+        bpb.v.BPB_BytsPerSec;
+
+    if(bytes < 256 || bytes > 2048 ||
+        (bytes & (bytes - 1)))
+        return false;
+
+    switch(bpb.v.BPB_SecPerClus) {
+    case 1:
+    case 2:
+    case 4:
+    case 8:
+        break;
+    default:
+        return false;
+    }
+
+    /**
+    if(bpb.v.BPB_RsvdSecCnt < 1 || bpb.v.BPB_RsvdSecCnt > 8)
+        return false;
+    */
+    if(bpb.v.BPB_NumFATs != 1 && bpb.v.BPB_NumFATs != 2)
+        return false;
+
+    if(bpb.v.BPB_FATSz16 == 0 || bpb.v.BPB_FATSz16 > 16)
+        return false;
+
+    /**
+    if(bpb.v.BPB_SecPerTrk < 8 || bpb.v.BPB_SecPerTrk > 36)
+        return false;
+    */
+    if(bpb.v.BPB_NumHeads < 1 || bpb.v.BPB_NumHeads > 2)
+        return false;
+
+    return true;
 }
 
 void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32_t cylsector, uint32_t headscyl, uint32_t cylinders, uint64_t filesize, const std::vector<std::string> &options) {
@@ -1646,7 +1859,12 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 			partSectOff = startSector;
 			partSectSize = countSector;
 		}
-		else if(is_hdd) {
+		/* NTS: MS-DOS block devices cannot represent a disk with a partition table.
+		 *      There is no consideration or support for it. The BIOS block devices
+		 *      built in do not either. Partition support only works because MSINIT
+		 *      takes the time to parse the partition table and create block devices
+		 *      for it. This is why you have to reboot after using FDISK. */
+		else if(is_hdd && loadedDisk->class_id != imageDisk::ID_MSDOSBLOCKDEV) {
 			/* Set user specified harddrive parameters */
 			if (headscyl > 0 && cylinders > 0 && cylsector > 0 && bytesector > 0)
 				loadedDisk->Set_Geometry(headscyl, cylinders,cylsector, bytesector);
@@ -1786,9 +2004,12 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 			/* Floppy disks don't have partitions */
 			partSectOff = 0;
 
-			if (loadedDisk->heads == 0 || loadedDisk->sectors == 0 || loadedDisk->cylinders == 0) {
-				/* Get_Geometry fails for some floppies with weird geometries, so try obtaining the geometry from BPB in such case */
-				LOG_MSG("drive_fat.cpp: No geometry, check your image. Try obtaining from BPB");
+			/* MS-DOS block device drivers do not have geometry, they just have sectors */
+			if (loadedDisk->class_id != imageDisk::ID_MSDOSBLOCKDEV) {
+				if (loadedDisk->heads == 0 || loadedDisk->sectors == 0 || loadedDisk->cylinders == 0) {
+					/* Get_Geometry fails for some floppies with weird geometries, so try obtaining the geometry from BPB in such case */
+					LOG_MSG("drive_fat.cpp: No geometry, check your image. Try obtaining from BPB");
+				}
 			}
 		}
 
@@ -1960,91 +2181,125 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 		bootbuffer.bpb.v.BPB_VolID = var_read((uint32_t*)var);
 
 		if(!is_hdd) {
-			if (loadedDisk->heads == 0 || loadedDisk->sectors == 0 || loadedDisk->cylinders == 0 || loadedDisk->sector_size == 0) { // Set geometry from BPB
+            /* Identify floppy format and create/fix BPB if necessary */
+
+            if((bootbuffer.BS_jmpBoot[0] == 0x69 || bootbuffer.BS_jmpBoot[0] == 0xe9 ||
+                (bootbuffer.BS_jmpBoot[0] == 0xeb && bootbuffer.BS_jmpBoot[2] == 0x90)) &&
+                (bootbuffer.bpb.v.BPB_Media & 0xf0) == 0xf0) {
+                /* DOS 2.x or later format, BPB assumed valid */
+
+                if((bootbuffer.bpb.v.BPB_Media != 0xf0 && !(bootbuffer.bpb.v.BPB_Media & 0x1)) &&
+                    (bootbuffer.BS_OEMName[5] != '3' || bootbuffer.BS_OEMName[6] != '.' || bootbuffer.BS_OEMName[7] < '2')) {
+                    /* Fix pre-DOS 3.2 single-sided floppy */
+                    bootbuffer.bpb.v.BPB_SecPerClus = 1;
+                }
+            }
+            else if(bootbuffer.BS_jmpBoot[0] == 0x60 && bootbuffer.BS_jmpBoot[1] == 0x1c) {
+                LOG_MSG("Experimental: Detected Human68k v1.00 or v2.00 floppy disk. Assuming PC-98 2HD(1.25MB disk).");
+                bootbuffer.bpb.v.BPB_BytsPerSec = 0x400;  //Offset 0x12,0x13
+                bootbuffer.bpb.v.BPB_SecPerClus = 1;      //Offset 0x14
+                bootbuffer.bpb.v.BPB_RsvdSecCnt = 1;
+                bootbuffer.bpb.v.BPB_NumFATs = 2;         //Offset 0x15?
+                bootbuffer.bpb.v.BPB_RootEntCnt = 0xc0;   //Offset 0x18,0x19
+                bootbuffer.bpb.v.BPB_TotSec16 = 0x4d0;    //Offset 0x1a,0x1b
+                bootbuffer.bpb.v.BPB_Media = 0xfe;        //Offset 0x1c
+                bootbuffer.bpb.v.BPB_FATSz16 = 2;         //Offset 0x1d?
+                bootbuffer.bpb.v.BPB_SecPerTrk = 8;
+                bootbuffer.bpb.v.BPB_NumHeads = 2;
+                bootbuffer.magic1 = 0x55;	// to silence warning
+                bootbuffer.magic2 = 0xaa;
+            }
+            else if(!IS_PC98_ARCH) {
+                /* Before DOS 2.0 there was no BPB. DOS 1.x identified the floppy format
+                 * solely by the media descriptor byte at the start of the FAT. Read it and
+                 * build the BPB from that (done before matching against DiskGeometryList). */
+                uint8_t sectorBuffer[512];
+                loadedDisk->Read_AbsoluteSector(1, &sectorBuffer);
+                uint8_t mdesc = sectorBuffer[0];
+
+                if(mdesc >= 0xf8) {
+                    /* DOS 1.x format, create BPB for 160kB floppy */
+                    bootbuffer.bpb.v.BPB_BytsPerSec = 512;
+                    bootbuffer.bpb.v.BPB_SecPerClus = 1;
+                    bootbuffer.bpb.v.BPB_RsvdSecCnt = 1;
+                    bootbuffer.bpb.v.BPB_NumFATs = 2;
+                    bootbuffer.bpb.v.BPB_RootEntCnt = 64;
+                    bootbuffer.bpb.v.BPB_TotSec16 = 320;
+                    bootbuffer.bpb.v.BPB_Media = mdesc;
+                    bootbuffer.bpb.v.BPB_FATSz16 = 1;
+                    bootbuffer.bpb.v.BPB_SecPerTrk = 8;
+                    bootbuffer.bpb.v.BPB_NumHeads = 1;
+                    bootbuffer.magic1 = 0x55;	// to silence warning
+                    bootbuffer.magic2 = 0xaa;
+                    if(!(mdesc & 0x2)) {
+                        /* Adjust for 9 sectors per track */
+                        bootbuffer.bpb.v.BPB_TotSec16 = 360;
+                        bootbuffer.bpb.v.BPB_FATSz16 = 2;
+                        bootbuffer.bpb.v.BPB_SecPerTrk = 9;
+                    }
+                    if(mdesc & 0x1) {
+                        /* Adjust for 2 sides */
+                        bootbuffer.bpb.v.BPB_SecPerClus = 2;
+                        bootbuffer.bpb.v.BPB_RootEntCnt = 112;
+                        bootbuffer.bpb.v.BPB_TotSec16 *= 2;
+                        bootbuffer.bpb.v.BPB_NumHeads = 2;
+                    }
+                }
+            }
+
+            /* BPB sanity check */
+            if(!IsFloppyBPBSane(bootbuffer.bpb)) {
+                int i = 0;
+
+                while(DiskGeometryList[i].ksize != 0) {
+                    if(DiskGeometryList[i].ksize == loadedDisk->diskSizeK)
+                        break;
+                    i++;
+                }
+
+                if(DiskGeometryList[i].ksize == 0) {
+                    LOG_MSG("Rejecting image, boot sector has invalid BPB, and disk image size %d kB is not a supported floppy size",
+                        (unsigned int)loadedDisk->diskSizeK);
+                    created_successfully = false;
+                    return;
+                }
+
+                LOG_MSG("Values in boot sector in the floppy image are not consistent with FAT filesystem. Setting typical value instead.");
+
+                bootbuffer.bpb.v.BPB_BytsPerSec = DiskGeometryList[i].bytespersect;
+                bootbuffer.bpb.v.BPB_SecPerClus = DiskGeometryList[i].sectcluster;
+                bootbuffer.bpb.v.BPB_RsvdSecCnt = 1;
+                bootbuffer.bpb.v.BPB_NumFATs = 2;
+                bootbuffer.bpb.v.BPB_SecPerTrk = DiskGeometryList[i].secttrack;
+                bootbuffer.bpb.v.BPB_NumHeads = DiskGeometryList[i].headscyl;
+                bootbuffer.bpb.v.BPB_RootEntCnt = DiskGeometryList[i].rootentries;
+                bootbuffer.bpb.v.BPB_TotSec16 =
+                    static_cast<uint16_t>(loadedDisk->image_length / DiskGeometryList[i].bytespersect);
+                bootbuffer.bpb.v.BPB_Media = DiskGeometryList[i].mediaid;
+                bootbuffer.bpb.v.BPB_FATSz16 = DiskGeometryList[i].fatsz;
+            }
+
+            if (loadedDisk->heads == 0 || loadedDisk->sectors == 0 || loadedDisk->cylinders == 0 || loadedDisk->sector_size == 0) { // Set geometry from BPB
 				headscyl = bootbuffer.bpb.v.BPB_NumHeads;
 				cylsector = bootbuffer.bpb.v.BPB_SecPerTrk;
 				bytesector = bootbuffer.bpb.v.BPB_BytsPerSec;
-				if(headscyl == 0 || cylsector == 0 || bytesector == 0 || loadedDisk->diskSizeK == 0 || ((bytesector & (bytesector - 1)) != 0)/*not a power of 2*/){
+				if(headscyl == 0 || cylsector == 0 || bytesector == 0 || loadedDisk->image_length == 0 || ((bytesector & (bytesector - 1)) != 0)/*not a power of 2*/){
 					LOG_MSG("drive_fat.cpp: Illegal BPB value");
+					LOG(LOG_MISC,LOG_DEBUG)("heads=%u cyls=%u sect=%u sizeK=%u bytesect=%u",headscyl,cylsector,bytesector,(unsigned int)loadedDisk->diskSizeK,bytesector);
 					if(!IS_PC98_ARCH){
 						created_successfully = false;
 						return;
 					}
 				}
 				else {
-					cylinders = loadedDisk->diskSizeK * 1024 / headscyl / cylsector / bytesector;
-					loadedDisk->Set_Geometry(headscyl, cylinders, cylsector, bytesector);
+                    const uint64_t cyl_size = static_cast<uint64_t>(headscyl) * cylsector * bytesector;
+                    cylinders = static_cast<uint32_t>(loadedDisk->image_length / cyl_size);
+    				loadedDisk->Set_Geometry(headscyl, cylinders, cylsector, bytesector);
 					LOG_MSG("drive_fat.cpp: Floppy geometry set from BPB information SS/C/H/S = %u/%u/%u/%u",
 							loadedDisk->sector_size,
 							loadedDisk->cylinders,
 							loadedDisk->heads,
 							loadedDisk->sectors);
-				}
-			}
-			/* Identify floppy format */
-			if((bootbuffer.BS_jmpBoot[0] == 0x69 || bootbuffer.BS_jmpBoot[0] == 0xe9 ||
-						(bootbuffer.BS_jmpBoot[0] == 0xeb && bootbuffer.BS_jmpBoot[2] == 0x90)) &&
-					(bootbuffer.bpb.v.BPB_Media & 0xf0) == 0xf0) {
-				/* DOS 2.x or later format, BPB assumed valid */
-
-				if((bootbuffer.bpb.v.BPB_Media != 0xf0 && !(bootbuffer.bpb.v.BPB_Media & 0x1)) &&
-						(bootbuffer.BS_OEMName[5] != '3' || bootbuffer.BS_OEMName[6] != '.' || bootbuffer.BS_OEMName[7] < '2')) {
-					/* Fix pre-DOS 3.2 single-sided floppy */
-					bootbuffer.bpb.v.BPB_SecPerClus = 1;
-				}
-			}
-			else if(bootbuffer.BS_jmpBoot[0] == 0x60 && bootbuffer.BS_jmpBoot[1] == 0x1c) {
-				LOG_MSG("Experimental: Detected Human68k v1.00 or v2.00 floppy disk. Assuming PC-98 2HD(1.25MB disk).");
-				bootbuffer.bpb.v.BPB_BytsPerSec = 0x400;  //Offset 0x12,0x13
-				bootbuffer.bpb.v.BPB_SecPerClus = 1;      //Offset 0x14
-				bootbuffer.bpb.v.BPB_RsvdSecCnt = 1;      
-				bootbuffer.bpb.v.BPB_NumFATs = 2;         //Offset 0x15?
-				bootbuffer.bpb.v.BPB_RootEntCnt = 0xc0;   //Offset 0x18,0x19
-				bootbuffer.bpb.v.BPB_TotSec16 = 0x4d0;    //Offset 0x1a,0x1b
-				bootbuffer.bpb.v.BPB_Media = 0xfe;        //Offset 0x1c
-				bootbuffer.bpb.v.BPB_FATSz16 = 2;         //Offset 0x1d?
-				bootbuffer.bpb.v.BPB_SecPerTrk = 8;
-				bootbuffer.bpb.v.BPB_NumHeads = 2;
-				bootbuffer.magic1 = 0x55;	// to silence warning
-				bootbuffer.magic2 = 0xaa;
-			}
-			else if(!IS_PC98_ARCH && loadedDisk->diskSizeK <= 360){
-				/* Read media descriptor in FAT */
-				uint8_t sectorBuffer[512];
-				loadedDisk->Read_AbsoluteSector(1,&sectorBuffer);
-				uint8_t mdesc = sectorBuffer[0];
-
-				if (mdesc >= 0xf8) {
-					/* DOS 1.x format, create BPB for 160kB floppy */
-					bootbuffer.bpb.v.BPB_BytsPerSec = 512;
-					bootbuffer.bpb.v.BPB_SecPerClus = 1;
-					bootbuffer.bpb.v.BPB_RsvdSecCnt = 1;
-					bootbuffer.bpb.v.BPB_NumFATs = 2;
-					bootbuffer.bpb.v.BPB_RootEntCnt = 64;
-					bootbuffer.bpb.v.BPB_TotSec16 = 320;
-					bootbuffer.bpb.v.BPB_Media = mdesc;
-					bootbuffer.bpb.v.BPB_FATSz16 = 1;
-					bootbuffer.bpb.v.BPB_SecPerTrk = 8;
-					bootbuffer.bpb.v.BPB_NumHeads = 1;
-					bootbuffer.magic1 = 0x55;	// to silence warning
-					bootbuffer.magic2 = 0xaa;
-					if (!(mdesc & 0x2)) {
-						/* Adjust for 9 sectors per track */
-						bootbuffer.bpb.v.BPB_TotSec16 = 360;
-						bootbuffer.bpb.v.BPB_FATSz16 = 2;
-						bootbuffer.bpb.v.BPB_SecPerTrk = 9;
-					}
-					if (mdesc & 0x1) {
-						/* Adjust for 2 sides */
-						bootbuffer.bpb.v.BPB_SecPerClus = 2;
-						bootbuffer.bpb.v.BPB_RootEntCnt = 112;
-						bootbuffer.bpb.v.BPB_TotSec16 *= 2;
-						bootbuffer.bpb.v.BPB_NumHeads = 2;
-					}
-				} else {
-					/* Unknown format */
-					created_successfully = false;
-					return;
 				}
 			}
 		}
@@ -2070,15 +2325,16 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 	}
 
 	/* NTS: Some HDI images of PC-98 games do in fact have BPB_NumHeads == 0. Some like "Amaranth 5" have BPB_SecPerTrk == 0 too! */
-	if (!IS_PC98_ARCH) {
-		/* a clue that we're not really looking at FAT is invalid or weird values in the boot sector */
-		if (BPB.v.BPB_SecPerTrk == 0 || (BPB.v.BPB_SecPerTrk > ((filesize <= 3000) ? 40 : 255)) ||
-				(BPB.v.BPB_NumHeads > ((filesize <= 3000) ? 64 : 255))) {
-			LOG_MSG("Rejecting image, boot sector has weird values not consistent with FAT filesystem");
-			created_successfully = false;
-			return;
-		}
-	}
+	if (!IS_PC98_ARCH && is_hdd) {
+        /* a clue that we're not really looking at FAT is invalid or weird values in the boot sector */
+        if(BPB.v.BPB_SecPerTrk == 0 ||
+            BPB.v.BPB_SecPerTrk > 255 ||
+            BPB.v.BPB_NumHeads > 255) {
+            LOG_MSG("Rejecting image, boot sector has weird values not consistent with FAT filesystem");
+            created_successfully = false;
+            return;
+        }
+    }
 
 	/* work at this point in logical sectors */
 	sector_size = loadedDisk->getSectSize();
@@ -2241,6 +2497,7 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 	/* another fault of this code is that it assumes the sector size of the medium matches
 	 * the BPB_BytsPerSec value of the MS-DOS filesystem. if they don't match, problems
 	 * will result. */
+    /*
 	if (BPB.v.BPB_BytsPerSec != fatDrive::getSectSize()) {
 		LOG_MSG("FAT bytes/sector %u does not match disk image bytes/sector %u",
 			(unsigned int)BPB.v.BPB_BytsPerSec,
@@ -2248,9 +2505,10 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 		created_successfully = false;
 		return;
 	}
-
-	/* Filesystem must be contiguous to use absolute sectors, otherwise CHS will be used */
-	absolute = IS_PC98_ARCH || ((BPB.v.BPB_NumHeads == headscyl) && (BPB.v.BPB_SecPerTrk == cylsector));
+    */
+	/* Filesystem must be contiguous to use absolute sectors, otherwise CHS will be used. */
+	/* MS-DOS block devices can only do absolute sectors, there is no support for C/H/S */
+	absolute = IS_PC98_ARCH || loadedDisk->class_id == imageDisk::ID_MSDOSBLOCKDEV || ((BPB.v.BPB_NumHeads == headscyl) && (BPB.v.BPB_SecPerTrk == cylsector));
 	LOG(LOG_DOSMISC,LOG_DEBUG)("FAT driver: Using %s sector access",absolute ? "absolute" : "C/H/S");
 
 	/* Determine FAT format, 12, 16 or 32 */
@@ -2342,8 +2600,12 @@ void fatDrive::fatDriveInit(const char *sysFilename, uint32_t bytesector, uint32
 # define MIN(a,b) ((a) < (b) ? (a) : (b))
 # define MAX(a,b) ((a) > (b) ? (a) : (b))
 #else
-# define MIN(a,b) std::min(a,b)
-# define MAX(a,b) std::max(a,b)
+# ifndef MIN
+#  define MIN(a,b) std::min(a,b)
+# endif
+# ifndef MAX
+#  define MAX(a,b) std::max(a,b)
+# endif
 #endif
 
 bool fatDrive::AllocationInfo32(uint32_t * _bytes_sector,uint32_t * _sectors_cluster,uint32_t * _total_clusters,uint32_t * _free_clusters) {
@@ -2564,6 +2826,7 @@ bool fatDrive::FileCreate(DOS_File **file, const char *name, uint16_t attributes
 		/* Can we find the base directory? */
 		if(!getDirClustNum(name, &dirClust, true)) return false;
 
+#if !defined(OSFREE)
 		/* NTS: "name" is the full relative path. For LFN creation to work we need only the final element of the path */
 		if (uselfn && !force_sfn) {
 			lfn = strrchr_dbcs((char *)name,'\\');
@@ -2583,6 +2846,7 @@ bool fatDrive::FileCreate(DOS_File **file, const char *name, uint16_t attributes
 			} else
 				lfn = NULL;
 		}
+#endif
 
 		memset(&fileEntry, 0, sizeof(direntry));
 		memcpy(&fileEntry.entryname, &pathName[0], 11);
@@ -2681,6 +2945,7 @@ bool fatDrive::FileUnlink(const char * name) {
 	if(!getFileDirEntry(name, &fileEntry, &dirClust, &subEntry)) return false; /* Do not use dirOk, DOS should never call this unless a file */
 	lfnRange_t dir_lfn_range = lfnRange; /* copy down LFN results before they are obliterated by the next call to FindNextInternal. */
 
+#if !defined(OSFREE)
 	/* delete LFNs */
 	if (!dir_lfn_range.empty() && (dos.version.major >= 7 || uselfn)) {
 		/* last LFN entry should be fileidx */
@@ -2693,6 +2958,7 @@ bool fatDrive::FileUnlink(const char * name) {
 			}
 		}
 	}
+#endif
 
 	/* remove primary 8.3 SFN */
 	fileEntry.entryname[0] = 0xe5;
@@ -2714,21 +2980,38 @@ bool fatDrive::FindFirst(const char *_dir, DOS_DTA &dta,bool fcb_findfirst) {
 
 	checkDiskChange();
 
-    direntry dummyClust = {};
+	direntry dummyClust = {};
 
-    // volume label searches always affect root directory, no matter the current directory, at least with FCBs
-    if (dta.GetAttr() == DOS_ATTR_VOLUME || ((dta.GetAttr() & DOS_ATTR_VOLUME) && (fcb_findfirst || !(_dir && *_dir && dta.GetAttr() == 0x3F)))) {
-        if(!getDirClustNum("\\", &cwdDirCluster, false)) {
-            DOS_SetError(DOSERR_PATH_NOT_FOUND);
-            return false;
-        }
-    }
-    else {
-        if(!getDirClustNum(_dir, &cwdDirCluster, false)) {
-            DOS_SetError(DOSERR_PATH_NOT_FOUND);
-            return false;
-        }
-    }
+	/* Elder Scrolls Arena does an 8-bit divide using CL=A and then forgets to clear CL when calling INT 21h AH=4Eh,
+	 * which to us appears as a program searching for files that may also be a volume label and/or hidden (CX=0x000A). */
+	/* TODO: Perhaps this check could be rolled into the _dir && *_dir && dta.GetAttr() == 0x3F check? */
+	/* Elder Scrolls Arena: The load game screen doesn't just open SAVEGAME.00, it does an INT 21h AH=4Eh search for
+	 *                      it with CX=0x007C??? What the fuck? If we don't watch for this, then players running the
+	 *                      game from a image will see their saves, but will not be able to load them ("No save here"). */
+	bool ignore_volbit = false;
+	if (dta.GetAttr() & DOS_ATTR_VOLUME) {
+		if (dta.GetAttr() & (0xC0|DOS_ATTR_HIDDEN|DOS_ATTR_SYSTEM|DOS_ATTR_READ_ONLY)) {
+			LOG(LOG_MISC,LOG_DEBUG)("FindFirst() ignoring volume label bit because other bits are set (Elder Scrolls Arena fix)");
+			ignore_volbit = true;
+		}
+	}
+
+	// volume label searches always affect root directory, no matter the current directory, at least with FCBs
+	if (dta.GetAttr() == DOS_ATTR_VOLUME || ((dta.GetAttr() & DOS_ATTR_VOLUME) && !ignore_volbit && (fcb_findfirst || !(_dir && *_dir && dta.GetAttr() == 0x3F)))) {
+		if(!getDirClustNum("\\", &cwdDirCluster, false)) {
+			DOS_SetError(DOSERR_PATH_NOT_FOUND);
+			return false;
+		}
+	}
+	else {
+		if(!getDirClustNum(_dir, &cwdDirCluster, false)) {
+			DOS_SetError(DOSERR_PATH_NOT_FOUND);
+			return false;
+		}
+	}
+
+	/* need to remember whether doing an FCB or FindFirst (AH=4Eh) search */
+	findFirstFCB = fcb_findfirst;
 
 	if (lfn_filefind_handle>=LFN_FILEFIND_MAX) {
 		dta.SetDirID(0);
@@ -2739,29 +3022,6 @@ bool fatDrive::FindFirst(const char *_dir, DOS_DTA &dta,bool fcb_findfirst) {
 	}
 
 	return FindNextInternal(cwdDirCluster, dta, &dummyClust);
-}
-
-char* removeTrailingSpaces(char* str) {
-	char* end = str + strlen(str) - 1;
-	while (end >= str && *end == ' ') end--;
-    /* NTS: The loop will exit with 'end' one char behind the last ' ' space character.
-     *      So to ASCIIZ snip off the space, step forward one and overwrite with NUL.
-     *      The loop may end with 'end' one char behind 'ptr' if the string was empty ""
-     *      or nothing but spaces. This is OK because after the step forward, end >= str
-     *      in all cases. */
-	*(++end) = '\0';
-	return str;
-}
-
-char* removeLeadingSpaces(char* str) {
-	size_t len = strlen(str);
-	size_t pos = strspn(str," ");
-	memmove(str,str + pos,len - pos + 1);
-	return str;
-}
-
-char* trimString(char* str) {
-	return removeTrailingSpaces(removeLeadingSpaces(str));
 }
 
 uint32_t fatDrive::GetSectorCount(void) {
@@ -2800,9 +3060,81 @@ static void copyDirEntry(const direntry *src, direntry *dst) {
 	var_write((uint32_t*)var, src->entrysize);
 }
 
+static bool VolumeLabelCmp(const char* label11, const char* pattern)
+{
+    int pi = 0;
+
+    /* ---- Name part (8 bytes) ---- */
+    for (int i = 0; i < 8; i++) {
+        char p = pattern[pi];
+
+        if (p == 0 || p == '.')
+            break;
+
+        if (p == '*') {
+            /* '*' matches rest of name */
+            while(pattern[pi] && pattern[pi] != '.')
+                pi++;
+            break;
+        }
+
+        if (p != '?' && toupper(p) != toupper(label11[i]))
+            return false;
+
+        pi++;
+    }
+
+    /* Skip remaining name chars in pattern until dot or end */
+    while (pattern[pi] && pattern[pi] != '.')
+        pi++;
+
+    /* No extension specified */
+    if (pattern[pi] != '.')
+        return true;
+
+    /* Skip dot */
+    pi++;
+
+    /* ---- Extension part starts at label11[8] ---- */
+    int li = 8;
+
+    while (pattern[pi]) {
+        char p = pattern[pi];
+
+        if (p == '*') {
+            /* '*' matches rest of extension */
+            return true;
+        }
+
+        /* If the rest of the pattern is only spaces, stop */
+        if (p == ' ') {
+            bool only_spaces = true;
+            for (int k = pi; pattern[k]; k++) {
+                if (pattern[k] != ' ') {
+                    only_spaces = false;
+                    break;
+                }
+            }
+            if (only_spaces)
+                return true;
+        }
+
+        if (p != '?' && toupper(p) != toupper(label11[li]))
+            return false;
+
+        pi++;
+        li++;
+    }
+
+    return true;
+}
+
 bool fatDrive::FindNextInternal(uint32_t dirClustNumber, DOS_DTA &dta, direntry *foundEntry) {
 	if (unformatted) return false;
 
+	clusterChainMemory dir_ccm;
+	bool sectbuf_valid = false;
+	uint32_t sectbuf_sector = 0;
 	direntry sectbuf[MAX_DIRENTS_PER_SECTOR]; /* 16 directory entries per 512 byte sector */
 	uint32_t logentsector; /* Logical entry sector */
 	uint32_t entryoffset;  /* Index offset within sector */
@@ -2817,9 +3149,9 @@ bool fatDrive::FindNextInternal(uint32_t dirClustNumber, DOS_DTA &dta, direntry 
 	bool lfn_ord_found[0x40];
 	char extension[4];
 
-    size_t dirent_per_sector = getSectSize() / sizeof(direntry);
-    assert(dirent_per_sector <= MAX_DIRENTS_PER_SECTOR);
-    assert((dirent_per_sector * sizeof(direntry)) <= SECTOR_SIZE_MAX);
+	size_t dirent_per_sector = getSectSize() / sizeof(direntry);
+	assert(dirent_per_sector <= MAX_DIRENTS_PER_SECTOR);
+	assert((dirent_per_sector * sizeof(direntry)) <= SECTOR_SIZE_MAX);
 
 	dta.GetSearchParams(attrs, srch_pattern,false);
 	dirPos = lfn_filefind_handle>=LFN_FILEFIND_MAX?dta.GetDirID():dpos[lfn_filefind_handle]; /* NTS: Windows 9x is said to have a 65536 dirent limit even for FAT32, so dirPos as 16-bit is acceptable */
@@ -2831,8 +3163,10 @@ nextfile:
 	logentsector = (uint32_t)((size_t)dirPos / dirent_per_sector);
 	entryoffset = (uint32_t)((size_t)dirPos % dirent_per_sector);
 
+	//LOG_MSG("sec=%lu ofs=%u",(unsigned long)logentsector,(unsigned int)entryoffset);
+
 	if(dirClustNumber==0) {
-        if (BPB.is_fat32()) return false;
+		if (BPB.is_fat32()) return false;
 
 		if(dirPos >= BPB.v.BPB_RootEntCnt) {
 			if (lfn_filefind_handle<LFN_FILEFIND_MAX) {
@@ -2842,9 +3176,15 @@ nextfile:
 			DOS_SetError(DOSERR_NO_MORE_FILES);
 			return false;
 		}
-		readSector(firstRootDirSect+logentsector,sectbuf);
+
+		if (!sectbuf_valid || sectbuf_sector != (firstRootDirSect+logentsector)) {
+			//LOG_MSG("read %lu",(unsigned long)(firstRootDirSect+logentsector));
+			readSector(firstRootDirSect+logentsector,sectbuf);
+			sectbuf_sector = (firstRootDirSect+logentsector);
+			sectbuf_valid = true;
+		}
 	} else {
-		tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector);
+		tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector, &dir_ccm);
 		/* A zero sector number can't happen */
 		if(tmpsector == 0) {
 			if (lfn_filefind_handle<LFN_FILEFIND_MAX) {
@@ -2854,66 +3194,111 @@ nextfile:
 			DOS_SetError(DOSERR_NO_MORE_FILES);
 			return false;
 		}
-		readSector(tmpsector,sectbuf);
+
+		if (!sectbuf_valid || sectbuf_sector != tmpsector) {
+			//LOG_MSG("read %lu",(unsigned long)tmpsector);
+			readSector(tmpsector,sectbuf);
+			sectbuf_sector = tmpsector;
+			sectbuf_valid = true;
+		}
 	}
 	dirPos++;
 	if (lfn_filefind_handle>=LFN_FILEFIND_MAX) dta.SetDirID(dirPos);
 	else dpos[lfn_filefind_handle]=dirPos;
 
-    /* Deleted file entry */
-    if (sectbuf[entryoffset].entryname[0] == 0xe5) {
-        lfind_name[0] = 0; /* LFN code will memset() it in full upon next dirent */
-        lfn_max_ord = 0;
-        lfnRange.clear();
-        goto nextfile;
-    }
+	/* Deleted file entry */
+	if (sectbuf[entryoffset].entryname[0] == 0xe5) {
+		lfind_name[0] = 0; /* LFN code will memset() it in full upon next dirent */
+		lfn_max_ord = 0;
+		lfnRange.clear();
+		goto nextfile;
+	}
 
 	/* End of directory list */
 	if (sectbuf[entryoffset].entryname[0] == 0x00) {
-			if (lfn_filefind_handle<LFN_FILEFIND_MAX) {
-				dpos[lfn_filefind_handle]=0;
-				dnum[lfn_filefind_handle]=0;
-			}
+		if (lfn_filefind_handle<LFN_FILEFIND_MAX) {
+			dpos[lfn_filefind_handle]=0;
+			dnum[lfn_filefind_handle]=0;
+		}
 		DOS_SetError(DOSERR_NO_MORE_FILES);
 		return false;
 	}
 	memset(find_name,0,DOS_NAMELENGTH_ASCII);
 	memset(extension,0,4);
-
-    if (sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME)
-        memcpy(find_name, &sectbuf[entryoffset].entryname[0], 11);
-    else
-    {
-        memcpy(find_name, &sectbuf[entryoffset].entryname[0], 8);
-        memcpy(extension, &sectbuf[entryoffset].entryname[8], 3);
-    }
-
+	memcpy(find_name,&sectbuf[entryoffset].entryname[0],8);
 	// recover the SFN initial E5, which was converted to 05
 	// to distinguish with a free directory entry
-	if (find_name[0] == 0x05) find_name[0] = 0xe5;
+	if (find_name[0] == 0x05) find_name[0] = (char)0xe5;
+	memcpy(extension,&sectbuf[entryoffset].entryname[8],3);
 
-    if (!(sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME)) {
-        trimString(&find_name[0]);
-        trimString(&extension[0]);
-    }
-
-	if (extension[0]!=0) {
-		strcat(find_name, ".");
-		strcat(find_name, extension);
+	if (!(sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME)) {
+		trimString(&find_name[0]);
+		trimString(&extension[0]);
 	}
 
-    /* Compare attributes to search attributes */
+	if (extension[0]!=0) {
+		// NTS: There are actually two ways to search for/read a volume label on a drive.
+		//
+		// 1. Set up an FCB to search for a volume label attribute with name ???????????
+		//    which will scan the root directory for a volume label and return it if it
+		//    exists.
+		//
+		//    The volume label will be returned in the FCB exactly as it is, and it can
+		//    be treated as an 11 byte string.
+		//
+		//    This is the standard documented way to do it. MS-DOS LABEL.EXE does this.
+		//
+		// 2. Use INT 21h AH=4Eh (Find First File) to search for a volume label attribute
+		//    with name *.* (Creative INSTALL.EXE uses A:\*.*). It will scan the root
+		//    directory and return it if it exists.
+		//
+		//    The volume label will be processed like any other file or directory name and
+		//    converted to an 8.3 filename, including removal of trailing spaces and the
+		//    addition of the "." if the last 3 chars have text.
+		//
+		//    This is a nonstandard way to do it. Creative Sound Blaster INSTALL.EXE uses
+		//    this method to determine which setup disk is in the drive, and it explicitly
+		//    checks for and expects the munged 8.3 volume label file name to detect it.
+		//
+		//    Example: Checks for "SBPRO_DISK1", expects INT 21h AH=4Eh to return "SBPRO_DI.SK1",
+		//             will not accept "SBPRO_DISK1".
+		//
+		//    A cursory check of the released MS-DOS 4.0 source code (DOS/SEARCH.ASM) shows
+		//    that INT 21h AH=4Eh has absolutely no code to handle volume labels whatsoever,
+		//    and therefore, this is something Microsoft never intended DOS programs to do.
+		//    ref: [https://github.com/joncampbell123/MS-DOS/blob/master/v4.0/src/DOS/SEARCH.ASM#L262]
+		if (findFirstFCB) {
+			if (!(sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME)) {
+				strcat(find_name, ".");
+			}
+		}
+		else {
+			strcat(find_name, ".");
+		}
+		strcat(find_name, extension);
+	}
+	
+	if (sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME)
+        trimString(find_name);
 
-    //TODO What about attrs = DOS_ATTR_VOLUME|DOS_ATTR_DIRECTORY ?
+	/* Compare attributes to search attributes */
+
+	//TODO What about attrs = DOS_ATTR_VOLUME|DOS_ATTR_DIRECTORY ?
 	if (attrs == DOS_ATTR_VOLUME) {
+#if !defined(OSFREE)
 		if (dos.version.major >= 7 || uselfn) {
 			/* skip LFN entries */
 			if ((sectbuf[entryoffset].attrib & 0x3F) == 0x0F)
 				goto nextfile;
 		}
+#endif
 
-		if (!(sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME)) goto nextfile;
-		labelCache.SetLabel(find_name, false, true);
+		if (!(sectbuf[entryoffset].attrib & DOS_ATTR_VOLUME) || !VolumeLabelCmp((const char*)sectbuf[entryoffset].entryname, srch_pattern)) goto nextfile;
+		std::array<char, 12> volume_label = {};
+		memcpy(volume_label.data(), sectbuf[entryoffset].entryname, 11);
+		trimString(volume_label.data());
+		labelCache.SetLabel(volume_label.data(), false, true);
+#if !defined(OSFREE)
 	} else if ((dos.version.major >= 7 || uselfn) && (sectbuf[entryoffset].attrib & 0x3F) == 0x0F) { /* long filename piece */
 		struct direntry_lfn *dlfn = (struct direntry_lfn*)(&sectbuf[entryoffset]);
 
@@ -2932,80 +3317,81 @@ nextfile:
 			unsigned int stridx = oidx * 13u, len = 0;
 			uint16_t lchar = 0;
 			char lname[27] = {0};
-            char text[10];
-            uint16_t uname[4];
+			char text[10];
+			uint16_t uname[4];
 
-            for (unsigned int i=0;i < 5;i++) {
-                text[0] = text[1] = text[2] = 0;
-                lchar = (uint16_t)(dlfn->LDIR_Name1[i]);
-                if (lchar < 0x100 || lchar == 0xFFFF)
-                    lname[len++] = lchar != 0xFFFF && CodePageHostToGuestUTF16(text,&lchar) && text[0] && !text[1] ? text[0] : (char)(lchar & 0xFF);
-                else {
-                    uname[0]=lchar;
-                    uname[1]=0;
-                    if (CodePageHostToGuestUTF16(text,uname)) {
-                        lname[len++] = (char)(text[0] & 0xFF);
-                        lname[len++] = (char)(text[1] & 0xFF);
-                    } else
-                        lname[len++] = '_';
-                }
-            }
-            for (unsigned int i=0;i < 6;i++) {
-                text[0] = text[1] = text[2] = 0;
-                lchar = (uint16_t)(dlfn->LDIR_Name2[i]);
-                if (lchar < 0x100 || lchar == 0xFFFF)
-                    lname[len++] = lchar != 0xFFFF && CodePageHostToGuestUTF16(text,&lchar) && text[0] && !text[1] ? text[0] : (char)(lchar & 0xFF);
-                else {
-                    char text[10];
-                    uint16_t uname[4];
-                    uname[0]=lchar;
-                    uname[1]=0;
-                    text[0] = 0;
-                    text[1] = 0;
-                    text[2] = 0;
-                    if (CodePageHostToGuestUTF16(text,uname)) {
-                        lname[len++] = (char)(text[0] & 0xFF);
-                        lname[len++] = (char)(text[1] & 0xFF);
-                    } else
-                        lname[len++] = '_';
-                }
-            }
-            for (unsigned int i=0;i < 2;i++) {
-                text[0] = text[1] = text[2] = 0;
-                lchar = (uint16_t)(dlfn->LDIR_Name3[i]);
-                if (lchar < 0x100 || lchar == 0xFFFF)
-                    lname[len++] = lchar != 0xFFFF && CodePageHostToGuestUTF16(text,&lchar) && text[0] && !text[1] ? text[0] : (char)(lchar & 0xFF);
-                else {
-                    char text[10];
-                    uint16_t uname[4];
-                    uname[0]=lchar;
-                    uname[1]=0;
-                    text[0] = 0;
-                    text[1] = 0;
-                    text[2] = 0;
-                    if (CodePageHostToGuestUTF16(text,uname)) {
-                        lname[len++] = (char)(text[0] & 0xFF);
-                        lname[len++] = (char)(text[1] & 0xFF);
-                    } else
-                        lname[len++] = '_';
-                }
-            }
-            lname[len] = 0;
-            if ((stridx+len) <= LFN_NAMELENGTH) {
-                std::string full = std::string(lname) + std::string(lfind_name);
-                strcpy(lfind_name, full.c_str());
-                lfn_ord_found[oidx] = true;
-            }
+			for (unsigned int i=0;i < 5;i++) {
+				text[0] = text[1] = text[2] = 0;
+				lchar = (uint16_t)(dlfn->LDIR_Name1[i]);
+				if (lchar < 0x100 || lchar == 0xFFFF)
+					lname[len++] = lchar != 0xFFFF && CodePageHostToGuestUTF16(text,&lchar) && text[0] && !text[1] ? text[0] : (char)(lchar & 0xFF);
+				else {
+					uname[0]=lchar;
+					uname[1]=0;
+					if (CodePageHostToGuestUTF16(text,uname)) {
+						lname[len++] = (char)(text[0] & 0xFF);
+						lname[len++] = (char)(text[1] & 0xFF);
+					} else
+						lname[len++] = '_';
+				}
+			}
+			for (unsigned int i=0;i < 6;i++) {
+				text[0] = text[1] = text[2] = 0;
+				lchar = (uint16_t)(dlfn->LDIR_Name2[i]);
+				if (lchar < 0x100 || lchar == 0xFFFF)
+					lname[len++] = lchar != 0xFFFF && CodePageHostToGuestUTF16(text,&lchar) && text[0] && !text[1] ? text[0] : (char)(lchar & 0xFF);
+				else {
+					char text[10];
+					uint16_t uname[4];
+					uname[0]=lchar;
+					uname[1]=0;
+					text[0] = 0;
+					text[1] = 0;
+					text[2] = 0;
+					if (CodePageHostToGuestUTF16(text,uname)) {
+						lname[len++] = (char)(text[0] & 0xFF);
+						lname[len++] = (char)(text[1] & 0xFF);
+					} else
+						lname[len++] = '_';
+				}
+			}
+			for (unsigned int i=0;i < 2;i++) {
+				text[0] = text[1] = text[2] = 0;
+				lchar = (uint16_t)(dlfn->LDIR_Name3[i]);
+				if (lchar < 0x100 || lchar == 0xFFFF)
+					lname[len++] = lchar != 0xFFFF && CodePageHostToGuestUTF16(text,&lchar) && text[0] && !text[1] ? text[0] : (char)(lchar & 0xFF);
+				else {
+					char text[10];
+					uint16_t uname[4];
+					uname[0]=lchar;
+					uname[1]=0;
+					text[0] = 0;
+					text[1] = 0;
+					text[2] = 0;
+					if (CodePageHostToGuestUTF16(text,uname)) {
+						lname[len++] = (char)(text[0] & 0xFF);
+						lname[len++] = (char)(text[1] & 0xFF);
+					} else
+						lname[len++] = '_';
+				}
+			}
+			lname[len] = 0;
+			if ((stridx+len) <= LFN_NAMELENGTH) {
+				std::string full = std::string(lname) + std::string(lfind_name);
+				strcpy(lfind_name, full.c_str());
+				lfn_ord_found[oidx] = true;
+			}
 		}
 
 		goto nextfile;
+#endif
 	} else {
-        if (~attrs & sectbuf[entryoffset].attrib & (DOS_ATTR_DIRECTORY | DOS_ATTR_VOLUME) ) {
-            lfind_name[0] = 0; /* LFN code will memset() it in full upon next dirent */
-            lfn_max_ord = 0;
-            lfnRange.clear();
-            goto nextfile;
-        }
+		if (~attrs & sectbuf[entryoffset].attrib & (DOS_ATTR_DIRECTORY | DOS_ATTR_VOLUME) ) {
+			lfind_name[0] = 0; /* LFN code will memset() it in full upon next dirent */
+			lfn_max_ord = 0;
+			lfnRange.clear();
+			goto nextfile;
+		}
 	}
 
 	if (lfn_max_ord != 0) {
@@ -3038,22 +3424,15 @@ nextfile:
 	}
 
 	/* Compare name to search pattern. Skip long filename match if no long filename given. */
-    if(attrs == DOS_ATTR_VOLUME) {
-        if (!(wild_match(find_name, srch_pattern)))
-            goto nextfile;
-    }
-	else if (!(WildFileCmp(find_name,srch_pattern) || (lfn_max_ord != 0 && lfind_name[0] != 0 && LWildFileCmp(lfind_name,srch_pattern)))) {
+	if (attrs != DOS_ATTR_VOLUME && (!(WildFileCmp(find_name,srch_pattern) || (lfn_max_ord != 0 && lfind_name[0] != 0 && LWildFileCmp(lfind_name,srch_pattern))))) {
 		lfind_name[0] = 0; /* LFN code will memset() it in full upon next dirent */
 		lfn_max_ord = 0;
 		lfnRange.clear();
 		goto nextfile;
 	}
 
-    if(sectbuf[entryoffset].attrib == DOS_ATTR_VOLUME)
-        trimString(find_name);
-
-    // Drive emulation does not need to require a LFN in case there is no corresponding 8.3 names.
-    if (lfind_name[0] == 0) strcpy(lfind_name,find_name);
+	// Drive emulation does not need to require a LFN in case there is no corresponding 8.3 names.
+	if (lfind_name[0] == 0) strcpy(lfind_name,find_name);
 
 	copyDirEntry(&sectbuf[entryoffset], foundEntry);
 
@@ -3067,7 +3446,7 @@ nextfile:
 bool fatDrive::FindNext(DOS_DTA &dta) {
 	if (unformatted) return false;
 
-    direntry dummyClust = {};
+	direntry dummyClust = {};
 
 	return FindNextInternal(lfn_filefind_handle>=LFN_FILEFIND_MAX?dta.GetDirIDCluster():(dnum[lfn_filefind_handle]?dnum[lfn_filefind_handle]:0), dta, &dummyClust);
 }
@@ -3222,7 +3601,10 @@ bool fatDrive::directoryChange(uint32_t dirClustNumber, const direntry *useEntry
 bool fatDrive::addDirectoryEntry(uint32_t dirClustNumber, const direntry& useEntry,const char *lfn) {
 	if (unformatted) return false;
 
+	clusterChainMemory dir_ccm;
 	direntry sectbuf[MAX_DIRENTS_PER_SECTOR]; /* 16 directory entries per 512 byte sector */
+	uint32_t sectbuf_sector = 0;
+	bool sectbuf_valid = false;
 	uint32_t tmpsector;
 	uint16_t dirPos = 0;
 	unsigned int need = 1;
@@ -3234,32 +3616,32 @@ bool fatDrive::addDirectoryEntry(uint32_t dirClustNumber, const direntry& useEnt
 	if (lfn != NULL && *lfn != 0) {
 		/* 13 characters per LFN entry */
 		bool lead = false;
-        char text[3];
-        uint16_t uname[4];
-        for (const char *scan = lfn; *scan; scan++) {
-            if (lead) {
-                lead = false;
-                text[0]=*(scan-1)&0xFF;
-                text[1]=*scan&0xFF;
-                text[2]=0;
-                uname[0]=0;
-                uname[1]=0;
-                if (CodePageGuestToHostUTF16(uname,text)&&uname[0]!=0&&uname[1]==0) {
-                    lfnw[len++] = uname[0];
-                } else {
-                    lfnw[len++] = *(scan-1)&0xFF;
-                    if (len < LFN_NAMELENGTH) lfnw[len++] = *scan&0xFF;
-                }
-            } else if (*(scan+1) && ((IS_PC98_ARCH && shiftjis_lead_byte(*scan&0xFF)) || (isDBCSCP() && isKanji1_gbk(*scan&0xFF)))) lead = true;
-            else if (dos.loaded_codepage != 437) {
-                text[0]=*scan&0xFF;
-                text[1]=0;
-                lfnw[len++] = CodePageGuestToHostUTF16(uname,text)&&uname[0]!=0&&uname[1]==0 ? uname[0] : (uint16_t)((unsigned char)(*scan));
-            } else
-                lfnw[len++] = (uint16_t)((unsigned char)(*scan));
-        }
-        lfnw[len] = 0;
-        need = (unsigned int)(1 + (len + 12) / 13); /*round up*/;
+		char text[3];
+		uint16_t uname[4];
+		for (const char *scan = lfn; *scan; scan++) {
+			if (lead) {
+				lead = false;
+				text[0]=*(scan-1)&0xFF;
+				text[1]=*scan&0xFF;
+				text[2]=0;
+				uname[0]=0;
+				uname[1]=0;
+				if (CodePageGuestToHostUTF16(uname,text)&&uname[0]!=0&&uname[1]==0) {
+					lfnw[len++] = uname[0];
+				} else {
+					lfnw[len++] = *(scan-1)&0xFF;
+					if (len < LFN_NAMELENGTH) lfnw[len++] = *scan&0xFF;
+				}
+			} else if (*(scan+1) && ((IS_PC98_ARCH && shiftjis_lead_byte(*scan&0xFF)) || (isDBCSCP() && isKanji1_gbk(*scan&0xFF)))) lead = true;
+			else if (dos.loaded_codepage != 437) {
+				text[0]=*scan&0xFF;
+				text[1]=0;
+				lfnw[len++] = CodePageGuestToHostUTF16(uname,text)&&uname[0]!=0&&uname[1]==0 ? uname[0] : (uint16_t)((unsigned char)(*scan));
+			} else
+				lfnw[len++] = (uint16_t)((unsigned char)(*scan));
+		}
+		lfnw[len] = 0;
+		need = (unsigned int)(1 + (len + 12) / 13); /*round up*/;
 	}
 
 	size_t dirent_per_sector = getSectSize() / sizeof(direntry);
@@ -3275,19 +3657,24 @@ bool fatDrive::addDirectoryEntry(uint32_t dirClustNumber, const direntry& useEnt
 			if(dirPos >= BPB.v.BPB_RootEntCnt) return false;
 			tmpsector = firstRootDirSect+logentsector;
 		} else {
-			tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector);
+			tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector, &dir_ccm);
 			/* A zero sector number can't happen - we need to allocate more room for this directory*/
 			if(tmpsector == 0) {
 				uint32_t newClust;
-				newClust = appendCluster(dirClustNumber);
+				newClust = appendCluster(dirClustNumber, &dir_ccm);
 				if(newClust == 0) return false;
 				zeroOutCluster(newClust);
 				/* Try again to get tmpsector */
-				tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector);
+				tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector, &dir_ccm);
 				if(tmpsector == 0) return false; /* Give up if still can't get more room for directory */
 			}
 		}
-		readSector(tmpsector,sectbuf);
+
+		if (!sectbuf_valid || sectbuf_sector != tmpsector) {
+			readSector(tmpsector,sectbuf);
+			sectbuf_sector = tmpsector;
+			sectbuf_valid = true;
+		}
 
 		/* Deleted file entry or end of directory list */
 		if ((sectbuf[entryoffset].entryname[0] == 0xe5) || (sectbuf[entryoffset].entryname[0] == 0x00)) {
@@ -3334,12 +3721,13 @@ bool fatDrive::addDirectoryEntry(uint32_t dirClustNumber, const direntry& useEnt
 							if(dirPos >= BPB.v.BPB_RootEntCnt) return false;
 							tmpsector = firstRootDirSect+logentsector;
 						} else {
-							tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector);
+							tmpsector = getAbsoluteSectFromChain(dirClustNumber, logentsector, &dir_ccm);
 							/* A zero sector number can't happen - we need to allocate more room for this directory*/
 							if(tmpsector == 0) return false;
 						}
 						readSector(tmpsector,sectbuf);
 
+#if !defined(OSFREE)
 						direntry_lfn *dlfn = (direntry_lfn*)(&sectbuf[entryoffset]);
 
 						memset(dlfn,0,sizeof(*dlfn));
@@ -3351,6 +3739,7 @@ bool fatDrive::addDirectoryEntry(uint32_t dirClustNumber, const direntry& useEnt
 						for (unsigned int i=0;i < 5;i++) dlfn->LDIR_Name1[i] = lfnbuf[lfnsrc++];
 						for (unsigned int i=0;i < 6;i++) dlfn->LDIR_Name2[i] = lfnbuf[lfnsrc++];
 						for (unsigned int i=0;i < 2;i++) dlfn->LDIR_Name3[i] = lfnbuf[lfnsrc++];
+#endif
 
 						writeSector(tmpsector,sectbuf);
 						dirPos++;
@@ -3388,15 +3777,15 @@ bool fatDrive::MakeDir(const char *dir) {
 
 	const char *lfn = NULL;
 
-    if (readonly) {
+	if (readonly) {
 		DOS_SetError(DOSERR_WRITE_PROTECTED);
-        return false;
-    }
+		return false;
+	}
 	uint32_t dummyClust, dirClust, subEntry;
 	direntry tmpentry;
 	char dirName[DOS_NAMELENGTH_ASCII];
-    char pathName[11], path[DOS_PATHLENGTH];
-    uint16_t ct,cd;
+	char pathName[11], path[DOS_PATHLENGTH];
+	uint16_t ct,cd;
 
 	/* you cannot mkdir root directory */
 	if (*dir == 0) {
@@ -3420,6 +3809,7 @@ bool fatDrive::MakeDir(const char *dir) {
 
 	if(!allocateCluster(dummyClust, 0)) return false;
 
+#if !defined(OSFREE)
 	/* NTS: "dir" is the full relative path. For LFN creation to work we need only the final element of the path */
 	if (uselfn && !force_sfn) {
 		lfn = strrchr_dbcs((char *)dir,'\\');
@@ -3439,6 +3829,7 @@ bool fatDrive::MakeDir(const char *dir) {
 		} else
 			lfn = NULL;
 	}
+#endif
 
 	zeroOutCluster(dummyClust);
 
@@ -3450,9 +3841,9 @@ bool fatDrive::MakeDir(const char *dir) {
 	tmpentry.loFirstClust = (uint16_t)(dummyClust & 0xffff);
 	tmpentry.hiFirstClust = (uint16_t)(dummyClust >> 16);
 	tmpentry.attrib = DOS_ATTR_DIRECTORY;
-    tmpentry.modTime = ct;
-    tmpentry.modDate = cd;
-    addDirectoryEntry(dirClust, tmpentry, lfn);
+	tmpentry.modTime = ct;
+	tmpentry.modDate = cd;
+	addDirectoryEntry(dirClust, tmpentry, lfn);
 
 	/* Add the [.] and [..] entries to our new directory*/
 	/* [.] entry */
@@ -3461,8 +3852,8 @@ bool fatDrive::MakeDir(const char *dir) {
 	tmpentry.loFirstClust = (uint16_t)(dummyClust & 0xffff);
 	tmpentry.hiFirstClust = (uint16_t)(dummyClust >> 16);
 	tmpentry.attrib = DOS_ATTR_DIRECTORY;
-    tmpentry.modTime = ct;
-    tmpentry.modDate = cd;
+	tmpentry.modTime = ct;
+	tmpentry.modDate = cd;
 	addDirectoryEntry(dummyClust, tmpentry);
 
 	/* [..] entry */
@@ -3480,8 +3871,8 @@ bool fatDrive::MakeDir(const char *dir) {
 		tmpentry.hiFirstClust = (uint16_t)(dirClust >> 16);
 	}
 	tmpentry.attrib = DOS_ATTR_DIRECTORY;
-    tmpentry.modTime = ct;
-    tmpentry.modDate = cd;
+	tmpentry.modTime = ct;
+	tmpentry.modDate = cd;
 	addDirectoryEntry(dummyClust, tmpentry);
 	//if(!getDirClustNum(dir, &dummyClust, false)) return false;
 
@@ -3538,6 +3929,7 @@ bool fatDrive::RemoveDir(const char *dir) {
 	/* Return if directory is not empty */
 	if(filecount > 0) return false;
 
+#if !defined(OSFREE)
 	/* delete LFNs */
 	if (!dir_lfn_range.empty() && (dos.version.major >= 7 || uselfn)) {
 		/* last LFN entry should be fileidx */
@@ -3550,6 +3942,7 @@ bool fatDrive::RemoveDir(const char *dir) {
 			}
 		}
 	}
+#endif
 
 	/* remove primary 8.3 entry */
 	if (!directoryBrowse(dirClust, &tmpentry, subEntry)) return false;
@@ -3600,6 +3993,7 @@ bool fatDrive::Rename(const char * oldname, const char * newname) {
 	/* Can we find the base directory of the new name? (we know the parent dir of oldname in dirClust1) */
 	if(!getDirClustNum(newname, &dirClust2, true)) return false;
 
+#if !defined(OSFREE)
 	/* NTS: "newname" is the full relative path. For LFN creation to work we need only the final element of the path */
 	if (uselfn && !force_sfn) {
 		lfn = strrchr_dbcs((char *)newname,'\\');
@@ -3624,6 +4018,7 @@ bool fatDrive::Rename(const char * oldname, const char * newname) {
 		} else
 			lfn = NULL;
 	}
+#endif
 
 	/* add new dirent */
 	memcpy(&fileEntry2, &fileEntry1, sizeof(direntry));
@@ -3634,6 +4029,7 @@ bool fatDrive::Rename(const char * oldname, const char * newname) {
 	fileEntry1.entryname[0] = 0xe5;
 	directoryChange(dirClust1, &fileEntry1, (int32_t)subEntry1);
 
+#if !defined(OSFREE)
 	/* remove LFNs of old entry only if emulating LFNs or DOS version 7.0.
 	 * Earlier DOS versions ignore LFNs. */
 	if (!dir_lfn_range.empty() && (dos.version.major >= 7 || uselfn)) {
@@ -3647,6 +4043,7 @@ bool fatDrive::Rename(const char * oldname, const char * newname) {
 			}
 		}
 	}
+#endif
 
 	return true;
 }
@@ -3683,7 +4080,7 @@ void fatDrive::clusterChainMemory::clear(void) {
 }
 
 void fatDrive::checkDiskChange(void) {
-	bool chg = false;
+	//bool chg = false;
 
 	/* Hack for "Bliss" by DeathStar (1995).
 	 * The demo runs A:\GO.EXE, but the floppy disk doesn't actually exist, it's brought into
@@ -3760,4 +4157,4 @@ void fatDrive::checkDiskChange(void) {
 			(unsigned long)RootDirSectors,(unsigned long)DataSectors);
 	}
 }
-
+#endif

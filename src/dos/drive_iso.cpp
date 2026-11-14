@@ -34,6 +34,7 @@
 #define FLAGS1	((iso) ? de.fileFlags : de.timeZone)
 #define FLAGS2	((iso) ? de->fileFlags : de->timeZone)
 
+#if !defined(OSFREE)
 char fullname[LFN_NAMELENGTH];
 static uint16_t sdid[256];
 extern int lfn_filefind_handle;
@@ -44,15 +45,19 @@ inline bool CodePageHostToGuestUTF16(uint8_t *d/*CROSS_LEN*/,const uint8_t *s/*C
     std::u16string u16s(reinterpret_cast<const char16_t *>(s));
     return CodePageHostToGuestUTF16(reinterpret_cast<char *>(d), reinterpret_cast<const uint16_t *>(u16s.c_str()));
 }
+#endif
 
 using namespace std;
 
+#if !defined(OSFREE)
 static bool islfnchar(const char *s) {
     return (unsigned char)*s <= 32 || (unsigned char)*s == 127 || *s == '\"' || *s == '+' || *s == '=' || *s == ',' || *s == ';' || *s == ':' || *s == '<' || *s == '>' || *s == '?' || *s == '*';
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 /*From Linux kernel source*/
 /** CRC table for the CRC ITU-T V.41 0x1021 (x^16 + x^12 + x^15 + 1) */
 const uint16_t UDF_crc_itu_t_table[256] = {
@@ -97,9 +102,11 @@ uint16_t UDF_crc_itu_t(uint16_t crc, const uint8_t *buffer, size_t len)
 
 	return crc;
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFTagId::parse(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 16) {
 		TagIdentifier = le16toh( *((uint16_t*)(&b[0])) );
@@ -162,9 +169,11 @@ UDFTagId::UDFTagId(const unsigned int sz,const unsigned char *b) {
 
 UDFTagId::UDFTagId() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFextent_ad::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 8u) {
 		ExtentLength = le32toh( *((uint32_t*)(&b[0])) );
@@ -178,9 +187,11 @@ UDFextent_ad::UDFextent_ad(const unsigned int sz,const unsigned char *b) {
 
 UDFextent_ad::UDFextent_ad() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFAnchorVolumeDescriptorPointer::get(UDFTagId &tag,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 32u) {
 		DescriptorTag = tag;
@@ -195,9 +206,11 @@ UDFAnchorVolumeDescriptorPointer::UDFAnchorVolumeDescriptorPointer(UDFTagId &tag
 
 UDFAnchorVolumeDescriptorPointer::UDFAnchorVolumeDescriptorPointer() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 UDFextent_ad isoDrive::convertToUDFextent_ad(const UDFshort_ad &s,const uint32_t partition_ref_id) const {
 	UDFextent_ad r;
 
@@ -259,9 +272,11 @@ bool isoDrive::convertToUDFextent_ad(UDFextent_ad &d,const UDFext_ad &s) const {
 
 	return false;
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFPrimaryVolumeDescriptor::get(UDFTagId &tag/*already parsed, why parse again?*/,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 490) {
 		DescriptorTag = tag;
@@ -297,9 +312,11 @@ UDFPrimaryVolumeDescriptor::UDFPrimaryVolumeDescriptor(UDFTagId &tag/*already pa
 
 UDFPrimaryVolumeDescriptor::UDFPrimaryVolumeDescriptor() {
 }
+#endif
 
 ////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFFileSetDescriptor::get(UDFTagId &tag/*already parsed, why parse again?*/,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 480) {
 		DescriptorTag = tag;
@@ -329,9 +346,11 @@ UDFFileSetDescriptor::UDFFileSetDescriptor(UDFTagId &tag/*already parsed, why pa
 
 UDFFileSetDescriptor::UDFFileSetDescriptor() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFext_ad::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 20) {
 		ExtentLength = le32toh( *((uint32_t*)(&b[0])) );
@@ -350,9 +369,11 @@ UDFext_ad::UDFext_ad(const unsigned int sz,const unsigned char *b) {
 
 UDFext_ad::UDFext_ad() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 uint8_t UDFicbtag::AllocationDescriptorType(void) const {
 	return (uint8_t)(Flags & 7u);
 }
@@ -379,9 +400,11 @@ UDFicbtag::UDFicbtag(const unsigned int sz,const unsigned char *b) {
 
 UDFicbtag::UDFicbtag() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFFileEntry::get(UDFTagId &tag/*already parsed, why parse again?*/,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 176) {
 		DescriptorTag = tag;
@@ -461,9 +484,11 @@ UDFFileEntry::UDFFileEntry(UDFTagId &tag/*already parsed, why parse again?*/,con
 
 UDFFileEntry::UDFFileEntry() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFFileIdentifierDescriptor::get(UDFTagId &tag/*already parsed, why parse again?*/,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 38) {
 		DescriptorTag = tag;
@@ -494,9 +519,11 @@ UDFFileIdentifierDescriptor::UDFFileIdentifierDescriptor(UDFTagId &tag/*already 
 
 UDFFileIdentifierDescriptor::UDFFileIdentifierDescriptor() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFPartitionDescriptor::get(UDFTagId &tag/*already parsed, why parse again?*/,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 356) {
 		DescriptorTag = tag;
@@ -524,9 +551,11 @@ UDFPartitionDescriptor::UDFPartitionDescriptor(UDFTagId &tag/*already parsed, wh
 
 UDFPartitionDescriptor::UDFPartitionDescriptor() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFLogicalVolumeDescriptor::get(UDFTagId &tag/*already parsed, why parse again?*/,const unsigned int sz,const unsigned char *b) {
 	if (sz >= 440) {
 		DescriptorTag = tag;
@@ -560,9 +589,11 @@ UDFLogicalVolumeDescriptor::UDFLogicalVolumeDescriptor(UDFTagId &tag/*already pa
 
 UDFLogicalVolumeDescriptor::UDFLogicalVolumeDescriptor() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 // FIXME: Why do the "strings" start with a control code like \x08?
 void UDFdstring::get(const unsigned int sz,const unsigned char *b) {
 	/* the LAST byte is the string length (?) */
@@ -583,9 +614,11 @@ UDFdstring::UDFdstring(const unsigned int sz,const unsigned char *b) {
 
 UDFdstring::UDFdstring() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFtimestamp::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 12u) {
 		TypeAndTimeZone = le16toh( *((uint16_t*)(&b[0])) );
@@ -607,9 +640,11 @@ UDFtimestamp::UDFtimestamp(const unsigned int sz,const unsigned char *b) {
 
 UDFtimestamp::UDFtimestamp() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFregid::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 32u) {
 		Flags = b[0];
@@ -624,9 +659,11 @@ UDFregid::UDFregid(const unsigned int sz,const unsigned char *b) {
 
 UDFregid::UDFregid() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFcharspec::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 64u) {
 		CharacterSetType = b[0];
@@ -640,9 +677,11 @@ UDFcharspec::UDFcharspec(const unsigned int sz,const unsigned char *b) {
 
 UDFcharspec::UDFcharspec() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFlb_addr::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 6u) {
 		LogicalBlockNumber = le32toh( *((uint32_t*)(&b[0])) );
@@ -656,9 +695,11 @@ UDFlb_addr::UDFlb_addr(const unsigned int sz,const unsigned char *b) {
 
 UDFlb_addr::UDFlb_addr() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFshort_ad::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 8u) {
 		ExtentLength = le32toh( *((uint32_t*)(&b[0])) );
@@ -672,9 +713,11 @@ UDFshort_ad::UDFshort_ad(const unsigned int sz,const unsigned char *b) {
 
 UDFshort_ad::UDFshort_ad() {
 }
+#endif
 
 ////////////////////////////////////////////////////////
 
+#if !defined(OSFREE)
 void UDFlong_ad::get(const unsigned int sz,const unsigned char *b) {
 	if (sz >= 16) {
 		ExtentLength = le32toh( *((uint32_t*)(&b[0])) );
@@ -694,26 +737,32 @@ UDFlong_ad::UDFlong_ad(const unsigned int sz,const unsigned char *b) {
 
 UDFlong_ad::UDFlong_ad() {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 UDFextent::UDFextent() {
 }
 
 UDFextent::UDFextent(const struct UDFextent_ad &s) : ex(s) {
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 UDFextents::UDFextents() {
 }
 
 UDFextents::UDFextents(const struct UDFextent_ad &s) {
 	xl.push_back(s);
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void isoDrive::UDFFileEntryToExtents(UDFextents &ex,UDFFileEntry &fe) const {
 	ex.xl.clear();
 	ex.indata.clear();
@@ -739,9 +788,11 @@ void isoDrive::UDFFileEntryToExtents(UDFextents &ex,UDFFileEntry &fe) const {
 
 	UDFextent_rewind(ex);
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 void isoDrive::UDFextent_rewind(struct UDFextents &ex) const {
 	ex.relofs = 0;
 	ex.extent = 0;
@@ -842,9 +893,11 @@ unsigned int isoDrive::UDFextent_read(struct UDFextents &ex,unsigned char *buf,s
 
 	return rd;
 }
+#endif
 
 ////////////////////////////////////
 
+#if !defined(OSFREE)
 class isoFile : public DOS_File {
 public:
     isoFile(isoDrive* drive, const char* name, const FileStat_Block* stat, uint32_t offset);
@@ -866,7 +919,9 @@ private:
 	uint32_t fileEnd;
 //	uint16_t info;
 };
+#endif
 
+#if !defined(OSFREE)
 isoFile::isoFile(isoDrive* drive, const char* name, const FileStat_Block* stat, uint32_t offset) : drive(drive), fileBegin(offset) {
 	time = stat->time;
 	date = stat->date;
@@ -877,7 +932,9 @@ isoFile::isoFile(isoDrive* drive, const char* name, const FileStat_Block* stat, 
 	this->name = NULL;
 	SetName(name);
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoFile::Read(uint8_t *data, uint16_t *size) {
 	if (udf) {
 		*size = (uint16_t)(drive->UDFextent_read(udffext,data,*size));
@@ -920,11 +977,15 @@ bool isoFile::Read(uint8_t *data, uint16_t *size) {
 	filePos += *size;
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoFile::Write(const uint8_t* /*data*/, uint16_t* /*size*/) {
 	return false;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoFile::Seek(uint32_t *pos, uint32_t type) {
 	switch (type) {
 		case DOS_SEEK_SET:
@@ -951,89 +1012,113 @@ bool isoFile::Seek(uint32_t *pos, uint32_t type) {
 
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoFile::Close() {
 	if (refCtr == 1) open = false;
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 uint16_t isoFile::GetInformation(void) {
 	return 0x40;		// read-only drive
 }
+#endif
 
+#if !defined(OSFREE)
 uint32_t isoFile::GetSeekPos() {
 	return filePos - fileBegin;
 }
+#endif
 
 int   MSCDEX_RemoveDrive(char driveLetter);
 int   MSCDEX_AddDrive(char driveLetter, const char* physicalPath, uint8_t& subUnit);
+int   MSCDEX_UpdateDrive(char driveLetter, const char* physicalPath, const uint8_t subUnit);
 void  MSCDEX_ReplaceDrive(CDROM_Interface* cdrom, uint8_t subUnit);
 bool  MSCDEX_HasDrive(char driveLetter);
 bool  MSCDEX_GetVolumeName(uint8_t subUnit, char* name);
 uint8_t MSCDEX_GetSubUnit(char driveLetter);
+bool  GetMSCDEXDriveBySubUnit(uint8_t unit,CDROM_Interface **_cdrom);
 
-bool CDROM_Interface_Image::images_init = false;
+bool CDROM_IsEmpty(CDROM_Interface *cd) {
+	if (cd->class_id == CDROM_Interface::ID_FAKE) {
+		CDROM_Interface_Fake *cdfake = (CDROM_Interface_Fake*)cd;
+		if (cdfake->isEmpty)
+			return true;
+	}
+
+	return false;
+}
+
+bool CDROM_IsAudioOnly(CDROM_Interface *cd) {
+	if (cd->class_id == CDROM_Interface::ID_IMAGE) {
+		CDROM_Interface_Image *cdimg = (CDROM_Interface_Image*)cd;
+		if (cdimg->HasDataTrack() == false && cdimg->HasAudioTrack() == true)
+			return true;
+	}
+
+	return false;
+}
 
 isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int& error, std::vector<std::string>& options) {
-    enable_udf = (dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10));//default
-    enable_rock_ridge = (dos.version.major >= 7 || uselfn);//default
-    enable_joliet = (dos.version.major >= 7 || uselfn);//default
-    for (const auto &opt : options) {
-        size_t equ = opt.find_first_of('=');
-        std::string name,value;
+#if !defined(OSFREE)
+	enable_udf = (dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10));//default
+	enable_rock_ridge = (dos.version.major >= 7 || uselfn);//default
+	enable_joliet = (dos.version.major >= 7 || uselfn);//default
 
-        if (equ != std::string::npos) {
-            name = opt.substr(0,equ);
-            value = opt.substr(equ+1);
-        }
-        else {
-            name = opt;
-            value.clear();
-        }
-
-        if (name == "rr") { // Enable/disable Rock Ridge extensions
-            if (value == "1" || value == "") enable_rock_ridge = true; // "-o rr" or "-o rr=1"
-            else if (value == "0") enable_rock_ridge = false;
-        }
-        else if (name == "joliet") { // Enable/disable Joliet extensions
-            if (value == "1" || value == "") enable_joliet = true; // "-o joliet" or "-o joliet=1"
-            else if (value == "0") enable_joliet = false;
+	if (dos_kernel_disabled) {
+		enable_udf = true;
+		enable_rock_ridge = true;
+		enable_joliet = true;
 	}
-        else if (name == "udf") { // Enable/disable UDF
-            if (value == "1" || value == "") enable_udf = true; // "-o udf" or "-o udf=1"
-            else if (value == "0") enable_udf = false;
+#endif
+
+	for (const auto &opt : options) {
+		size_t equ = opt.find_first_of('=');
+		std::string name,value;
+
+		if (equ != std::string::npos) {
+			name = opt.substr(0,equ);
+			value = opt.substr(equ+1);
+		}
+		else {
+			name = opt;
+			value.clear();
+		}
+
+#if !defined(OSFREE)
+		if (name == "rr") { // Enable/disable Rock Ridge extensions
+			if (value == "1" || value == "") enable_rock_ridge = true; // "-o rr" or "-o rr=1"
+			else if (value == "0") enable_rock_ridge = false;
+		}
+		else if (name == "joliet") { // Enable/disable Joliet extensions
+			if (value == "1" || value == "") enable_joliet = true; // "-o joliet" or "-o joliet=1"
+			else if (value == "0") enable_joliet = false;
+		}
+		else if (name == "udf") { // Enable/disable UDF
+			if (value == "1" || value == "") enable_udf = true; // "-o udf" or "-o udf=1"
+			else if (value == "0") enable_udf = false;
+		}
+#endif
 	}
-    }
-
-    if (!strcmp(fileName,"empty"))
-        empty_drive = true;
-
-    if (!CDROM_Interface_Image::images_init) {
-        CDROM_Interface_Image::images_init = true;
-        for (size_t i=0;i < 26;i++)
-            CDROM_Interface_Image::images[i] = NULL;
-    }
 
 	this->fileName[0]  = '\0';
 	this->discLabel[0] = '\0';
 	subUnit = 0;
+#if !defined(OSFREE)
 	nextFreeDirIterator = 0;
 	memset(sectorHashEntries, 0, sizeof(sectorHashEntries));
 	memset(&rootEntry, 0, sizeof(isoDirEntry));
+#endif
 	
 	safe_strncpy(this->fileName, fileName, CROSS_LEN);
 	error = UpdateMscdex(driveLetter, fileName, subUnit);
+	UpdateCDROMRef();
 
 	if (!error) {
-		if (empty_drive) {
-			LOG_MSG("Empty ISO");
-			strcpy(info, "isoDrive ");
-			strcat(info, "empty");
-			this->driveLetter = driveLetter;
-			this->mediaid = mediaid;
-			char buffer[32] = { 0 };
-			Set_Label(buffer,discLabel,true);
-		} else if (loadImage()) {
+		if (loadImage()) {
 			strcpy(info, "isoDrive ");
 			strcat(info, fileName);
 			this->driveLetter = driveLetter;
@@ -1041,7 +1126,7 @@ isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int&
 			char buffer[32] = { 0 };
 			if (!MSCDEX_GetVolumeName(subUnit, buffer)) strcpy(buffer, "");
 			Set_Label(buffer,discLabel,true);
-		} else if (CDROM_Interface_Image::images[subUnit]->HasDataTrack() == false && CDROM_Interface_Image::images[subUnit]->HasAudioTrack() == true) { //Audio only cdrom
+		} else if (CDROM_IsAudioOnly(cdrom)) { //Audio only cdrom
 			strcpy(info, "isoDrive ");
 			strcat(info, fileName);
 			this->driveLetter = driveLetter;
@@ -1049,11 +1134,36 @@ isoDrive::isoDrive(char driveLetter, const char* fileName, uint8_t mediaid, int&
 			char buffer[32] = { 0 };
 			strcpy(buffer, "Audio_CD");
 			Set_Label(buffer,discLabel,true);
-		} else error = 6; //Corrupt image
+		} else if (dos_kernel_disabled) {
+			//If we don't recognize the filesystem or disc and the guest OS is running,
+			//it's not our job to reject CDs. Maybe the guest OS might recognize it anyway.
+			strcpy(info, "isoDrive ");
+			strcat(info, fileName);
+			this->driveLetter = driveLetter;
+			this->mediaid = mediaid;
+			char buffer[32] = { 0 };
+			strcpy(buffer, "Unknown_CD");
+			Set_Label(buffer,discLabel,true);
+			LOG(LOG_MISC,LOG_DEBUG)("isoDrive: Failed to mount the filesystem, but presenting the ISO image to the guest anyway");
+		} else {
+			error = 6; //Corrupt image
+		}
 	}
 }
 
-isoDrive::~isoDrive() { }
+isoDrive::~isoDrive() {
+	/* if drive letter assigned but error returned, and we don't
+	 * remove the drive here, the drive will still exist in MSCDEX
+	 * but will point to a NULL pointer and cause a crash */
+	if (driveLetter && MSCDEX_HasDrive(driveLetter)) {
+		MSCDEX_RemoveDrive(driveLetter);
+	}
+
+	if (cdrom) {
+		cdrom->Release();
+		cdrom = NULL;
+	}
+}
 
 void isoDrive::setFileName(const char* fileName) {
 	safe_strncpy(this->fileName, fileName, CROSS_LEN);
@@ -1061,44 +1171,32 @@ void isoDrive::setFileName(const char* fileName) {
 	strcat(info, fileName);
 }
 
+/* because of the way this ties into IDE emulation through MSCDEX emulation, this must stay */
 int isoDrive::UpdateMscdex(char driveLetter, const char* path, uint8_t& subUnit) {
-	if (MSCDEX_HasDrive(driveLetter)) {
-		subUnit = MSCDEX_GetSubUnit(driveLetter);
-		if (empty_drive) {
-			CDROM_Interface_Image* oldCdrom = CDROM_Interface_Image::images[subUnit];
-			CDROM_Interface* cdrom = new CDROM_Interface_Fake();
-			char pathCopy[CROSS_LEN];
-			safe_strncpy(pathCopy, path, CROSS_LEN);
-			if (!cdrom->SetDevice(pathCopy, 0)) {
-				CDROM_Interface_Image::images[subUnit] = oldCdrom;
-				delete cdrom;
-				return 3;
-			}
-			MSCDEX_ReplaceDrive(cdrom, subUnit);
-		}
-		else {
-			CDROM_Interface_Image* oldCdrom = CDROM_Interface_Image::images[subUnit];
-			CDROM_Interface* cdrom = new CDROM_Interface_Image(subUnit);
-			char pathCopy[CROSS_LEN];
-			safe_strncpy(pathCopy, path, CROSS_LEN);
-			if (!cdrom->SetDevice(pathCopy, 0)) {
-				CDROM_Interface_Image::images[subUnit] = oldCdrom;
-				delete cdrom;
-				return 3;
-			}
-			MSCDEX_ReplaceDrive(cdrom, subUnit);
-		}
-		return 0;
-	} else {
+	if (MSCDEX_HasDrive(driveLetter))
+		return MSCDEX_UpdateDrive(driveLetter, path, subUnit);
+	else
 		return MSCDEX_AddDrive(driveLetter, path, subUnit);
-	}
 }
 
 void isoDrive::Activate(void) {
 	UpdateMscdex(driveLetter, fileName, subUnit);
+	UpdateCDROMRef();
+}
+
+void isoDrive::UpdateCDROMRef(void) {
+	CDROM_Interface *new_cdrom = NULL;
+
+	GetMSCDEXDriveBySubUnit(subUnit,&new_cdrom);/*will Addref*/
+
+	if (new_cdrom) {
+		if (cdrom) cdrom->Release();
+		cdrom = new_cdrom;
+	}
 }
 
 bool isoDrive::FileOpen(DOS_File **file, const char *name, uint32_t flags) {
+#if !defined(OSFREE)
 	FileStat_Block file_stat;
 	bool success;
 
@@ -1141,6 +1239,10 @@ bool isoDrive::FileOpen(DOS_File **file, const char *name, uint32_t flags) {
 	}
 
 	return success;
+#else
+	DOS_SetError(DOSERR_ACCESS_DENIED);
+	return false;
+#endif
 }
 
 bool isoDrive::FileCreate(DOS_File** /*file*/, const char* /*name*/, uint16_t /*attributes*/) {
@@ -1164,6 +1266,7 @@ bool isoDrive::MakeDir(const char* /*dir*/) {
 }
 
 bool isoDrive::TestDir(const char *dir) {
+#if !defined(OSFREE)
 	if (is_udf) {
 		UDFFileIdentifierDescriptor fid;
 		UDFFileEntry fe;
@@ -1173,9 +1276,14 @@ bool isoDrive::TestDir(const char *dir) {
 		isoDirEntry de;	
 		return (lookup(&de, dir) && IS_DIR(FLAGS1));
 	}
+#else
+	DOS_SetError(DOSERR_ACCESS_DENIED);
+	return false;
+#endif
 }
 
 bool isoDrive::FindFirst(const char *dir, DOS_DTA &dta, bool fcb_findfirst) {
+#if !defined(OSFREE)
 	if (is_udf) {
 		UDFFileIdentifierDescriptor fid;
 		UDFFileEntry fe;
@@ -1244,9 +1352,13 @@ bool isoDrive::FindFirst(const char *dir, DOS_DTA &dta, bool fcb_findfirst) {
 
 		return FindNext(dta);
 	}
+#else
+	return FindNext(dta);
+#endif
 }
 
 bool isoDrive::FindNext(DOS_DTA &dta) {
+#if !defined(OSFREE)
 	uint8_t attr;
 	char fname[LFN_NAMELENGTH];
 	char pattern[CROSS_LEN], findName[DOS_NAMELENGTH_ASCII], lfindName[ISO_MAXPATHNAME];
@@ -1310,6 +1422,7 @@ bool isoDrive::FindNext(DOS_DTA &dta) {
 
 	// after searching the directory, free the iterator
 	FreeDirIterator(dirIterator);
+#endif
 
 	DOS_SetError(DOSERR_NO_MORE_FILES);
 	return false;
@@ -1323,6 +1436,7 @@ bool isoDrive::Rename(const char* /*oldname*/, const char* /*newname*/) {
 bool isoDrive::SetFileAttr(const char * name,uint16_t attr) {
 	(void)attr;
 
+#if !defined(OSFREE)
 	if (is_udf) {
 		UDFFileIdentifierDescriptor fid;
 		UDFFileEntry fe;
@@ -1334,11 +1448,16 @@ bool isoDrive::SetFileAttr(const char * name,uint16_t attr) {
 		DOS_SetError(lookup(&de, name) ? DOSERR_ACCESS_DENIED : DOSERR_FILE_NOT_FOUND);
 		return false;
 	}
+#else
+	DOS_SetError(DOSERR_ACCESS_DENIED);
+	return false;
+#endif
 }
 
 bool isoDrive::GetFileAttr(const char *name, uint16_t *attr) {
 	*attr = 0;
 
+#if !defined(OSFREE)
 	if (is_udf) {
 		UDFFileIdentifierDescriptor fid;
 		UDFFileEntry fe;
@@ -1359,6 +1478,10 @@ bool isoDrive::GetFileAttr(const char *name, uint16_t *attr) {
 		}
 		return success;
 	}
+#else
+	DOS_SetError(DOSERR_ACCESS_DENIED);
+	return false;
+#endif
 }
 
 bool isoDrive::GetFileAttrEx(char* name, struct stat *status) {
@@ -1389,6 +1512,7 @@ bool isoDrive::AllocationInfo(uint16_t *bytes_sector, uint8_t *sectors_cluster, 
 }
 
 bool isoDrive::FileExists(const char *name) {
+#if !defined(OSFREE)
 	if (is_udf) {
 		UDFFileIdentifierDescriptor fid;
 		UDFFileEntry fe;
@@ -1398,9 +1522,14 @@ bool isoDrive::FileExists(const char *name) {
 		isoDirEntry de;
 		return (lookup(&de, name) && !IS_DIR(FLAGS1));
 	}
+#else
+	DOS_SetError(DOSERR_ACCESS_DENIED);
+	return false;
+#endif
 }
 
 bool isoDrive::FileStat(const char *name, FileStat_Block *const stat_block) {
+#if !defined(OSFREE)
 	if (is_udf) {
 		UDFFileIdentifierDescriptor fid;
 		UDFFileEntry fe;
@@ -1430,6 +1559,10 @@ bool isoDrive::FileStat(const char *name, FileStat_Block *const stat_block) {
 
 		return success;
 	}
+#else
+	DOS_SetError(DOSERR_ACCESS_DENIED);
+	return false;
+#endif
 }
 
 uint8_t isoDrive::GetMediaByte(void) {
@@ -1452,8 +1585,9 @@ Bits isoDrive::UnMount(void) {
 	return 2;
 }
 
+#if !defined(OSFREE)
 int isoDrive::GetDirIterator(const UDFFileEntry &fe) {
-    (void)fe;
+	(void)fe;
 	if (!is_udf) return 0;
 
 	int dirIterator = nextFreeDirIterator;
@@ -1471,7 +1605,9 @@ int isoDrive::GetDirIterator(const UDFFileEntry &fe) {
 
 	return dirIterator;
 }
+#endif
 
+#if !defined(OSFREE)
 int isoDrive::GetDirIterator(const isoDirEntry* de) {
 	// Not for UDF filesystem use!
 	if (is_udf) return 0;
@@ -1495,7 +1631,9 @@ int isoDrive::GetDirIterator(const isoDirEntry* de) {
 
 	return dirIterator;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, UDFFileIdentifierDescriptor &fid, UDFFileEntry &fe, UDFextents &dirext, char fname[LFN_NAMELENGTH],unsigned int dirIteratorIndex) {
 	if (!is_udf) return 0;
 
@@ -1613,23 +1751,23 @@ bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, UDFFileIdentifierDes
 			while (*s == '.'||*s == ' ') s++;
 			bool lead = false;
 			while (*s != 0) {
-                if(s == ext) break; // doesn't match if ext == NULL, so no harm in that case
-                if (!lead && ((IS_PC98_ARCH && shiftjis_lead_byte(*s & 0xFF)) || (isDBCSCP() && isKanji1_gbk(*s & 0xFF)))) {
-                    if (c >= (7-tailsize)) break;
-                    lead = true;
-                    *d++ = *s;
-                    c++;
+				if(s == ext) break; // doesn't match if ext == NULL, so no harm in that case
+				if (!lead && ((IS_PC98_ARCH && shiftjis_lead_byte(*s & 0xFF)) || (isDBCSCP() && isKanji1_gbk(*s & 0xFF)))) {
+					if (c >= (7-tailsize)) break;
+					lead = true;
+					*d++ = *s;
+					c++;
 				} else if ((unsigned char)*s <= 32 || (unsigned char)*s == 127 || *s == '.' || *s == '\"' || *s == '+' || *s == '=' || *s == ',' || *s == ';' || *s == ':' || *s == '<' || *s == '>' || ((*s == '[' || *s == ']' || *s == '|' || *s == '\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*s=='?'||*s=='*') {
-                    lead = false;
-                    if (*s != '.') {
-                        *d++ = '_';
-                        c++;
-                    }
-                } else if (c >= (8-tailsize)) {
-                    if (s < ext) s = ext;
-                    break;
-                } else {
-                    lead = false;
+					lead = false;
+					if (*s != '.') {
+						*d++ = '_';
+						c++;
+					}
+				} else if (c >= (8-tailsize)) {
+					if (s < ext) s = ext;
+					break;
+				} else {
+					lead = false;
 					*d++ = *s;
 					c++;
 				}
@@ -1645,16 +1783,16 @@ bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, UDFFileIdentifierDes
 					c = 0;
 					while (*s != 0) {
 						if (!lead && ((IS_PC98_ARCH && shiftjis_lead_byte(*s & 0xFF)) || (isDBCSCP() && isKanji1_gbk(*s & 0xFF)))) {
-                            if (c >= 2) break;
-                            lead = true;
-                            *d++ = *s;
-                            c++;
+							if (c >= 2) break;
+							lead = true;
+							*d++ = *s;
+							c++;
 						} else if ((unsigned char)*s <= 32 || (unsigned char)*s == 127 || *s == '.' || *s == '\"' || *s == '+' || *s == '=' || *s == ',' || *s == ';' || *s == ':' || *s == '<' || *s == '>' || ((*s == '[' || *s == ']' || *s == '|' || *s == '\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*s=='?'||*s=='*') {
-                            lead = false;
-                            *d++ = '_';
-                            c++;
-                        } else if (c >= 3) break;
-                        else {
+							lead = false;
+							*d++ = '_';
+							c++;
+						} else if (c >= 3) break;
+						else {
 							*d++ = *s;
 							c++;
 						}
@@ -1668,7 +1806,9 @@ bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, UDFFileIdentifierDes
 
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, isoDirEntry* de) {
 	// Not for UDF filesystem use!
 	if (is_udf) return 0;
@@ -1704,7 +1844,9 @@ bool isoDrive::GetNextDirEntry(const int dirIteratorHandle, isoDirEntry* de) {
 
 	return result;
 }
+#endif
 
+#if !defined(OSFREE)
 void isoDrive::FreeDirIterator(const int dirIterator) {
 	dirIterators[dirIterator].valid = false;
 	
@@ -1717,15 +1859,19 @@ void isoDrive::FreeDirIterator(const int dirIterator) {
 		}
 	}
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoDrive::ReadCachedSector(uint8_t** buffer, const uint32_t sector) {
+	if(cdrom == nullptr) return false;
+
 	// get hash table entry
 	unsigned int pos = sector % ISO_MAX_HASH_TABLE_SIZE;
 	SectorHashEntry& he = sectorHashEntries[pos];
-	
+
 	// check if the entry is valid and contains the correct sector
 	if (!he.valid || he.sector != sector) {
-		if (!CDROM_Interface_Image::images[subUnit]->ReadSector(he.data, false, sector)) {
+		if (!cdrom->ReadSectorsHost(he.data, false, sector, 1)) {
 			return false;
 		}
 		he.valid = true;
@@ -1735,12 +1881,14 @@ bool isoDrive::ReadCachedSector(uint8_t** buffer, const uint32_t sector) {
 	*buffer = he.data;
 	return true;
 }
+#endif
 
 inline bool isoDrive :: readSector(uint8_t *buffer, uint32_t sector) const {
-    if(CDROM_Interface_Image::images[subUnit] == nullptr) return false;
-    return CDROM_Interface_Image::images[subUnit]->ReadSector(buffer, false, sector);
+    if(cdrom == nullptr) return false;
+    return cdrom->ReadSectorsHost(buffer, false, sector, 1);
 }
 
+#if !defined(OSFREE)
 int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dirIteratorIndex) const {
 	// This code is NOT for UDF filesystem access!
 	if (is_udf) return -1;
@@ -1914,23 +2062,23 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 			while (*s == '.'||*s == ' ') s++;
 			bool lead = false;
 			while (*s != 0) {
-                if(s == ext) break; // doesn't match if ext == NULL, so no harm in that case
-                if (!lead && ((IS_PC98_ARCH && shiftjis_lead_byte(*s & 0xFF)) || (isDBCSCP() && isKanji1_gbk(*s & 0xFF)))) {
-                    if (c >= (7-tailsize)) break;
-                    lead = true;
-                    *d++ = *s;
-                    c++;
+				if(s == ext) break; // doesn't match if ext == NULL, so no harm in that case
+				if (!lead && ((IS_PC98_ARCH && shiftjis_lead_byte(*s & 0xFF)) || (isDBCSCP() && isKanji1_gbk(*s & 0xFF)))) {
+					if (c >= (7-tailsize)) break;
+					lead = true;
+					*d++ = *s;
+					c++;
 				} else if ((unsigned char)*s <= 32 || (unsigned char)*s == 127 || *s == '.' || *s == '\"' || *s == '+' || *s == '=' || *s == ',' || *s == ';' || *s == ':' || *s == '<' || *s == '>' || ((*s == '[' || *s == ']' || *s == '|' || *s == '\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*s=='?'||*s=='*') {
-                    lead = false;
-                    if (*s != '.') {
-                        *d++ = '_';
-                        c++;
-                    }
-                } else if (c >= (8-tailsize)) {
-                    if (s < ext) s = ext;
-                    break;
-                } else {
-                    lead = false;
+					lead = false;
+					if (*s != '.') {
+						*d++ = '_';
+						c++;
+					}
+				} else if (c >= (8-tailsize)) {
+					if (s < ext) s = ext;
+					break;
+				} else {
+					lead = false;
 					*d++ = *s;
 					c++;
 				}
@@ -1946,16 +2094,16 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 					c = 0;
 					while (*s != 0) {
 						if (!lead && ((IS_PC98_ARCH && shiftjis_lead_byte(*s & 0xFF)) || (isDBCSCP() && isKanji1_gbk(*s & 0xFF)))) {
-                            if (c >= 2) break;
-                            lead = true;
-                            *d++ = *s;
-                            c++;
+							if (c >= 2) break;
+							lead = true;
+							*d++ = *s;
+							c++;
 						} else if ((unsigned char)*s <= 32 || (unsigned char)*s == 127 || *s == '.' || *s == '\"' || *s == '+' || *s == '=' || *s == ',' || *s == ';' || *s == ':' || *s == '<' || *s == '>' || ((*s == '[' || *s == ']' || *s == '|' || *s == '\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||*s=='?'||*s=='*') {
-                            lead = false;
-                            *d++ = '_';
-                            c++;
-                        } else if (c >= 3) break;
-                        else {
+							lead = false;
+							*d++ = '_';
+							c++;
+						} else if (c >= 3) break;
+						else {
 							*d++ = *s;
 							c++;
 						}
@@ -1966,9 +2114,12 @@ int isoDrive::readDirEntry(isoDirEntry* de, const uint8_t* data,unsigned int dir
 			*d = 0;
 		}
 	}
+
 	return de->length;
 }
+#endif
 
+#if !defined(OSFREE)
 static bool escape_is_joliet(const unsigned char *esc) {
 	if (    !memcmp(esc,"\x25\x2f\x40",3) ||
 		!memcmp(esc,"\x25\x2f\x43",3) ||
@@ -1978,7 +2129,9 @@ static bool escape_is_joliet(const unsigned char *esc) {
 
 	return false;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoDrive :: loadImageUDFAnchorVolumePointer(UDFAnchorVolumeDescriptorPointer &avdp,uint8_t pvd[COOKED_SECTOR_SIZE],uint32_t sector) const {
 	UDFTagId aid;
 
@@ -1987,7 +2140,9 @@ bool isoDrive :: loadImageUDFAnchorVolumePointer(UDFAnchorVolumeDescriptorPointe
 	avdp.get(aid,COOKED_SECTOR_SIZE,pvd);
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoDrive :: loadImageUDF() {
 	uint8_t pvd[COOKED_SECTOR_SIZE];
 	UDFextent_ad avdex;
@@ -2089,6 +2244,7 @@ bool isoDrive :: loadImageUDF() {
 
 	return true;
 }
+#endif
 
 bool isoDrive :: loadImage() {
 	uint8_t pvd[COOKED_SECTOR_SIZE];
@@ -2096,10 +2252,18 @@ bool isoDrive :: loadImage() {
 	unsigned int choose_joliet = 0;
 	unsigned int sector = 16;
 
+#if !defined(OSFREE)
 	is_rock_ridge = false;
 	is_udf = false;
+#endif
 	dataCD = false;
 
+	if (CDROM_IsEmpty(cdrom)) {
+		LOG(LOG_MISC,LOG_DEBUG)("ISO: empty CD-ROM drive");
+		return true;
+	}
+
+#if !defined(OSFREE)
 	if (loadImageUDF()) {
 		LOG(LOG_MISC,LOG_DEBUG)("ISO: UDF filesystem detected");
 		if (enable_udf) {
@@ -2107,11 +2271,14 @@ bool isoDrive :: loadImage() {
 			dataCD = true;
 			return true;
 		} else if (dos.version.major < 7 || (dos.version.major == 7 && dos.version.minor < 10)) {
-			const char *msg = "Found UDF image which requires a reported DOS version of 7.10 to mount.\r\n";
-			uint16_t n = (uint16_t)strlen(msg);
-			DOS_WriteFile (STDOUT,(uint8_t *)msg, &n);
+			if (!dos_kernel_disabled) {
+				const char *msg = "Found UDF image which requires a reported DOS version of 7.10 to mount.\r\n";
+				uint16_t n = (uint16_t)strlen(msg);
+				DOS_WriteFile (STDOUT,(uint8_t *)msg, &n);
+			}
 		}
 	}
+#endif
 
 	/* scan the volume descriptors */
 	while (sector < 256) {
@@ -2126,6 +2293,7 @@ bool isoDrive :: loadImage() {
 				}
 			}
 		}
+#if !defined(OSFREE)
 		else if (pvd[0] == 2) { // supplementary volume (usually Joliet, but not necessarily)
 			if (!strncmp((char*)(&pvd[1]), "CD001", 5) && pvd[6] == 1) {
 				bool joliet = escape_is_joliet(&pvd[88]);
@@ -2143,6 +2311,7 @@ bool isoDrive :: loadImage() {
 				}
 			}
 		}
+#endif
 		else if (pvd[0] == 0xFF) { // terminating descriptor
 			break;
 		}
@@ -2162,20 +2331,27 @@ bool isoDrive :: loadImage() {
 	}
 
 	if (choose_joliet && enable_joliet) {
+#if !defined(OSFREE)
 		sector = choose_joliet;
 		LOG(LOG_MISC,LOG_DEBUG)("ISO 9660: Choosing Joliet (unicode) volume at sector %u",sector);
 		is_joliet = true;
 		iso = true;
+#else
+		return false;
+#endif
 	}
 	else if (choose_iso9660) {
 		sector = choose_iso9660;
 		LOG(LOG_MISC,LOG_DEBUG)("ISO 9660: Choosing ISO 9660 volume at sector %u",sector);
+#if !defined(OSFREE)
 		is_joliet = false;
+#endif
 	}
 	else {
 		return false;
 	}
 
+#if !defined(OSFREE)
 	readSector(pvd, sector);
 	uint16_t offset = iso ? 156 : 180;
 	if (readDirEntry(&this->rootEntry, &pvd[offset], 0) <= 0)
@@ -2225,16 +2401,20 @@ bool isoDrive :: loadImage() {
 			}
 		}
 	}
+#endif
 
+#if !defined(OSFREE)
 	/* Sanity check: This code does NOT support Rock Ridge extensions when reading the Joliet supplementary volume! */
 	if (is_joliet) {
 		assert(!is_rock_ridge);
 	}
+#endif
 
 	dataCD = true;
 	return true;
 }
 
+#if !defined(OSFREE)
 bool isoDrive :: lookup(UDFFileIdentifierDescriptor &fid, UDFFileEntry &fe, const char *path) {
 	uint8_t pvd[COOKED_SECTOR_SIZE];
 	char fname[LFN_NAMELENGTH];
@@ -2301,7 +2481,9 @@ bool isoDrive :: lookup(UDFFileIdentifierDescriptor &fid, UDFFileEntry &fe, cons
 
 	return true;
 }
+#endif
 
+#if !defined(OSFREE)
 bool isoDrive :: lookup(isoDirEntry *de, const char *path) {
 	// This code is not for UDF
 	if (is_udf) return false;
@@ -2341,14 +2523,26 @@ bool isoDrive :: lookup(isoDirEntry *de, const char *path) {
 
 	return true;
 }
+#endif
 
-void IDE_ATAPI_MediaChangeNotify(unsigned char drive_index);
+#if !defined(OSFREE)
+void IDE_ATAPI_MediaChangeNotify(unsigned char drive_index,bool immediate);
+#endif
 
 void isoDrive :: MediaChange() {
-	IDE_ATAPI_MediaChangeNotify(toupper(driveLetter) - 'A'); /* ewwww */
+#if !defined(OSFREE)
+	IDE_ATAPI_MediaChangeNotify(toupper(driveLetter) - 'A',/*immediate*/false); /* ewwww */
+#endif
+}
+
+void isoDrive :: MediaChangeImmediate() {
+#if !defined(OSFREE)
+	IDE_ATAPI_MediaChangeNotify(toupper(driveLetter) - 'A',/*immediate*/true); /* ewwww */
+#endif
 }
 
 void isoDrive :: EmptyCache(void) {
+#if !defined(OSFREE)
 	// Magical Girl Pretty Sammy installer
 	// Installer copies files found by FindFirst/FindNext with "command /c copy",
 	// this function is called at end of DOS_Shell::CMD_COPY and cache is cleared, so only one file is copied.
@@ -2360,9 +2554,18 @@ void isoDrive :: EmptyCache(void) {
 		}
 	}
 	if (dos_kernel_disabled) return;
+#if !defined(OSFREE)
 	enable_udf = (dos.version.major > 7 || (dos.version.major == 7 && dos.version.minor >= 10));//default
 	enable_rock_ridge = dos.version.major >= 7 || uselfn;
 	enable_joliet = dos.version.major >= 7 || uselfn;
+
+	if (dos_kernel_disabled) {
+		enable_udf = true;
+		enable_rock_ridge = true;
+		enable_joliet = true;
+	}
+#endif
+
 	is_joliet = false;
 	//this->fileName[0]  = '\0'; /* deleted to fix issue #3848. Revert this if there are any flaws */
 	//this->discLabel[0] = '\0'; /* deleted to fix issue #3848. Revert this if there are any flaws */
@@ -2375,4 +2578,5 @@ void isoDrive :: EmptyCache(void) {
 	memset(&rootEntry, 0, sizeof(isoDirEntry));
 	//safe_strncpy(this->fileName, fileName, CROSS_LEN); /* deleted to fix issue #3848. Revert this if there are any flaws */
 	loadImage();
+#endif
 }

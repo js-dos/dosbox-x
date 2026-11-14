@@ -32,6 +32,7 @@
 #include <thread>
 #endif
 
+#include "ide.h"
 #include "mem.h"
 #include "mixer.h"
 #include "../libs/decoders/SDL_sound.h"
@@ -108,10 +109,10 @@ public:
 	};
 
 //	CDROM_Interface						(void);
-	virtual ~CDROM_Interface			(void) {};
+	virtual ~CDROM_Interface			(void) { if (refcount) fprintf(stderr,"CDROM_Interface delete with refcount %u\n",refcount); };
 
     //! \brief Set the device associated with this interface, if supported by emulation
-	virtual bool	SetDevice			(char* path, int forceCD) = 0;
+	virtual bool	SetDevice			(const char* path, int forceCD) = 0;
 
     //! \brief Get UPC string from the CD-ROM
 	virtual bool	GetUPC				(unsigned char& attr, char* upc) = 0;
@@ -156,6 +157,26 @@ public:
 	virtual void	InitNewMedia		(void) {};
 
 	INTERFACE_TYPE class_id = ID_BASE;
+	uint8_t                subUnit = 0xFF;
+
+	private:
+		volatile int refcount = 0;
+
+	public:
+		int Addref() {
+//			fprintf(stderr,"ptr %p addref from %u\n",(void*)this,refcount); 
+			return ++refcount;
+		}
+		int Release() {
+			int ret = --refcount;
+			if (ret < 0) {
+				fprintf(stderr,"WARNING: CDROM_Interface Release() changed refcount to %d\n",ret);
+				abort();
+			}
+			if (ret == 0) delete this;
+//			fprintf(stderr,"ptr %p releaseref to %u\n",(void*)this,ret); 
+			return ret;
+		}
 };	
 
 //! \brief CD-ROM interface to SDL 1.x CD-ROM support
@@ -168,7 +189,7 @@ public:
 	virtual ~CDROM_Interface_SDL(void);
 
     /* base C++ class overrides, no documentation needed */
-	bool	SetDevice			(char* path, int forceCD) override;
+	bool	SetDevice			(const char* path, int forceCD) override;
 	bool	GetUPC				(unsigned char& attr, char* upc) override { attr = 0; strcpy(upc,"UPC"); return true; };
 	bool	GetAudioTracks		(int& stTrack, int& end, TMSF& leadOut) override;
 	bool	GetAudioTrackInfo	(int track, TMSF& start, unsigned char& attr) override;
@@ -203,7 +224,7 @@ private:
 class CDROM_Interface_Fake : public CDROM_Interface
 {
 public:
-	bool	SetDevice			(char* /*path*/, int /*forceCD*/) override { return true; };
+	bool	SetDevice			(const char* /*path*/, int /*forceCD*/) override { return true; };
 	bool	GetUPC				(unsigned char& attr, char* upc) override { attr = 0; strcpy(upc,"UPC"); return true; };
 	bool	GetAudioTracks		(int& stTrack, int& end, TMSF& leadOut) override;
 	bool	GetAudioTrackInfo	(int track, TMSF& start, unsigned char& attr) override;
@@ -345,7 +366,7 @@ public:
 	CDROM_Interface_Image           (uint8_t subUnit);
 	virtual ~CDROM_Interface_Image  (void);
 	void	InitNewMedia            (void) override {};
-	bool	SetDevice               (char *path, int forceCD) override;
+	bool	SetDevice               (const char *path, int forceCD) override;
 	bool	GetUPC                  (unsigned char& attr, char* upc) override;
 	bool	GetAudioTracks          (int& stTrack, int& end, TMSF& leadOut) override;
 	bool	GetAudioTrackInfo       (int track, TMSF& start, unsigned char& attr) override;
@@ -355,6 +376,7 @@ public:
 	bool	PlayAudioSector         (unsigned long start, unsigned long len) override;
 	bool	PauseAudio              (bool resume) override;
 	bool	StopAudio               (void) override;
+    bool    PlayNextAudioTrack      (void);
 	void	ChannelControl          (TCtrl ctrl) override;
 	bool	ReadSectors             (PhysPt buffer, bool raw, unsigned long sector, unsigned long num) override;
 	/* This is needed for IDE hack, who's buffer does not exist in DOS physical memory */
@@ -365,16 +387,6 @@ public:
 	//! \brief Indicate whether the image has a data track
 	bool	HasDataTrack            (void) const;
 	bool	HasAudioTrack           (void) const;
-    //! \brief Flag to track if images have been initialized
-    //!
-    //! \description Whether images[] has been initialized.
-    //!              Note that images_init and images[] are static and
-    //!              they are not specific to any one C++ class instance.
-	static bool images_init;
-    //! \brief Array of CD-ROM images, one per drive letter.
-    //!
-    //! \description images[] is static and not specific to any C++ class instance.
-	static CDROM_Interface_Image* images[26];
 
 private:
 	static struct imagePlayer {
@@ -400,19 +412,20 @@ private:
 		int      playbackRemaining;
 		uint16_t   bufferPos;
 		uint16_t   bufferConsumed;
+        int currentTrackIdx = -1;
 	} player;
 
 	// Private utility functions
 	void  ClearTracks();
-	bool  LoadIsoFile(char *filename);
+	bool  LoadIsoFile(const char *filename);
 	bool  CanReadPVD(TrackFile *file, int sectorSize, bool mode2) const;
 	int	  GetTrack(unsigned long sector);
 	static void CDAudioCallBack (Bitu len);
 
 	// Private functions for cue sheet processing
-	bool  LoadCueSheet(char *cuefile);
-	bool  LoadChdFile(char* chdfile);
-	bool  LoadCloneCDSheet(char *cuefile);
+	bool  LoadCueSheet(const char *cuefile);
+	bool  LoadChdFile(const char* chdfile);
+	bool  LoadCloneCDSheet(const char *cuefile);
 	bool  GetRealFileName(std::string& filename, std::string& pathname) const;
 	bool  GetCueKeyword(std::string &keyword, std::istream &in) const;
 	bool  GetCueFrame(int &frames, std::istream &in) const;
@@ -423,7 +436,6 @@ private:
 	std::vector<uint8_t> readBuffer;
 	std::string          mcn;
 	static int           refCount;
-    uint8_t                subUnit;
 };
 
 #if defined (WIN32)	/* Win 32 */
@@ -438,7 +450,7 @@ class CDROM_Interface_Aspi : public CDROM_Interface
 public:
 	virtual ~CDROM_Interface_Aspi(void);
 
-	bool	SetDevice			(char* path, int forceCD) override;
+	bool	SetDevice			(const char* path, int forceCD) override;
 
 	bool	GetUPC				(unsigned char& attr, char* upc) override;
 
@@ -491,7 +503,7 @@ public:
 	CDROM_Interface_Ioctl		(cdioctl_cdatype ioctl_cda);
 	virtual ~CDROM_Interface_Ioctl(void);
 
-	bool	SetDevice			(char* path, int forceCD) override;
+	bool	SetDevice			(const char* path, int forceCD) override;
 
 	bool	GetUPC				(unsigned char& attr, char* upc) override;
 
@@ -576,7 +588,7 @@ class CDROM_Interface_Ioctl : public CDROM_Interface_SDL
 public:
 	CDROM_Interface_Ioctl		(void);
 
-	bool	SetDevice		(char* path, int forceCD) override;
+	bool	SetDevice		(const char* path, int forceCD) override;
 	bool	GetUPC			(unsigned char& attr, char* upc) override;
 	bool	ReadSectors		(PhysPt buffer, bool raw, unsigned long sector, unsigned long num) override;
 	/* This is needed for IDE hack, who's buffer does not exist in DOS physical memory */
@@ -587,5 +599,8 @@ private:
 };
 
 #endif /* LINUX */
+
+bool IDE_CDROM_Attach(const std::string &opts,const std::vector<CDROM_Interface*> &cds,bool opt_replace=false);
+bool IDE_CDROM_Attach(signed char index,bool slave,const std::vector<CDROM_Interface*> &cds,bool opt_replace=false);
 
 #endif /* __CDROM_INTERFACE__ */

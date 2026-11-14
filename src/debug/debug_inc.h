@@ -20,7 +20,11 @@
 
 
 #if C_DEBUG
+#ifdef EMSCRIPTEN
+#include <jsdos-curses.h>
+#else
 #include <curses.h>
+#endif
 
 #include <string>
 
@@ -119,4 +123,3 @@ extern DBGBlock dbg;
 Bitu DasmI386(char* buffer, PhysPt pc, uint32_t cur_ip, bool bit32);
 int  DasmLastOperandSize(void);
 #endif
-

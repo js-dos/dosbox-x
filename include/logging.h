@@ -22,7 +22,7 @@
 #include "config.h"
 #include "setup.h"
 
-#ifdef JSDOS_X
+#if defined(JSDOS_X) && !defined(C_DEBUG)
 #include <jsdos-log.h>
 #else
 enum LOG_TYPES {

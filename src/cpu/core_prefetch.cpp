@@ -26,6 +26,8 @@
 #include "pic.h"
 #include "fpu.h"
 
+extern bool do_lds_wraparound;
+
 using namespace std;
 
 #define PRE_EXCEPTION { }
@@ -33,6 +35,8 @@ using namespace std;
 #define CPU_CORE CPU_ARCHTYPE_386
 
 #define DoString DoString_Prefetch
+
+static uint16_t last_ea86_offset;
 
 extern bool ignore_opcode_63;
 
@@ -48,6 +52,10 @@ extern bool ignore_opcode_63;
 #define SaveMw(off,val)	mem_writew_inline(off,val)
 #define SaveMd(off,val)	mem_writed_inline(off,val)
 #define SaveMq(off,val) {mem_writed_inline(off,val&0xffffffff);mem_writed_inline(off+4,(val>>32)&0xffffffff);}
+
+static INLINE uint8_t LockPrefixRead(PhysPt address) {
+	return mem_readb_inline(address);
+}
 
 extern Bitu cycle_count;
 
@@ -199,6 +207,7 @@ Bits CPU_Core_Prefetch_Run(void) {
 		last_prefix=MP_NONE;
 		core.opcode_index=cpu.code.big*(Bitu)0x200u;
 		core.prefixes=cpu.code.big;
+		last_ea86_offset=0;
 		core.ea_table=&EATable[cpu.code.big*256u];
 		BaseDS=SegBase(ds);
 		BaseSS=SegBase(ss);
@@ -309,4 +318,3 @@ Bits CPU_Core_Prefetch_Trap_Run(void) {
 void CPU_Core_Prefetch_Init(void) {
 
 }
-

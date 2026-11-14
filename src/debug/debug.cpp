@@ -18,11 +18,15 @@
 
 
 #include "dosbox.h"
+#if defined(C_DOSBOX_AGENT)
+#include "agent/agent_bridge.h"
+#endif
 #if C_DEBUG
 
 #include "../../tests/tests.h"
 
 #include <string.h>
+#include <atomic>
 #include <list>
 #include <vector>
 #include <ctype.h>
@@ -33,6 +37,7 @@
 using namespace std;
 
 #include "debug.h"
+#include "agent/agent_bridge.h"
 #include "cross.h" //snprintf
 #include "fpu.h"
 #include "bios.h"
@@ -51,9 +56,22 @@ using namespace std;
 #include "keyboard.h"
 #include "control.h"
 
+#include "debug_mcp.h"
+
+#ifdef JSDOS_X
+#include <jsdos-asyncify.h>
+#endif
+
 bool Clear_SYSENTER_Debug();
 bool Toggle_BreakSYSEnter();
 bool Toggle_BreakSYSExit();
+
+#if !defined(OSFREE)
+extern bool debugger_break_on_exec;
+# if defined(C_DOSBOX_AGENT)
+extern unsigned int debugger_box_depth;
+# endif
+#endif
 
 /* [https://github.com/joncampbell123/dosbox-x/issues/1264] ncurses non-ASCII keys are outside ASCII range (start at octal 0400 == hex 0x100) */
 static inline int ncurses_aware_toupper(int x) {
@@ -149,6 +167,7 @@ extern bool logBuffSuppressConsole;
 extern bool logBuffSuppressConsoleNeedUpdate;
 
 void DEBUG_PrintGUS();
+void DEBUG_PrintRTC();
 
 // Forwards
 static void DrawCode(void);
@@ -156,12 +175,15 @@ static void DrawInput(void);
 static void DEBUG_RaiseTimerIrq(void);
 static void SaveMemory(uint16_t seg, uint32_t ofs1, uint32_t num);
 static void SaveMemoryBin(uint16_t seg, uint32_t ofs1, uint32_t num);
+static void LogDEVS(void);
 static void LogMCBS(void);
 static void LogGDT(void);
 static void LogLDT(void);
 static void LogIDT(void);
 static void LogXMS(void);
+#if !defined(OSFREE)
 static void LogEMS(void);
+#endif
 static void LogFNKEY(void);
 static void LogPages(char* selname);
 static void LogCPUInfo(void);
@@ -186,6 +208,8 @@ void DEBUG_EndPagedContent(void);
 Bitu MEM_PageMaskActive(void);
 Bitu MEM_TotalPages(void);
 Bitu MEM_PageMask(void);
+void DEBUG_WarnDynamic(void);
+int CPU_IsDynamicCore(void); // cpu.cpp 0=normal, 1=dynamic, 2=dynamic core with assembler
 
 static void LogEMUMachine(void) {
     DEBUG_BeginPagedContent();
@@ -199,6 +223,8 @@ static void LogEMUMachine(void) {
         switch (machine) {
             case MCH_HERC:      m="Hercules";   break;
             case MCH_CGA:       m="CGA";        break;
+            case MCH_OLIVETTI:  m="Olivetti M24"; break;
+            case MCH_3270PC:    m="IBM 3270 PC"; break;
             case MCH_TANDY:     m="Tandy";      break;
             case MCH_PCJR:      m="PCjr";       break;
             case MCH_EGA:       m="EGA";        break;
@@ -218,6 +244,7 @@ static void LogEMUMachine(void) {
             case SVGA_TsengET3K:        cardName ="Tseng ET3000";    break;
             case SVGA_ParadisePVGA1A:   cardName ="Paradise PVGA1A"; break;
             case SVGA_ATI:              cardName ="ATI";             break;
+            case SVGA_DOSBoxIG:         cardName ="DOSBox Integrated Graphics"; break;
         }
 
         DEBUG_ShowMsg("Machine: %s %s",m, cardName);
@@ -279,6 +306,22 @@ public:
 };
 #endif
 
+typedef struct MEMFinder {
+	bool usePreviousValue = false;
+	uint8_t opType = 0;
+	uint8_t size = 1;
+	uint16_t iterations = 0;
+	uint16_t seg = 0;
+	uint32_t ofs = 0;
+	uint32_t baseLinear = 0;
+	uint32_t range = 0;
+	uint32_t value = 0;
+	uint32_t matches = 0;
+	vector<uint8_t> tableValue;
+	vector<bool> tableTruth;
+}MEMFinder;
+
+MEMFinder* MEMFINDInstance = NULL;
 
 class DEBUG;
 
@@ -311,8 +354,11 @@ extern Bitu cycle_count;
 static bool debugging = false;
 static bool debug_running = false;
 static bool check_rescroll = false;
+static std::atomic<uint64_t> agent_entry_breakpoint_sequence(0);
 
 static FPU_rec oldfpu;
+static bool warn_dynamic = false;
+
 
 void VGA_DebugRedraw(void);
 
@@ -417,12 +463,37 @@ uint64_t LinMakeProt(uint16_t selector, uint32_t offset)
 	return mem_no_address;
 }
 
+static bool Is16BitSegment(const uint16_t seg)
+{
+	if (cpu.pmode && !(reg_flags & FLAG_VM)) {
+		if (seg == SegValue(cs))
+			return !cpu.code.big;
+
+		Descriptor desc;
+		return cpu.gdt.GetDescriptor(seg, desc) ? !desc.saved.seg.big : false;
+	}
+
+	return true;
+}
+
 uint64_t GetAddress(uint16_t seg, uint32_t offset)
 {
+	/* In 16-bit modes, segment offsets wrap to 16 bits. This also normalizes
+	 * values that came from signed arithmetic (for example, -1 -> 0xFFFF). */
+	if (Is16BitSegment(seg))
+		offset &= 0xffffu;
+
+	/* For the current CS, always use the cached hidden base (SegPhys(cs)).
+	 * Real x86 segment registers have a hidden descriptor cache that is only
+	 * updated when a new selector is loaded. After LMSW sets CR0.PE=1 but
+	 * before a far jump reloads CS, cpu.pmode is true yet SegValue(cs) still
+	 * holds the previous (real-mode) value, so resolving via the GDT would
+	 * read garbage. */
+	if (seg == SegValue(cs)) return SegPhys(cs)+(uint64_t)offset;
+
 	if (cpu.pmode && !(reg_flags & FLAG_VM))
 		return LinMakeProt(seg,offset);
 
-	if (seg==SegValue(cs)) return SegPhys(cs)+(uint64_t)offset;
 	return ((uint64_t)seg<<4u)+offset;
 }
 
@@ -504,6 +575,7 @@ private:
 public:
 	static void       InsertVariable(char* name, PhysPt adr);
 	static CDebugVar* FindVar       (PhysPt pt);
+	static CDebugVar* FindVar       (const std::string& name);
 	static void       DeleteAll     ();
 	static bool       SaveVars      (char* name);
 	static bool       LoadVars      (char* name);
@@ -512,6 +584,45 @@ public:
 };
 
 std::vector<CDebugVar*> CDebugVar::varList;
+
+static void AnnotateDirectBranch(char* line, const size_t line_size)
+{
+	char* mnemonic = line;
+	while (*mnemonic == ' ' || *mnemonic == '\t') ++mnemonic;
+
+	char* operand = mnemonic;
+	while (isalpha(static_cast<unsigned char>(*operand))) ++operand;
+	const std::string instruction(mnemonic, operand - mnemonic);
+	if (instruction != "call" && instruction != "jmp" &&
+	    (instruction.empty() || instruction[0] != 'j') &&
+	    instruction.compare(0, 4, "loop") != 0)
+		return;
+
+	while (*operand == ' ' || *operand == '\t') ++operand;
+	for (const char* qualifier : {"far ", "near ", "short "}) {
+		const size_t length = strlen(qualifier);
+		if (strncmp(operand, qualifier, length) == 0) {
+			operand += length;
+			break;
+		}
+	}
+
+	char* end = operand;
+	while (isxdigit(static_cast<unsigned char>(*end))) ++end;
+	if (end == operand || (*end != '\0' && *end != ' ' && *end != '\t')) return;
+
+	char* parse_end = nullptr;
+	const unsigned long target = strtoul(operand, &parse_end, 16);
+	if (parse_end != end || target > UINT32_MAX) return;
+
+	CDebugVar* variable = CDebugVar::FindVar(static_cast<PhysPt>(target));
+	if (!variable) return;
+
+	const size_t used = strlen(line);
+	const size_t available = used < line_size ? line_size - used : 0;
+	if (available > 1)
+		snprintf(line + used, available, " <%s>", variable->GetName());
+}
 
 
 /********************/
@@ -563,9 +674,11 @@ public:
 	static CBreakpoint*		FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* skip);
 	static bool				IsBreakpoint		(uint16_t seg, uint32_t off);
 	static bool				DeleteBreakpoint	(uint16_t seg, uint32_t off);
+	static bool				DeleteBreakpoint		(CBreakpoint* breakpoint);
 	static bool				DeleteByIndex		(uint16_t index);
 	static void				DeleteAll			(void);
 	static void				ShowList			(void);
+	static CBreakpoint*				ConsumeLastTriggered			(void);
 
 
 private:
@@ -586,6 +699,7 @@ private:
 	bool		once;
 
 	static std::list<CBreakpoint*>	BPoints;
+	static CBreakpoint*	lastTriggered;
 #if C_HEAVY_DEBUG
 	friend bool DEBUG_HeavyIsBreakpoint(void);
 #endif
@@ -639,6 +753,7 @@ void CBreakpoint::Activate(bool _active)
 
 // Statics
 std::list<CBreakpoint*> CBreakpoint::BPoints;
+CBreakpoint* CBreakpoint::lastTriggered = nullptr;
 
 CBreakpoint* CBreakpoint::AddBreakpoint(uint16_t seg, uint32_t off, bool once)
 {
@@ -710,6 +825,7 @@ bool CBreakpoint::CheckBreakpoint(uint16_t seg, uint32_t off)
 		if ((bp->GetType() == BKPNT_PHYSICAL) && bp->IsActive() &&
 		    (bp->GetLocation() == GetAddress(seg, off))) {
 			// Found
+			lastTriggered = bp;
 			if (bp->GetOnce()) {
 				// delete it, if it should only be used once
 				(BPoints.erase)(i);
@@ -753,6 +869,7 @@ bool CBreakpoint::CheckBreakpoint(uint16_t seg, uint32_t off)
                     }
 					DEBUG_ShowMsg("DEBUG: Memory breakpoint %s: %04X:%04X - %02X -> %02X\n",(bp->GetType()==BKPNT_MEMORY_PROT)?"(Prot)":"",bp->GetSegment(),bp->GetOffset(),bp->GetValue(),value);
 					bp->SetValue(value);
+					lastTriggered = bp;
 					return true;
 				}
 			}
@@ -800,6 +917,7 @@ void CBreakpoint::DeleteAll()
 		delete bp;
 	}
 	(BPoints.clear)();
+	lastTriggered = nullptr;
 }
 
 
@@ -868,15 +986,43 @@ bool CBreakpoint::IsBreakpoint(uint16_t seg, uint32_t off)
 bool CBreakpoint::DeleteBreakpoint(uint16_t seg, uint32_t off)
 {
 	CBreakpoint* bp = FindPhysBreakpoint(seg, off, false);
-	if (bp) {
-		BPoints.remove(bp);
-		delete bp;
+#if defined(C_DOSBOX_AGENT)
+    return DeleteBreakpoint(bp);
+#else
+    if(bp) {
+        BPoints.remove(bp);
+        delete bp;
+        return true;
+    }
+    return false;
+#endif
+}
+
+#if defined(C_DOSBOX_AGENT)
+bool CBreakpoint::DeleteBreakpoint(CBreakpoint* breakpoint)
+{
+	if (breakpoint == nullptr)
+		return false;
+	for (std::list<CBreakpoint*>::iterator it = BPoints.begin(); it != BPoints.end(); ++it) {
+		if (*it != breakpoint)
+			continue;
+		BPoints.erase(it);
+		breakpoint->Activate(false);
+		if (lastTriggered == breakpoint)
+			lastTriggered = nullptr;
+		delete breakpoint;
 		return true;
 	}
-
 	return false;
 }
 
+CBreakpoint* CBreakpoint::ConsumeLastTriggered(void)
+{
+	CBreakpoint* result = lastTriggered;
+	lastTriggered = nullptr;
+	return result;
+}
+#endif // C_DOSBOX_AGENT
 
 void CBreakpoint::ShowList(void)
 {
@@ -951,6 +1097,147 @@ static bool StepOver()
 	} 
 	return false;
 }
+
+#if defined(C_DOSBOX_AGENT)
+void DrawRegistersUpdateOld(void);
+int32_t DEBUG_Run(int32_t amount,bool quickexit);
+bool ParseCommand(char* str);
+
+bool DEBUG_AgentStep(bool over, bool* continued)
+{
+	if (continued == nullptr || !debugging || debug_running)
+		return false;
+
+	DEBUG_AgentClearLastBreakpoint();
+	DrawRegistersUpdateOld();
+	if (over && StepOver()) {
+		mustCompleteInstruction = true;
+		inhibit_int_breakpoint = true;
+		DEBUG_Run(1,false);
+		inhibit_int_breakpoint = false;
+		mustCompleteInstruction = false;
+		*continued = true;
+		return true;
+	}
+
+	exitLoop = false;
+	mustCompleteInstruction = true;
+	DEBUG_Run(1,true);
+	mustCompleteInstruction = false;
+	*continued = false;
+	return true;
+}
+
+bool DEBUG_AgentResumeAfterTerminate(void)
+{
+	if (!debugging || debug_running)
+		return true;
+
+	// ParseCommand("RUN") always executes one instruction before returning to
+	// the normal loop. TerminateTarget has already restored CS:IP to the
+	// callback stop trampoline that must be observed by the enclosing
+	// CALLBACK_RunRealInt invocation. Stepping here consumes that trampoline
+	// inside the debugger and strands the synchronous DEBUGBOX command frame.
+	DrawRegistersUpdateOld();
+	debug_running = false;
+	debugging = false;
+	DrawCode();
+	DrawInput();
+	logBuffSuppressConsole = false;
+	if (logBuffSuppressConsoleNeedUpdate) {
+		logBuffSuppressConsoleNeedUpdate = false;
+		DEBUG_RefreshPage(0);
+	}
+	CBreakpoint::ActivateBreakpoints();
+	mainMenu.get_item("debugger_rundebug").check(false).refresh_item(mainMenu);
+	mainMenu.get_item("debugger_runnormal").check(true).refresh_item(mainMenu);
+	mainMenu.get_item("debugger_runwatch").check(false).refresh_item(mainMenu);
+	DOSBOX_SetNormalLoop();
+	GFX_SetTitle(-1,-1,-1,is_paused);
+	return true;
+}
+
+bool DEBUG_AgentCanStartTarget(void)
+{
+#if !defined(OSFREE)
+    return !debugging && !debug_running && !debugger_break_on_exec && debugger_box_depth == 0;
+#else
+	return false;
+#endif
+}
+
+uint64_t DEBUG_AgentEntryBreakpointSequence(void)
+{
+	return agent_entry_breakpoint_sequence.load(std::memory_order_relaxed);
+}
+
+bool DEBUG_AgentCreateExecutionBreakpoint(uint16_t seg, uint32_t off, bool once, uintptr_t* handle)
+{
+	if (handle == nullptr || GetAddress(seg,off) == mem_no_address)
+		return false;
+	CBreakpoint* breakpoint = CBreakpoint::AddBreakpoint(seg,off,once);
+	*handle = reinterpret_cast<uintptr_t>(breakpoint);
+	return breakpoint != nullptr;
+}
+
+bool DEBUG_AgentCreateMemoryBreakpoint(uint16_t seg,
+                                       uint32_t off,
+                                       bool protected_mode,
+                                       bool linear,
+                                       uintptr_t* handle)
+{
+#if C_HEAVY_DEBUG
+	if (handle == nullptr || (protected_mode && linear))
+		return false;
+	const uint64_t address = linear ? static_cast<uint64_t>(off) : GetAddress(seg,off);
+	if (address == mem_no_address)
+		return false;
+	uint8_t value = 0;
+	if (mem_readb_checked(static_cast<PhysPt>(address), &value))
+		return false;
+	CBreakpoint* breakpoint = CBreakpoint::AddMemBreakpoint(seg,off);
+	if (breakpoint == nullptr)
+		return false;
+	if (protected_mode)
+		breakpoint->SetType(BKPNT_MEMORY_PROT);
+	else if (linear)
+		breakpoint->SetType(BKPNT_MEMORY_LINEAR);
+	breakpoint->SetValue(value);
+	*handle = reinterpret_cast<uintptr_t>(breakpoint);
+	return true;
+#else
+	(void)seg;
+	(void)off;
+	(void)protected_mode;
+	(void)linear;
+	(void)handle;
+	return false;
+#endif
+}
+
+bool DEBUG_AgentDeleteBreakpoint(uintptr_t handle)
+{
+	return CBreakpoint::DeleteBreakpoint(reinterpret_cast<CBreakpoint*>(handle));
+}
+
+uintptr_t DEBUG_AgentConsumeLastBreakpoint(void)
+{
+	return reinterpret_cast<uintptr_t>(CBreakpoint::ConsumeLastTriggered());
+}
+
+void DEBUG_AgentClearLastBreakpoint(void)
+{
+	(void)CBreakpoint::ConsumeLastTriggered();
+}
+
+#if C_HEAVY_DEBUG
+bool DEBUG_AgentStartTrace(uint32_t instruction_count);
+bool DEBUG_AgentStopTrace(uint32_t* event_count);
+bool DEBUG_AgentTraceIsActive(void);
+void DEBUG_AgentCopyTraceEvents(std::vector<DEBUG_AgentTraceEvent>* events);
+#endif
+
+#endif // C_DEBUG && C_DOSBOX_AGENT
 
 bool DEBUG_ExitLoop(void)
 {
@@ -1332,6 +1619,7 @@ static void DrawCode(void) {
             drawsize=size=1;
             dline[0]=0;
         }
+		AnnotateDirectBranch(dline, sizeof(dline));
 		mvwprintw(dbg.win_code,i,0,"%04X:%08X ",codeViewData.useCS,disEIP);
 
 		if (drawsize>10) { toolarge = true; drawsize = 9; }
@@ -1606,6 +1894,7 @@ uint32_t GetHexValue(char* const str, char* &hex,bool *parsed,int exprge)
             else if (something == "DTASEG") { regval = (!dos_kernel_disabled) ? (dos.dta() >> 16u)    : 0; }
             else if (something == "DTAOFF") { regval = (!dos_kernel_disabled) ? (dos.dta() & 0xFFFFu) : 0; }
             else if (something == "PSPSEG") { regval = (!dos_kernel_disabled) ?  dos.psp()            : 0; }
+            else if (CDebugVar* variable = CDebugVar::FindVar(something)) { regval = variable->GetAdr(); }
             else if (hexnumber) { regval = (uint32_t)strtoul(something.c_str(),NULL,16/*hexadecimal*/); }
             else { if (parsed) *parsed = 0; return 0; }
         }
@@ -1872,6 +2161,11 @@ bool lookslikefloat(char* str) {
     return true;
 }
 
+void AddBPINT3(void) {
+	CBreakpoint::AddIntBreakpoint(3,BPINT_ALL,BPINT_ALL,false);
+	CBreakpoint::ActivateBreakpoints();
+}
+
 void VGA_DumpFontRamBIN(const char *filename);
 void VGA_DumpFontRamBMP(const char *filename);
 int32_t DEBUG_Run(int32_t amount,bool quickexit);
@@ -1970,9 +2264,293 @@ bool ParseCommand(char* str) {
 		return true;
 	}
 
+    if (command == "MEMFIND") { // Start a memory search instance with seg:ofs range
+		uint32_t valfind;
+		uint8_t valfind8;
+		uint16_t valfind16;
+		uint32_t valfind32;
+		uint32_t listedvalues = 0;
+		if (found[0] == '!'){
+			if (MEMFINDInstance != NULL){
+				DEBUG_ShowMsg("DEBUG: Memory search instance cancelled.");
+				MEMFINDInstance->tableTruth.clear();
+				MEMFINDInstance->tableValue.clear();
+				MEMFINDInstance->tableTruth.shrink_to_fit();
+				MEMFINDInstance->tableValue.shrink_to_fit();
+				delete MEMFINDInstance;
+				MEMFINDInstance = NULL;
+			} else {
+				DEBUG_ShowMsg("DEBUG: No active search instances to cancel.");
+			}
+			return true;
+		} else if (found[0] == 'L'){
+			if (MEMFINDInstance != NULL){
+				DEBUG_BeginPagedContent();
+				uint32_t j = 0;
+				for (uint32_t i = MEMFINDInstance->baseLinear; i < MEMFINDInstance->baseLinear + MEMFINDInstance->range; i+=MEMFINDInstance->size){
+							switch (MEMFINDInstance->size){
+								case 1:
+									mem_readb_checked((PhysPt)(i),&valfind8);
+									valfind = valfind8;
+									break;
+								case 2:
+									mem_readw_checked((PhysPt)(i),&valfind16);
+									valfind = valfind16;
+									break;
+								case 4:
+									mem_readd_checked((PhysPt)(i),&valfind32);
+									valfind = valfind32;
+									break;
+								default:
+									mem_readb_checked((PhysPt)(i),&valfind8);
+									valfind = valfind8;
+									break;
+							}
+							if (MEMFINDInstance->tableTruth[j] == true){
+								listedvalues++;
+								DEBUG_ShowMsg("DEBUG: [MEMFIND] Address: %04X:%06X (lin %08X) Current Value: %0*X\n",MEMFINDInstance->seg,(MEMFINDInstance->ofs + (i - MEMFINDInstance->baseLinear)),i,MEMFINDInstance->size*2,valfind);
+							}
+							j+=MEMFINDInstance->size;
+						}
+				DEBUG_ShowMsg("DEBUG: [MEMFIND] Matched values during current instance: %06X\n",listedvalues);
+				DEBUG_EndPagedContent();
+			} else {
+				DEBUG_ShowMsg("DEBUG: No active search instances to list from.");
+			}
+			return true;
+		}
+		uint16_t seg = (uint16_t)GetHexValue(found,found); found++;
+		uint32_t ofs = GetHexValue(found,found); found++;
+		uint32_t num = GetHexValue(found,found); found++;
+		if ((MEMFINDInstance == NULL) && (num > 0)){
+			uint64_t base = GetAddress(seg,ofs);
+			if (base == mem_no_address){
+				DEBUG_ShowMsg("DEBUG: Invalid selector/segment, cancelling.");
+				return true;
+			}
+			uint64_t memBytes = (uint64_t)MEM_TotalPages() << 12;
+			if ((base + (uint64_t)num) > memBytes){
+				DEBUG_ShowMsg("DEBUG: Range exceeds configured memory (%lX bytes), cancelling.",(unsigned long)memBytes);
+				return true;
+			}
+			DEBUG_ShowMsg("DEBUG: Created memory search instance.");
+			MEMFINDInstance = new MEMFinder;
+			MEMFINDInstance->baseLinear = (uint32_t)base;
+		} else if ((MEMFINDInstance == NULL) && (num == 0)){
+			DEBUG_ShowMsg("DEBUG: --MEMFIND-- Start memory search instance.");
+			DEBUG_ShowMsg("DEBUG: Use MEMS to proceed through search instance.");
+			DEBUG_ShowMsg("DEBUG: Usage: MEMFIND (!/L) [seg]:[offset] [range] (B/W/D)");
+			DEBUG_ShowMsg("DEBUG: L - List entries matched in the search instance.");
+			DEBUG_ShowMsg("DEBUG: ! - Cancel memory search instance.");
+			return true;
+		} else if (MEMFINDInstance != NULL){
+			DEBUG_ShowMsg("DEBUG: Memory search instance is already active.");
+			return true;
+		}
+		switch (*found){
+			case 'B':
+				DEBUG_ShowMsg("DEBUG: 1 byte specified.");
+				MEMFINDInstance->size = 1;
+				break;
+			case 'W':
+				DEBUG_ShowMsg("DEBUG: 2 bytes specified.");
+				MEMFINDInstance->size = 2;
+				break;
+			case 'D':
+				DEBUG_ShowMsg("DEBUG: 4 bytes specified.");
+				MEMFINDInstance->size = 4;
+				break;
+			default:
+				DEBUG_ShowMsg("DEBUG: No size specified, using 1 byte.");
+				MEMFINDInstance->size = 1;
+				break;
+		}
+		DEBUG_ShowMsg("DEBUG: RAM search from %04X:%04X (lin %08X) with range: %06X\n",seg,ofs,MEMFINDInstance->baseLinear,num);
+		MEMFINDInstance->range = num;
+		MEMFINDInstance->ofs = ofs;
+		MEMFINDInstance->seg = seg;
+		MEMFINDInstance->tableTruth.resize(num,true);
+		for (uint32_t i = MEMFINDInstance->baseLinear; i < MEMFINDInstance->baseLinear + MEMFINDInstance->range; i++){
+			mem_readb_checked((PhysPt)(i),&valfind8);
+			MEMFINDInstance->tableValue.push_back(valfind8);
+		}
+		return true;
+	}
+
+	if (command == "MEMS") { // Search through MEMFIND for matching values in memory search instance
+		bool parsed;
+		uint32_t valfind;
+		uint8_t valfind8;
+		uint16_t valfind16;
+		uint32_t valfind32;
+		uint32_t value;
+		uint32_t matches = 0;
+		char opTypeStr[26];
+		if (MEMFINDInstance == NULL){
+			DEBUG_ShowMsg("DEBUG: MEMFIND Memory search is not active.\n");
+			return true;
+		}
+		switch (found[0]){
+			case '>':
+				if (found[1] == '='){
+					found+=2;
+					MEMFINDInstance->opType = 4;
+					sprintf(opTypeStr, "GREATER THAN OR EQUAL TO");
+				} else {
+					found+=1;
+					MEMFINDInstance->opType = 1;
+					sprintf(opTypeStr, "GREATER THAN");
+				}
+				break;
+			case '<':
+				if (found[1] == '='){
+					found+=2;
+					MEMFINDInstance->opType = 5;
+					sprintf(opTypeStr, "LESS THAN OR EQUAL TO");
+				} else {
+					found+=1;
+					MEMFINDInstance->opType = 2;
+					sprintf(opTypeStr, "LESS THAN");
+				}
+				break;
+			case '!':
+				found+=1;
+				MEMFINDInstance->opType = 3;
+				sprintf(opTypeStr, "NOT EQUAL TO");
+				break;
+			case '=':
+				found+=1;
+				MEMFINDInstance->opType = 0;
+				sprintf(opTypeStr, "EQUAL TO");
+			default:
+				MEMFINDInstance->opType = 0;
+				sprintf(opTypeStr, "EQUAL TO");
+				break;
+		}
+		SkipSpace(found);
+		if (*found == ' '){
+			DEBUG_ShowMsg("DEBUG: MEMS - Memory Search from MEMFIND instance.\n");
+			DEBUG_ShowMsg("DEBUG: Usage: MEMS (OPERATOR) VALUE.\n");
+			DEBUG_ShowMsg("DEBUG: Valid operators: >, >=, <, <=, !, =.\n");
+			return true;
+		} else if (*found == '\0'){
+			DEBUG_ShowMsg("DEBUG: No value was entered. Comparing with previous values.\n");
+			MEMFINDInstance->usePreviousValue = true;
+			value = 0;
+		} else {
+			value = GetHexValue(found,found,&parsed);
+			if (((value > 255) && (MEMFINDInstance->size == 1)) || ((value > 65535) && (MEMFINDInstance->size == 2))){
+				DEBUG_ShowMsg("DEBUG: Memory search failed. Value is larger than specified size range.\n");
+				return true;
+			}
+			MEMFINDInstance->value = value;
+			MEMFINDInstance->usePreviousValue = false;
+		}
+		uint32_t y = 0;	//This index is seperated from the for loop, as the for loop can start from any index while this particular index starts at 0
+		for (uint32_t i = MEMFINDInstance->baseLinear; i < MEMFINDInstance->baseLinear + MEMFINDInstance->range; i+=MEMFINDInstance->size){
+			switch (MEMFINDInstance->size){
+				case 1:
+					mem_readb_checked((PhysPt)(i),&valfind8);
+					valfind = valfind8;
+					if (MEMFINDInstance->usePreviousValue == true){
+						memcpy(&value, &MEMFINDInstance->tableValue[y], 1);
+					}
+					break;
+				case 2:
+					mem_readw_checked((PhysPt)(i),&valfind16);
+					valfind = valfind16;
+					if (MEMFINDInstance->usePreviousValue == true){
+						memcpy(&value, &MEMFINDInstance->tableValue[y], 2);
+					}
+					break;
+				case 4:
+					mem_readd_checked((PhysPt)(i),&valfind32);
+					valfind = valfind32;
+					if (MEMFINDInstance->usePreviousValue == true){
+						memcpy(&value, &MEMFINDInstance->tableValue[y], 4);
+					}
+					break;
+				default:
+					mem_readb_checked((PhysPt)(i),&valfind8);
+					valfind = valfind8;
+					if (MEMFINDInstance->usePreviousValue == true){
+						memcpy(&value, &MEMFINDInstance->tableValue[y], 1);
+					}
+					break;
+			}
+			switch (MEMFINDInstance->opType){
+				case 1:
+					if ((valfind > value) && (MEMFINDInstance->tableTruth[y] == true)){
+						matches++;
+					} else {
+						MEMFINDInstance->tableTruth[y] = false;
+					}
+					break;
+				case 2:
+					if ((valfind < value) && (MEMFINDInstance->tableTruth[y] == true)){
+						matches++;
+					} else {
+						MEMFINDInstance->tableTruth[y] = false;
+					}
+					break;
+				case 3:
+					if ((valfind != value) && (MEMFINDInstance->tableTruth[y] == true)){
+						matches++;
+					} else {
+						MEMFINDInstance->tableTruth[y] = false;
+					}
+					break;
+				case 4:
+					if ((valfind >= value) && (MEMFINDInstance->tableTruth[y] == true)){
+						matches++;
+					} else {
+						MEMFINDInstance->tableTruth[y] = false;
+					}
+					break;
+				case 5:
+					if ((valfind <= value) && (MEMFINDInstance->tableTruth[y] == true)){
+						matches++;
+					} else {
+						MEMFINDInstance->tableTruth[y] = false;
+					}
+					break;
+				default:
+					if ((valfind == value) && (MEMFINDInstance->tableTruth[y] == true)){
+						matches++;
+					} else {
+						MEMFINDInstance->tableTruth[y] = false;
+					}
+					break;
+			}
+			y+=MEMFINDInstance->size;
+		}
+		MEMFINDInstance->matches = matches;
+		MEMFINDInstance->iterations++;
+		if (MEMFINDInstance->matches == 0){
+			if (MEMFINDInstance->usePreviousValue == true){
+				DEBUG_ShowMsg("DEBUG: No more matches found when comparing %s previous value. Memory search instance finished.\n",opTypeStr);
+			} else {
+				DEBUG_ShowMsg("DEBUG: No more matches found with value %s (%0*X). Memory search instance finished.\n",opTypeStr,MEMFINDInstance->size*2,value);
+			}
+			MEMFINDInstance->tableTruth.clear();
+			MEMFINDInstance->tableValue.clear();
+			MEMFINDInstance->tableTruth.shrink_to_fit();
+			MEMFINDInstance->tableValue.shrink_to_fit();
+			delete MEMFINDInstance;
+			MEMFINDInstance = NULL;
+		} else {
+				if (MEMFINDInstance->usePreviousValue == true){
+					DEBUG_ShowMsg("DEBUG: (%06X) addresses matching %s their previous values. Iterations: %06X\n",MEMFINDInstance->matches,opTypeStr,MEMFINDInstance->iterations);
+				} else {
+					DEBUG_ShowMsg("DEBUG: (%06X) matches found with value %s (%0*X). Iterations: %06X\n",MEMFINDInstance->matches,opTypeStr,MEMFINDInstance->size*2,value,MEMFINDInstance->iterations);
+				}
+		}
+		return true;
+	}
+
 	if (command == "IV") { // Insert variable
 		uint16_t seg = (uint16_t)GetHexValue(found,found); found++;
-		uint32_t ofs = (uint16_t)GetHexValue(found,found); found++;
+		uint32_t ofs = GetHexValue(found,found); found++;
 		char name[16];
 		for (int i=0; i<16; i++) {
 			if (found[i] && (found[i]!=' ')) name[i] = found[i];
@@ -2530,11 +3108,14 @@ bool ParseCommand(char* str) {
 	if (command == "DOS") {
 		stream >> command;
 		if (command == "MCBS") LogMCBS();
-        else if (command == "KERN") LogDOSKernMem();
-        else if (command == "XMS") LogXMS();
-        else if (command == "EMS") LogEMS();
-        else if (command == "FNKEY") LogFNKEY();
-        else return false;
+		else if (command == "DEVS") LogDEVS();
+		else if (command == "KERN") LogDOSKernMem();
+		else if (command == "XMS") LogXMS();
+#if !defined(OSFREE)
+		else if (command == "EMS") LogEMS();
+#endif
+		else if (command == "FNKEY") LogFNKEY();
+		else return false;
 
 		return true;
 	}
@@ -2911,8 +3492,22 @@ bool ParseCommand(char* str) {
         return true;
     }
 
+    if (command == "RTC") {
+        while (*found == ' ') found++;
+        command.clear(); // iostream >> command does not update "command" if there is no string there, so it's basically fancy scanf() then!
+        stream >> command;
+        while (*found != 0 && *found != ' ') found++;
+        while (*found == ' ') found++;
+
+        if (command == "") {
+            DEBUG_PrintRTC();
+            return true;
+        }
+    }
+
     if (command == "VGA") {
         while (*found == ' ') found++;
+        command.clear(); // iostream >> command does not update "command" if there is no string there, so it's basically fancy scanf() then!
         stream >> command;
         while (*found != 0 && *found != ' ') found++;
         while (*found == ' ') found++;
@@ -3692,6 +4287,8 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("EMU MEM/MACHINE           - Show emulator memory or machine info.\n");
 		DEBUG_ShowMsg("MEMDUMP [seg]:[off] [len] - Write memory to file memdump.txt.\n");
 		DEBUG_ShowMsg("MEMDUMPBIN [s]:[o] [len]  - Write memory to file memdump.bin.\n");
+        DEBUG_ShowMsg("MEMFIND [seg]:[off] [.].. - Start memory find search instance.\n");
+		DEBUG_ShowMsg("MEMS [operator] [value]   - Search value within instance.\n");
 		DEBUG_ShowMsg("SELINFO [segName]         - Show selector info.\n");
 
 		DEBUG_ShowMsg("INTVEC [filename]         - Writes interrupt vector table to file.\n");
@@ -3738,6 +4335,23 @@ bool ParseCommand(char* str) {
 	return false;
 }
 
+bool DEBUG_ExecuteCommand(const char* command)
+{
+	if (command == NULL || *command == 0) {
+		DEBUG_ShowMsg("*** Debugger command not recognized");
+		return false;
+	}
+
+	std::vector<char> buffer(command, command + strlen(command));
+	buffer.push_back(0);
+
+	if (ParseCommand(buffer.data()))
+		return true;
+
+	DEBUG_ShowMsg("*** Debugger command not recognized");
+	return false;
+}
+
 char* AnalyzeInstruction(char* inst, bool saveSelector) {
 	static char result[256];
 
@@ -3780,30 +4394,53 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 			} else
 				pos++;
 		}
-		uint32_t address = (uint32_t)GetAddress(seg,adr);
-		if (!(get_tlb_readhandler(address)->flags & PFLAG_INIT)) {
-			static char outmask[] = "%s:[%04X]=%02X";
-
-			if (cpu.pmode) outmask[6] = '8';
-				switch (DasmLastOperandSize()) {
-				case 8 : {	uint8_t val = mem_readb(address);
-							outmask[12] = '2';
-							sprintf(result,outmask,prefix,adr,val);
-						}	break;
-				case 16: {	uint16_t val = mem_readw(address);
-							outmask[12] = '4';
-							sprintf(result,outmask,prefix,adr,val);
-						}	break;
-				case 32: {	uint32_t val = mem_readd(address);
-							outmask[12] = '8';
-							sprintf(result,outmask,prefix,adr,val);
-						}	break;
-			}
-		} else {
+		if (Is16BitSegment(seg))
+			adr &= 0xffffu;
+		const uint64_t address64 = GetAddress(seg,adr);
+		const uint32_t address = (uint32_t)address64;
+		if (address64 == mem_no_address) {
 			sprintf(result,"[illegal]");
 		}
+		else {
+			static char outmask[] = "%s:[%04X]=%02X";
+			bool illegal = false;
+
+			if (cpu.pmode) outmask[6] = '8';
+			switch (DasmLastOperandSize()) {
+			case 8: {
+				uint8_t val = 0;
+				illegal = mem_readb_checked(address,&val);
+				if (!illegal) {
+					outmask[12] = '2';
+					sprintf(result,outmask,prefix,adr,val);
+				}
+			} break;
+			case 16: {
+				uint16_t val = 0;
+				illegal = mem_readw_checked(address,&val);
+				if (!illegal) {
+					outmask[12] = '4';
+					sprintf(result,outmask,prefix,adr,val);
+				}
+			} break;
+			case 32: {
+				uint32_t val = 0;
+				illegal = mem_readd_checked(address,&val);
+				if (!illegal) {
+					outmask[12] = '8';
+					sprintf(result,outmask,prefix,adr,val);
+				}
+			} break;
+			default:
+				illegal = true;
+				break;
+			}
+
+			if (illegal)
+				sprintf(result,"[illegal]");
+		}
 		// Variable found ?
-		CDebugVar* var = CDebugVar::FindVar(address);
+		CDebugVar* var = (address64 != mem_no_address) ? CDebugVar::FindVar(address) : NULL;
 		if (var) {
 			// Replace occurrence
 			char* pos1 = strchr(inst,'[');
@@ -3999,11 +4636,96 @@ int32_t DEBUG_Run(int32_t amount,bool quickexit) {
 	return ret;
 }
 
+#ifdef WIN32
+/* Translate VT escape sequences into ncurses KEY_* constants. Needed because
+   we set ENABLE_VIRTUAL_TERMINAL_INPUT on the debugger console input handle
+   (so the terminal host stops swallowing F11 etc. for fullscreen). With that
+   flag, function keys arrive as VT sequences (e.g. F11 = ESC [ 23 ~) instead of
+   virtual key codes, so ncurses' getch() returns them char by char and the
+   KEY_F(N) cases below never fire. */
+static int dbg_getch_vt(void) {
+	int c = getch();
+	if (c != 27) return c;
+
+	int c2 = getch();
+	if (c2 < 0) return 27; /* plain ESC */
+
+	if (c2 == 'O') {
+		/* SS3: ESC O X */
+		int c3 = getch();
+		switch (c3) {
+			case 'P': return KEY_F(1);
+			case 'Q': return KEY_F(2);
+			case 'R': return KEY_F(3);
+			case 'S': return KEY_F(4);
+			case 'A': return KEY_UP;
+			case 'B': return KEY_DOWN;
+			case 'C': return KEY_RIGHT;
+			case 'D': return KEY_LEFT;
+			case 'H': return KEY_HOME;
+			case 'F': return KEY_END;
+		}
+		return 27;
+	}
+
+	if (c2 == '[') {
+		/* CSI: ESC [ [params] final */
+		int param = 0;
+		int c3 = getch();
+		while (c3 >= '0' && c3 <= '9') {
+			param = param * 10 + (c3 - '0');
+			c3 = getch();
+		}
+		if (c3 == '~') {
+			switch (param) {
+				case 1: return KEY_HOME;
+				case 2: return KEY_IC;
+				case 3: return KEY_DC;
+				case 4: return KEY_END;
+				case 5: return KEY_PPAGE;
+				case 6: return KEY_NPAGE;
+				case 11: return KEY_F(1);
+				case 12: return KEY_F(2);
+				case 13: return KEY_F(3);
+				case 14: return KEY_F(4);
+				case 15: return KEY_F(5);
+				case 17: return KEY_F(6);
+				case 18: return KEY_F(7);
+				case 19: return KEY_F(8);
+				case 20: return KEY_F(9);
+				case 21: return KEY_F(10);
+				case 23: return KEY_F(11);
+				case 24: return KEY_F(12);
+			}
+		} else if (param == 0) {
+			switch (c3) {
+				case 'A': return KEY_UP;
+				case 'B': return KEY_DOWN;
+				case 'C': return KEY_RIGHT;
+				case 'D': return KEY_LEFT;
+				case 'H': return KEY_HOME;
+				case 'F': return KEY_END;
+			}
+		}
+		return 27;
+	}
+
+	/* Alt+letter or other ESC-prefixed sequence — push back so the existing
+	   case 27 handler below can read it as before. */
+	ungetch(c2);
+	return 27;
+}
+#endif
+
 uint32_t DEBUG_CheckKeys(void) {
 	Bits ret=0;
 	bool numberrun = false;
 	bool skipDraw = false;
+#ifdef WIN32
+	int key=dbg_getch_vt();
+#else
 	int key=getch();
+#endif
 
     if (key == KEY_RESIZE) {
 #ifdef WIN32 /* BUG: pdcurses notifies us immediately upon getting a resize event but does not update it's
@@ -4306,7 +5028,12 @@ uint32_t DEBUG_CheckKeys(void) {
 				break;
 		case KEY_F(10):	// Step over inst
 				DrawRegistersUpdateOld();
-				if (StepOver()) {
+                if(!CPU_IsDynamicCore()) warn_dynamic = false;
+                else if(!warn_dynamic) {
+                    DEBUG_WarnDynamic();
+                    warn_dynamic = true;
+                }
+                if (StepOver()) {
 					mustCompleteInstruction = true;
 					inhibit_int_breakpoint = true;
 					ret = DEBUG_Run(1,false);
@@ -4319,6 +5046,11 @@ uint32_t DEBUG_CheckKeys(void) {
 				/* FALLTHROUGH */
 		case KEY_F(11):	// trace into
 				DrawRegistersUpdateOld();
+                if(!CPU_IsDynamicCore()) warn_dynamic = false;
+                else if(!warn_dynamic) {
+                    DEBUG_WarnDynamic();
+                    warn_dynamic = true;
+                }
 				exitLoop = false;
 				mustCompleteInstruction = true;
 				ret = DEBUG_Run(1,true);
@@ -4433,6 +5165,15 @@ void dyn_core_dh_debug_flush (void);
 #endif
 
 Bitu DEBUG_Loop(void) {
+#if defined(C_DOSBOX_AGENT)
+    dosbox_agent::AGENT_BridgePump();
+#endif
+    ControlServer_Poll();
+
+    // MCP commands such as RUN or VRT can switch back to the normal loop.
+    if (DOSBOX_GetLoop() != DEBUG_Loop)
+        return 0;
+
     if (debug_running) {
         Bitu now = SDL_GetTicks();
 
@@ -4451,7 +5192,11 @@ Bitu DEBUG_Loop(void) {
         uint16_t oldCS	= SegValue(cs);
         uint32_t oldEIP	= reg_eip;
         PIC_runIRQs();
+#ifdef JSDOS_X
+        asyncify_sleep(1, true);
+#else
         SDL_Delay(1);
+#endif
 
 #if (C_DYNAMIC_X86)
 	if (GetDynamicType() > 0) {
@@ -4510,6 +5255,11 @@ Bitu DEBUG_Loop(void) {
 }
 
 void DEBUG_FlushInput(void);
+
+void DEBUG_WarnDynamic(void) {
+    DEBUG_ShowMsg("Warning: Single-stepping may not work correctly with \"Dynamic core\".");
+    DEBUG_ShowMsg("         If you encounter problems, switch the CPU core to \"Normal core\".");
+}
 
 bool tohide=true;
 static bool hidedebugger=false;
@@ -4602,13 +5352,21 @@ void DEBUG_Enable_Handler(bool pressed) {
 	DEBUG_DrawScreen();
 	DOSBOX_SetLoop(&DEBUG_Loop);
 	mainMenu.get_item("mapper_debugger").check(true).refresh_item(mainMenu);
-	if (!showhelp) {
-		showhelp=true;
+    if(!CPU_IsDynamicCore()) warn_dynamic = false;
+    else if(!warn_dynamic) {
+        DEBUG_WarnDynamic();
+        warn_dynamic = true;
+    }
+    if (!showhelp) {
+        showhelp=true;
 		DEBUG_ShowMsg("***| TYPE HELP (+ENTER) TO GET AN OVERVIEW OF ALL COMMANDS |***\n");
 	}
 	//KEYBOARD_ClrBuffer();
     GFX_SetTitle(-1,-1,-1,false);
     runnormal = false;
+#if defined(C_DOSBOX_AGENT)
+    dosbox_agent::AGENT_NotifyDebuggerStopped(SegValue(cs), reg_eip);
+#endif
     if (debugrunmode==1) {char command[] = "RUN"; ParseCommand(command);}
     else if (debugrunmode==2) {char command[] = "RUNWATCH"; ParseCommand(command);}
 }
@@ -4625,23 +5383,43 @@ static void DEBUG_RaiseTimerIrq(void) {
 	PIC_ActivateIRQ(0);
 }
 
+static void LogDEVChain(uint32_t devhdr) {
+	DOS_DEVHDR::hdr hdr;
+	char tmp[9];
+
+	while (1) {
+		MEM_BlockRead(PhysMake(devhdr >> 16,devhdr & 0xFFFFu),&hdr,sizeof(hdr));
+		memcpy(tmp,hdr.name,8); tmp[8] = 0;
+		DEBUG_ShowMsg("%04X:%04X %04X  %04X  %04X  %s",
+			devhdr >> 16,devhdr & 0xFFFFu,
+			hdr.attributes,hdr.strategy_entry,hdr.interrupt_entry,tmp);
+
+		devhdr = hdr.nextdev;
+		if (devhdr == NONEXTDEV) break;
+
+		/* Apparently in MS-DOS 5, a driver can set only the offset field to 0xFFFF and that is sufficient to end the linked list */
+		if ((devhdr&0xFFFFu) == 0xFFFFu) break;
+	}
+}
+
 // Display the content of the MCB chain starting with the MCB at the specified segment.
 static void LogMCBChain(uint16_t mcb_segment) {
-	DOS_MCB mcb(mcb_segment);
-	char filename[9]; // 8 characters plus a terminating NUL
+	std::string filename;
 	const char *psp_seg_note;
 	uint16_t DOS_dataOfs = static_cast<uint16_t>(dataOfs); //Realmode addressing only
 	PhysPt dataAddr = PhysMake(dataSeg,DOS_dataOfs);// location being viewed in the "Data Overview"
+	uint16_t end_of_chain_segment = mcb_segment;
 
-	// loop forever, breaking out of the loop once we've processed the last MCB
-	while (true) {
+	for (const auto mcb : DOS_MCB(mcb_segment)) {
+		const auto current_segment = mcb.GetSeg();
+
 		// verify that the type field is valid
-		if (mcb.GetType()!=0x4d && mcb.GetType()!=0x5a) {
-			DEBUG_ShowMsg("MCB chain broken at %04X:0000!",mcb_segment);
+		if (!mcb.isValid()) {
+			DEBUG_ShowMsg("MCB chain broken at %04X:0000!",current_segment);
 			return;
 		}
 
-		mcb.GetFileName(filename);
+		filename = mcb.GetFileName();
 
 		// some PSP segment values have special meanings
 		switch (mcb.GetPSPSeg()) {
@@ -4655,23 +5433,18 @@ static void LogMCBChain(uint16_t mcb_segment) {
 				psp_seg_note = "";
 		}
 
-        DEBUG_ShowMsg("   %04X  %12u     %04X %-7s  %s",mcb_segment,mcb.GetSize() << 4,mcb.GetPSPSeg(), psp_seg_note, filename);
+		DEBUG_ShowMsg("   %04X  %12u     %04X %-7s  %s",current_segment,mcb.GetSize() << 4,mcb.GetPSPSeg(), psp_seg_note, filename.c_str());
 
 		// print a message if dataAddr is within this MCB's memory range
-		PhysPt mcbStartAddr = PhysMake(mcb_segment+1,0);
-		PhysPt mcbEndAddr = PhysMake(mcb_segment+1+mcb.GetSize(),0);
+		PhysPt mcbStartAddr = PhysMake(current_segment+1,0);
+		PhysPt mcbEndAddr = PhysMake(current_segment+1+mcb.GetSize(),0);
 		if (dataAddr >= mcbStartAddr && dataAddr < mcbEndAddr) {
-            DEBUG_ShowMsg("   (data addr %04hX:%04X is %u bytes past this MCB)",dataSeg,DOS_dataOfs,dataAddr - mcbStartAddr);
+			DEBUG_ShowMsg("   (data addr %04hX:%04X is %u bytes past this MCB)",dataSeg,DOS_dataOfs,dataAddr - mcbStartAddr);
 		}
-
-		// if we've just processed the last MCB in the chain, break out of the loop
-		if (mcb.GetType()==0x5a) {
-			break;
-		}
-		// else, move to the next MCB in the chain
-		mcb_segment+=mcb.GetSize()+1;
-		mcb.SetPt(mcb_segment);
+		end_of_chain_segment = static_cast<uint16_t>(current_segment + mcb.GetSize() + 1);
 	}
+
+	DEBUG_ShowMsg("   %04X  END OF CHAIN",end_of_chain_segment);
 }
 
 #include "regionalloctracking.h"
@@ -4701,10 +5474,12 @@ static void LogBIOSMem(void) {
 Bitu XMS_GetTotalHandles(void);
 bool XMS_GetHandleInfo(Bitu &phys_location,Bitu &size,Bitu &lockcount,bool &free,Bitu handle);
 
+#if !defined(OSFREE)
 bool EMS_GetHandle(Bitu &size,PhysPt &addr,std::string &name,Bitu handle);
 const char *EMS_Type_String(void);
 Bitu EMS_Max_Handles(void);
 bool EMS_Active(void);
+#endif
 
 static void LogFNKEY(void) {
     DEBUG_BeginPagedContent();
@@ -4715,6 +5490,7 @@ static void LogFNKEY(void) {
     DEBUG_EndPagedContent();
 }
 
+#if !defined(OSFREE)
 static void LogEMS(void) {
     Bitu h_size;
     PhysPt xh_addr;
@@ -4785,6 +5561,7 @@ static void LogEMS(void) {
 
     DEBUG_EndPagedContent();
 }
+#endif
 
 static void LogXMS(void) {
     Bitu phys_location;
@@ -4842,6 +5619,43 @@ static void LogDOSKernMem(void) {
     }
 
     DEBUG_EndPagedContent();
+}
+
+// Display the content of all device drivers.
+static void LogDEVS(void) {
+	if (dos_kernel_disabled) {
+		if (boothax == BOOTHAX_MSDOS) {
+			if (guest_msdos_LoL == 0 || guest_msdos_dev_chain == 0) {
+				DEBUG_ShowMsg("Cannot enumerate device list while DOS kernel is inactive, and DOSBox-X has not yet determined the DEV list of the guest MS-DOS operating system");
+				return;
+			}
+
+			DEBUG_BeginPagedContent();
+
+			try {
+				DEBUG_ShowMsg("Header    Attr  Strat Intr  Name");
+				LogDEVChain(guest_msdos_dev_chain);
+			}
+			catch (GuestPageFaultException &pf) {
+				(void)pf;//unused
+				DEBUG_ShowMsg("(Enumeration caused page fault within the guest)");
+			}
+
+			DEBUG_EndPagedContent();
+			return;
+		}
+		else {
+			DEBUG_ShowMsg("Cannot enumerate device list while DOS kernel is inactive.");
+			return;
+		}
+	}
+
+	DEBUG_BeginPagedContent();
+
+	DEBUG_ShowMsg("Header    Attr  Strat Intr  Name");
+	LogDEVChain(dos_infoblock.GetStartOfDeviceChain());
+
+	DEBUG_EndPagedContent();
 }
 
 // Display the content of all Memory Control Blocks.
@@ -5096,20 +5910,20 @@ static void LogInstruction(uint16_t segValue, uint32_t eipValue,  ofstream& out)
 	char dline[200];Bitu size;
 	size = DasmI386(dline, start, reg_eip, cpu.code.big);
 	char* res = empty;
-	if (showExtend && (cpuLogType > 0) ) {
+	if (showExtend && (cpuLogType > 0)) {
 		res = AnalyzeInstruction(dline,false);
 		if (!res || !(*res)) res = empty;
 		Bitu reslen = strlen(res);
-        if (reslen < 22) {
-            memset(res + reslen, ' ', 22 - reslen);
-            res[22] = 0;
-        }
+		if (reslen < 22) {
+			memset(res + reslen, ' ', 22 - reslen);
+			res[22] = 0;
+		}
 	}
 	Bitu len = strlen(dline);
-    if (len < 30) {
-        memset(dline + len, ' ', 30 - len);
-        dline[30] = 0;
-    }
+	if (len < 30) {
+		memset(dline + len, ' ', 30 - len);
+		dline[30] = 0;
+	}
 
 	// Get register values
 
@@ -5118,7 +5932,9 @@ static void LogInstruction(uint16_t segValue, uint32_t eipValue,  ofstream& out)
 	} else if (cpuLogType == 1) {
 		out << setw(4) << SegValue(cs) << ":" << setw(8) << reg_eip << "  " << dline << "  " << res;
 	} else if (cpuLogType == 2) {
-		char ibytes[200]="";	char tmpc[200];
+		char ibytes[200]="";
+		char tstamp[128];
+		char tmpc[200];
 		for (Bitu i=0; i<size; i++) {
 			uint8_t value;
 			if (mem_readb_checked((PhysPt)(start+i),&value)) sprintf(tmpc,"%s","?? ");
@@ -5126,32 +5942,33 @@ static void LogInstruction(uint16_t segValue, uint32_t eipValue,  ofstream& out)
 			strcat(ibytes,tmpc);
 		}
 		len = strlen(ibytes);
-        if (len < 21) {
-            for (Bitu i = 0; i < 21 - len; i++) ibytes[len + i] = ' ';
-            ibytes[21] = 0;
-        }
-		out << setw(4) << SegValue(cs) << ":" << setw(8) << reg_eip << "  " << dline << "  " << res << "  " << ibytes;
+		if (len < 21) {
+			for (Bitu i = 0; i < 21 - len; i++) ibytes[len + i] = ' ';
+			ibytes[21] = 0;
+		}
+		sprintf(tstamp,"%.6f",(double)PIC_FullIndex());
+		out << tstamp << " " << setw(4) << SegValue(cs) << ":" << setw(8) << reg_eip << "  " << dline << "  " << res << "  " << ibytes;
 	}
 
 	out << " EAX:" << setw(8) << reg_eax << " EBX:" << setw(8) << reg_ebx
-	    << " ECX:" << setw(8) << reg_ecx << " EDX:" << setw(8) << reg_edx
-	    << " ESI:" << setw(8) << reg_esi << " EDI:" << setw(8) << reg_edi
-	    << " EBP:" << setw(8) << reg_ebp << " ESP:" << setw(8) << reg_esp
-	    << " DS:"  << setw(4) << SegValue(ds)<< " ES:"  << setw(4) << SegValue(es);
+		<< " ECX:" << setw(8) << reg_ecx << " EDX:" << setw(8) << reg_edx
+		<< " ESI:" << setw(8) << reg_esi << " EDI:" << setw(8) << reg_edi
+		<< " EBP:" << setw(8) << reg_ebp << " ESP:" << setw(8) << reg_esp
+		<< " DS:"  << setw(4) << SegValue(ds)<< " ES:"  << setw(4) << SegValue(es);
 
 	if(cpuLogType == 0) {
 		out << " SS:"  << setw(4) << SegValue(ss) << " C"  << (get_CF()>0)  << " Z"   << (get_ZF()>0)
-		    << " S" << (get_SF()>0) << " O"  << (get_OF()>0) << " I"  << GETFLAGBOOL(IF);
+			<< " S" << (get_SF()>0) << " O"  << (get_OF()>0) << " I"  << GETFLAGBOOL(IF);
 	} else {
 		out << " FS:"  << setw(4) << SegValue(fs) << " GS:"  << setw(4) << SegValue(gs)
-		    << " SS:"  << setw(4) << SegValue(ss)
-		    << " CF:"  << (get_CF()>0)  << " ZF:"   << (get_ZF()>0)  << " SF:"  << (get_SF()>0)
-		    << " OF:"  << (get_OF()>0)  << " AF:"   << (get_AF()>0)  << " PF:"  << (get_PF()>0)
-		    << " IF:"  << GETFLAGBOOL(IF);
+			<< " SS:"  << setw(4) << SegValue(ss)
+			<< " CF:"  << (get_CF()>0)  << " ZF:"   << (get_ZF()>0)  << " SF:"  << (get_SF()>0)
+			<< " OF:"  << (get_OF()>0)  << " AF:"   << (get_AF()>0)  << " PF:"  << (get_PF()>0)
+			<< " IF:"  << GETFLAGBOOL(IF);
 	}
 	if(cpuLogType == 2) {
 		out << " TF:" << GETFLAGBOOL(TF) << " VM:" << GETFLAGBOOL(VM) <<" FLG:" << setw(8) << reg_flags
-		    << " CR0:" << setw(8) << cpu.cr0;
+			<< " CR0:" << setw(8) << cpu.cr0;
 	}
 	out << endl;
 }
@@ -5213,18 +6030,26 @@ private:
 };
 #endif
 
-#if C_DEBUG
-extern bool debugger_break_on_exec;
-#endif
-
 void DEBUG_CheckExecuteBreakpoint(uint16_t seg, uint32_t off)
 {
-#if C_DEBUG
+#if !defined(OSFREE)
+# if C_DEBUG
     if (debugger_break_on_exec) {
-		CBreakpoint::AddBreakpoint(seg,off,true);
-		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
+#  if defined(C_DOSBOX_AGENT)
+        // The new entry breakpoint is created at the current CS:IP. The
+		// existing bulk activation intentionally skips that address, so arm
+		// this one explicitly before preserving the other breakpoint state.
+		CBreakpoint* const entry_breakpoint = CBreakpoint::AddBreakpoint(seg,off,true);
+		entry_breakpoint->Activate(true);
+        CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
+		agent_entry_breakpoint_sequence.fetch_add(1, std::memory_order_relaxed);
+#  else
+        CBreakpoint::AddBreakpoint(seg, off, true);
+        CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs) + reg_eip);
+#  endif
         debugger_break_on_exec = false;
     }
+# endif
 #endif
 #if 0
 	if (pDebugcom && pDebugcom->IsActive()) {
@@ -5291,6 +6116,9 @@ void DEBUG_SetupConsole(void) {
 }
 
 void DEBUG_ShutDown(Section * /*sec*/) {
+	TIMER_DelTickHandler(ControlServer_Poll);
+	ControlServer_Stop();
+
 	CBreakpoint::DeleteAll();
 	CDebugVar::DeleteAll();
 	if (dbg.win_main != NULL) {
@@ -5321,6 +6149,13 @@ void DEBUG_ReinitCallback(void) {
 
 void DEBUG_Init() {
     LOG(LOG_MISC, LOG_DEBUG)("Initializing debug system");
+
+	Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
+	const int mcp_server_port = section != NULL ? section->Get_int("mcp_server") : 0;
+	if (mcp_server_port > 0) {
+		ControlServer_Start(static_cast<uint16_t>(mcp_server_port));
+		TIMER_AddTickHandler(ControlServer_Poll);
+	}
 
 	/* Reset code overview and input line */
 	memset((void*)&codeViewData,0,sizeof(codeViewData));
@@ -5357,6 +6192,14 @@ CDebugVar* CDebugVar::FindVar(PhysPt pt)
 	for(std::vector<CDebugVar*>::size_type i = 0; i != s; i++) {
 		CDebugVar* bp = varList[i];
 		if (bp->GetAdr() == pt) return bp;
+	}
+	return nullptr;
+}
+
+CDebugVar* CDebugVar::FindVar(const std::string& name)
+{
+	for (auto* variable : varList) {
+		if (strcasecmp(name.c_str(), variable->GetName()) == 0) return variable;
 	}
 	return nullptr;
 }
@@ -5568,11 +6411,15 @@ struct TLogInst {
 	bool a;
 	bool p;
 	bool i;
+	uint32_t flags;
 	char dline[31];
 	char res[23];
 };
 
 TLogInst logInst[LOGCPUMAX];
+static bool agent_trace_active = false;
+static uint32_t agent_trace_remaining = 0;
+static vector<DEBUG_AgentTraceEvent> agent_trace_events;
 
 void DEBUG_HeavyLogInstruction(void) {
 
@@ -5621,9 +6468,71 @@ void DEBUG_HeavyLogInstruction(void) {
 	inst.a    = get_AF()>0;
 	inst.p    = get_PF()>0;
 	inst.i    = GETFLAGBOOL(IF);
+	inst.flags = static_cast<uint32_t>(reg_flags);
 
 	if (++logCount >= LOGCPUMAX) logCount = 0;
 }
+
+#if defined(C_DEBUG) && defined(C_DOSBOX_AGENT)
+bool DEBUG_AgentStartTrace(const uint32_t instruction_count)
+{
+	if (instruction_count == 0 || agent_trace_active)
+		return false;
+	agent_trace_events.clear();
+	agent_trace_events.reserve(instruction_count);
+	agent_trace_remaining = instruction_count;
+	agent_trace_active = true;
+	return true;
+}
+
+bool DEBUG_AgentStopTrace(uint32_t* event_count)
+{
+	if (event_count == nullptr)
+		return false;
+	agent_trace_active = false;
+	agent_trace_remaining = 0;
+	*event_count = static_cast<uint32_t>(agent_trace_events.size());
+	return true;
+}
+
+bool DEBUG_AgentTraceIsActive(void)
+{
+	return agent_trace_active;
+}
+
+void DEBUG_AgentCopyTraceEvents(vector<DEBUG_AgentTraceEvent>* events)
+{
+	if (events != nullptr)
+		*events = agent_trace_events;
+}
+
+static void DEBUG_AgentCaptureTraceEvent(void)
+{
+	DEBUG_HeavyLogInstruction();
+	const uint32_t last_index = logCount == 0 ? LOGCPUMAX - 1 : logCount - 1;
+	const TLogInst& inst = logInst[last_index];
+	DEBUG_AgentTraceEvent event;
+	event.cs = inst.s_cs;
+	event.instruction_pointer = inst.eip;
+	event.eax = inst.eax;
+	event.ebx = inst.ebx;
+	event.ecx = inst.ecx;
+	event.edx = inst.edx;
+	event.esi = inst.esi;
+	event.edi = inst.edi;
+	event.ebp = inst.ebp;
+	event.esp = inst.esp;
+	event.ds = inst.s_ds;
+	event.es = inst.s_es;
+	event.fs = inst.s_fs;
+	event.gs = inst.s_gs;
+	event.ss = inst.s_ss;
+	event.flags = inst.flags;
+	event.instruction = inst.dline;
+	event.analysis = inst.res;
+	agent_trace_events.push_back(event);
+}
+#endif
 
 void DEBUG_HeavyWriteLogInstruction(void) {
 	if (!logHeavy) return;
@@ -5665,6 +6574,17 @@ void DEBUG_HeavyWriteLogInstruction(void) {
 }
 
 bool DEBUG_HeavyIsBreakpoint(void) {
+	const bool agent_trace_was_active = agent_trace_active;
+#if defined(C_DOSBOX_AGENT)
+    if (agent_trace_active) {
+		DEBUG_AgentCaptureTraceEvent();
+		if (--agent_trace_remaining == 0) {
+			agent_trace_active = false;
+			DEBUG_EnableDebugger();
+			return true;
+		}
+	}
+#endif
 	if (cpuLog) {
 		if (cpuLogCounter>0) {
 			LogInstruction(SegValue(cs),reg_eip,cpuLogFile);
@@ -5680,7 +6600,11 @@ bool DEBUG_HeavyIsBreakpoint(void) {
 		}
 	}
 	// LogInstruction
-	if (logHeavy) DEBUG_HeavyLogInstruction();
+	if (logHeavy
+#if defined (C_DOSBOX_AGENT)
+        && !agent_trace_was_active
+#endif
+       ) DEBUG_HeavyLogInstruction();
 	if (zeroProtect) {
 		static Bitu zero_count = 0;
 		uint32_t value = 0;
@@ -5715,5 +6639,3 @@ void DEBUG_StopLog(void) {
 
 
 #endif // DEBUG
-
-

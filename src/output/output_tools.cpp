@@ -35,9 +35,18 @@
 #include <output/output_opengl.h>
 #include <output/output_surface.h>
 #include <output/output_ttf.h>
+#include <output/output_direct3d11.h>
+
+#if C_METAL
+void OUTPUT_Metal_Select();
+void metal_init();
+#endif
 
 #if C_DIRECT3D
 void d3d_init(void);
+#if defined(C_SDL2)
+void d3d11_init(void);
+#endif
 #endif
 
 #if defined(USE_TTF)
@@ -45,6 +54,11 @@ void resetFontSize();
 #endif
 
 void res_init(void), RENDER_Reset(void), UpdateOverscanMenu(void), GFX_SetTitle(int32_t cycles, int frameskip, Bits timing, bool paused);
+void OutputSettingMenuUpdate(void);
+
+#if defined(MACOSX) && defined(C_SDL2) && C_METAL
+void OUTPUT_Metal_Shutdown();
+#endif
 
 extern int initgl, posx, posy;
 extern bool rtl, gbk, chinasea, window_was_maximized, dpi_aware_enable, isVirtualBox;
@@ -169,7 +183,20 @@ void change_output(int output) {
         OUTPUT_GAMELINK_Select();
         break;
 #endif
-
+#if C_DIRECT3D && defined(C_SDL2)
+    case 13: /* direct3d11 */
+        LOG_MSG("change_output: DIRECT3D11");
+        OUTPUT_DIRECT3D11_Select();
+        d3d11_init();
+        break;
+#endif
+#if defined(MACOSX) && defined(C_SDL2) && C_METAL
+    case 14: /* Metal */
+        LOG_MSG("change_output: Metal");
+        OUTPUT_Metal_Select();
+        metal_init();
+        break;
+#endif
     default:
         LOG_MSG("SDL: Unsupported output device %d, switching back to surface",output);
         OUTPUT_SURFACE_Select();
@@ -275,10 +302,11 @@ void change_output(int output) {
     GFX_LogSDLState();
 
     UpdateWindowDimensions();
+    OutputSettingMenuUpdate();
 
 #ifdef C_SDL2
     // UX: always center window after changing output
-    SDL_SetWindowPosition(sdl.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    // SDL_SetWindowPosition(sdl.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 #endif
 }
 
@@ -286,6 +314,9 @@ void OutputSettingMenuUpdate(void) {
     mainMenu.get_item("output_surface").check(sdl.desktop.want_type == SCREEN_SURFACE).refresh_item(mainMenu);
 #if C_DIRECT3D
     mainMenu.get_item("output_direct3d").check(sdl.desktop.want_type == SCREEN_DIRECT3D).refresh_item(mainMenu);
+#if defined(C_SDL2)
+    mainMenu.get_item("output_direct3d11").check(sdl.desktop.want_type == SCREEN_DIRECT3D11).refresh_item(mainMenu);
+#endif
 #endif
 #if C_OPENGL
     mainMenu.get_item("output_opengl").check(sdl.desktop.want_type == SCREEN_OPENGL && sdl_opengl.kind == GLBilinear).refresh_item(mainMenu);
@@ -297,6 +328,14 @@ void OutputSettingMenuUpdate(void) {
 #endif
 #if C_GAMELINK
     mainMenu.get_item("output_gamelink").check(sdl.desktop.want_type == SCREEN_GAMELINK).refresh_item(mainMenu);
+#endif
+#if defined(MACOSX) && defined(C_SDL2) && C_METAL
+    mainMenu.get_item("output_metal").check(sdl.desktop.want_type == SCREEN_METAL).refresh_item(mainMenu);
+#endif
+
+    /* don't show Video -> TTF menu if not TTF output */
+#if defined(USE_TTF)
+    mainMenu.get_item("VideoTTFMenu").hide(sdl.desktop.want_type != SCREEN_TTF).refresh_item(mainMenu);
 #endif
 }
 
@@ -423,6 +462,45 @@ bool toOutput(const char *what) {
         reset = true;
 #endif
     }
+#if C_DIRECT3D && defined(C_SDL2)
+    else if(!strcmp(what, "direct3d11")) {
+        if(sdl.desktop.want_type == SCREEN_DIRECT3D11)
+            return false;
+
+        if(window_was_maximized && !GFX_IsFullscreen()) {
+            change_output(13);
+#if defined(WIN32)
+            ShowWindow(GetHWND(), SW_MAXIMIZE);
+#endif
+        }
+        else {
+            change_output(13);
+        }
+    }
+#endif
+#if MACOSX && defined(C_SDL2) && C_METAL
+    else if(!strcmp(what, "metal")) {
+        if(sdl.desktop.type == SCREEN_METAL)
+            return false;
+        OUTPUT_Metal_Shutdown();
+#if defined(C_OPENGL)
+        change_output(3);
+#endif
+        if(window_was_maximized && !GFX_IsFullscreen()) {
+            change_output(14);
+#if defined(WIN32)
+            ShowWindow(GetHWND(), SW_MAXIMIZE);
+#endif
+        }
+        else {
+            OUTPUT_Metal_Shutdown();
+#if defined(C_OPENGL)
+            change_output(3);
+#endif
+            change_output(14);
+        }
+    }
+#endif
     if (reset) RENDER_Reset();
     OutputSettingMenuUpdate();
     return true;

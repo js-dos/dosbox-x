@@ -27,7 +27,7 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
-  
+
 #include <jsdos-support.h>
 
 #include "dosbox.h"
@@ -133,7 +133,7 @@ bool check_last_split_char(const char *name, size_t len, char split)
 	return tail;
 }
 
-/* 
+/*
 	Ripped some source from freedos for this one.
 
 */
@@ -159,7 +159,7 @@ void strreplace(char * str,char o,char n) {
 		str++;
 	}
 }
-char *ltrim(char *str) { 
+char *ltrim(char *str) {
 	while (*str && isspace(*reinterpret_cast<unsigned char*>(str))) str++;
 	return str;
 }
@@ -480,7 +480,11 @@ int utf16le_decode(const char **ptr,const char *fence) {
 }
 
 #if C_DEBUG
+#ifdef EMSCRIPTEN
+#include <jsdos-curses.h>
+#else
 #include <curses.h>
+#endif
 #endif
 #if defined(WIN32)
 void DOSBox_ConsolePauseWait();

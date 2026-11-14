@@ -16,8 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#ifndef DOSBOX_ETHERNET_NOTHING_H
-#define DOSBOX_ETHERNET_NOTHING_H
+#ifndef DOSBOX_ETHERNET_ETHNET_H
+#define DOSBOX_ETHERNET_ETHNET_H
 
 #include "config.h"
 

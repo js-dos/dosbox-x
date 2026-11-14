@@ -38,7 +38,7 @@
 enum ASPECT_MODES {
     ASPECT_FALSE = 0
     ,ASPECT_TRUE
-#if C_SURFACE_POSTRENDER_ASPECT
+#if C_SURFACE_POSTRENDER_ASPECT || ((defined(WIN32) || defined(MACOSX)) && defined(C_SDL2))
     ,ASPECT_NEAREST
     ,ASPECT_BILINEAR
 #endif
@@ -98,6 +98,7 @@ typedef struct Render_t {
 		uint8_t *outWrite;
 		Bitu cachePitch;
 		uint8_t *cacheRead;
+		Bitu frameCachePitch;
 		Bitu inHeight, inLine, outLine;
 	} scale;
 	struct {
@@ -106,13 +107,14 @@ typedef struct Render_t {
 	} cache;
 #if C_OPENGL
 	char* shader_src;
-    bool shader_def=false;
+	bool shader_def=false;
 #endif
-    RenderPal_t pal;
+	RenderPal_t pal;
 	bool updating;
 	bool active;
 	int aspect;
-    bool aspectOffload;
+	bool aspectOffload;
+	bool disablerender;
 	bool fullFrame;
 	bool forceUpdate;
 	bool autofit;
@@ -194,5 +196,10 @@ void RENDER_EndUpdate(bool abort);
 void RENDER_SetPal(uint8_t entry,uint8_t red,uint8_t green,uint8_t blue);
 bool RENDER_GetForceUpdate(void);
 void RENDER_SetForceUpdate(bool);
+
+bool TempLineAlloc(unsigned int w);
+void TempLineFree(void);
+void scalerSourceCacheBufferFree(void);
+bool scalerSourceCacheBufferAlloc(unsigned int p,unsigned int h);
 
 #endif

@@ -727,7 +727,6 @@ void WriteCharDOSVSbcs24(uint8_t col, uint8_t row, uint8_t chr, uint8_t attr)
 	uint8_t *font;
 	Bitu off;
 	Bitu width = (real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS) == 85) ? 128 : 160;
-	volatile uint8_t dummy;
 
 	font = GetSbcs24Font(chr);
 
@@ -754,12 +753,12 @@ void WriteCharDOSVSbcs24(uint8_t col, uint8_t row, uint8_t chr, uint8_t attr)
 		for(uint8_t x = 0 ; x < 2 ; x++) {
 			IO_Write(0x3ce, 8); IO_Write(0x3cf, data[x]);
 			IO_Write(0x3ce, 0); IO_Write(0x3cf, attr);
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, 0xff);
 
 			IO_Write(0x3ce, 8); IO_Write(0x3cf, data[x] ^ mask_data[col & 1][x]);
 			IO_Write(0x3ce, 0); IO_Write(0x3cf, back);
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, 0xff);
 
 			off++;
@@ -779,7 +778,6 @@ void WriteCharDOSVDbcs24(uint16_t col, uint16_t row, uint16_t chr, uint8_t attr)
 	uint8_t *font;
 	Bitu off;
 	Bitu width = (real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS) == 85) ? 128 : 160;
-	volatile uint8_t dummy;
 
 	font = GetDbcs24Font(chr);
 
@@ -810,12 +808,12 @@ void WriteCharDOSVDbcs24(uint16_t col, uint16_t row, uint16_t chr, uint8_t attr)
 			if(mask_data[col & 1][x] != 0) {
 				IO_Write(0x3ce, 8); IO_Write(0x3cf, data[x]);
 				IO_Write(0x3ce, 0); IO_Write(0x3cf, attr);
-				dummy = real_readb(0xa000, off);
+				(void)real_readb(0xa000, off);
 				real_writeb(0xa000, off, 0xff);
 
 				IO_Write(0x3ce, 8); IO_Write(0x3cf, data[x] ^ mask_data[col & 1][x]);
 				IO_Write(0x3ce, 0); IO_Write(0x3cf, back);
-				dummy = real_readb(0xa000, off);
+				(void)real_readb(0xa000, off);
 				real_writeb(0xa000, off, 0xff);
 			}
 			off++;
@@ -839,20 +837,20 @@ void WriteCharDOSVSbcs(uint16_t col, uint16_t row, uint8_t chr, uint8_t attr) {
 		return;
 	}
 
-	if(real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE) == 0x72) {
+	if(real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE) == 0x72 || real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE) == 0x12) {
 		if(attr & 0x80) {
+			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, 0xff);
 			IO_Write(0x3ce, 0x05); IO_Write(0x3cf, 0x03);
 			IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr & 0x0f);
 			IO_Write(0x3ce, 0x03); IO_Write(0x3cf, 0x18);
 
-			volatile uint8_t dummy;
 			Bitu width = real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS);
 			uint8_t height = real_readb(BIOSMEM_SEG, BIOSMEM_CHAR_HEIGHT);
 			font = height == 16 ? GetSbcsFont(chr) : GetSbcs19Font(chr);
 			off = row * width * height + col;
 			select = StartBankSelect(off);
 			for(uint8_t h = 0 ; h < height ; h++) {
-				dummy = real_readb(0xa000, off);
+				(void)real_readb(0xa000, off);
 				data = *font++;
 				real_writeb(0xa000, off, data);
 				off += width;
@@ -863,16 +861,16 @@ void WriteCharDOSVSbcs(uint16_t col, uint16_t row, uint8_t chr, uint8_t attr) {
 		}
 		attr &= 0x0f;
 	}
-	volatile uint8_t dummy;
 	Bitu width = real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS);
 	uint8_t height = real_readb(BIOSMEM_SEG, BIOSMEM_CHAR_HEIGHT);
 	font = height == 16 ? GetSbcsFont(chr) : GetSbcs19Font(chr);
 	off = row * width * height + col;
 	select = StartBankSelect(off);
 
+	IO_Write(0x3ce, 0x08); IO_Write(0x3cf, 0xff);
 	IO_Write(0x3ce, 0x05); IO_Write(0x3cf, 0x03);
 	IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr >> 4);
-	real_writeb(0xa000, off, 0xff); dummy = real_readb(0xa000, off);
+	real_writeb(0xa000, off, 0xff); (void)real_readb(0xa000, off);
 	IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr & 0x0f);
 	for(uint8_t h = 0 ; h < height ; h++) {
 		data = *font++;
@@ -884,8 +882,8 @@ void WriteCharDOSVSbcs(uint16_t col, uint16_t row, uint8_t chr, uint8_t attr) {
 
 static void DrawCharDOSVDbcsHalf(Bitu off, uint8_t *font, uint8_t attr, Bitu width, uint8_t height, uint8_t select, bool xor_flag)
 {
-	volatile uint8_t dummy;
 	uint8_t data;
+	IO_Write(0x3ce, 0x08); IO_Write(0x3cf, 0xff);
 	if(xor_flag) {
 		IO_Write(0x3ce, 0x05); IO_Write(0x3cf, 0x03);
 		IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr & 0x0f);
@@ -893,12 +891,12 @@ static void DrawCharDOSVDbcsHalf(Bitu off, uint8_t *font, uint8_t attr, Bitu wid
 	} else {
 		IO_Write(0x3ce, 0x05); IO_Write(0x3cf, 0x03);
 		IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr >> 4);
-		real_writeb(0xa000, off, 0xff); dummy = real_readb(0xa000, off);
+		real_writeb(0xa000, off, 0xff); (void)real_readb(0xa000, off);
 		IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr & 0x0f);
 	}
 	for(uint8_t h = 0 ; h < height ; h++) {
 		if(xor_flag) {
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 		}
 		if(height == 19 && (h == 0 || h > 16)) {
 			data = 0;
@@ -917,12 +915,12 @@ static void DrawCharDOSVDbcsHalf(Bitu off, uint8_t *font, uint8_t attr, Bitu wid
 
 static inline void DrawCharDOSVDbcs(Bitu off, uint16_t *font, uint8_t attr, Bitu width, uint8_t height, uint8_t select)
 {
-	volatile uint16_t dummy;
 	uint16_t data;
 
+	IO_Write(0x3ce, 0x08); IO_Write(0x3cf, 0xff);
 	IO_Write(0x3ce, 0x05); IO_Write(0x3cf, 0x03);
 	IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr >> 4);
-	real_writew(0xa000, off, 0xffff); dummy = real_readw(0xa000, off);
+	real_writew(0xa000, off, 0xffff); (void)real_readw(0xa000, off);
 	IO_Write(0x3ce, 0x00); IO_Write(0x3cf, attr & 0x0f);
 
 	for(uint8_t h = 0 ; h < height ; h++) {
@@ -960,7 +958,7 @@ void WriteCharDOSVDbcs(uint16_t col, uint16_t row, uint16_t chr, uint8_t attr) {
 	uint8_t *font = GetDbcsFont(chr);
 	Bitu off = row * width * height + col;
 	uint8_t select = StartBankSelect(off);
-	if(real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE) == 0x72) {
+	if(real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE) == 0x72 || real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE) == 0x12) {
 		if(attr & 0x80) {
 			DrawCharDOSVDbcsHalf(off, font, prevattr, width, height, select, true);
 			if(col != width - 1) {
@@ -1211,10 +1209,9 @@ void INT10_SetActivePage(uint8_t page) {
     INT10_SetCursorPos(cur_row,cur_col,page);
 }
 
-extern const char* RunningProgram;
 void INT10_SetCursorShape(uint8_t first,uint8_t last) {
     real_writew(BIOSMEM_SEG,BIOSMEM_CURSOR_TYPE,last|(first<<8u));
-    if (machine==MCH_CGA || IS_TANDY_ARCH) goto dowrite;
+    if (machine==MCH_CGA || machine==MCH_OLIVETTI || machine==MCH_3270PC || IS_TANDY_ARCH) goto dowrite;
     /* Skip CGA cursor emulation if EGA/VGA system is active */
     if (machine==MCH_HERC || !(real_readb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL) & 0x8)) { /* if video subsystem is ACTIVE (bit is cleared) [https://www.stanislavs.org/helppc/bios_data_area.html] */
         /* Check for CGA type 01, invisible */
@@ -1289,8 +1286,31 @@ void INT10_GetCursorPos(uint8_t *row, uint8_t*col, const uint8_t page)
 }
 
 void INT10_SetCursorPos(uint8_t row,uint8_t col,uint8_t page) {
-    if (IS_DOSV && DOSV_CheckCJKVideoMode()) DOSV_OffCursor();
-    else if(J3_IsJapanese()) J3_OffCursor();
+    // Get the dimensions
+    BIOS_NCOLS;
+
+#if 0 // Disabled to fix Bad Dude (issue #6114). Elder Scrolls Arena installer still works fine, but may need additional fixes.  
+    BIOS_NROWS;
+
+    // EGA/VGA: Emulate a VGA BIOS that range-checks at least the row.
+    //          The DOS installer for Elder Scrolla Arena is obviously trying to put something on the last row of
+    //          the display, however it sets the cursor position to row=25. row is 0-based so that would actually put
+    //          it one row beyond the end of the display. This fixes the "Press F1 for"... message at the bottom.
+    // Assume MDA/CGA do not range check because the rows value in the BDA did not exist in the original IBM PC/XT BIOS.
+    if (IS_EGAVGA_ARCH && !IS_PC98_ARCH) {
+        if (nrows && row >= nrows)
+		row = nrows - 1;
+    }
+#endif
+
+    if (IS_DOSV && DOSV_CheckCJKVideoMode()) {
+        DOSV_OffCursor();
+        page = 0;
+    }
+    else if(J3_IsJapanese()) {
+        J3_OffCursor();
+        page = 0;
+    }
     if (page>7) LOG(LOG_INT10,LOG_ERROR)("INT10_SetCursorPos page %d",page);
     // Bios cursor pos
     if (IS_PC98_ARCH) {
@@ -1305,8 +1325,6 @@ void INT10_SetCursorPos(uint8_t row,uint8_t col,uint8_t page) {
     // Set the hardware cursor
     uint8_t current=IS_PC98_ARCH ? 0 : real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE);
     if(page==current) {
-        // Get the dimensions
-        BIOS_NCOLS;
         // Calculate the address knowing nbcols nbrows and page num
         // NOTE: BIOSMEM_CURRENT_START counts in colour/flag pairs
         uint16_t address=(ncols*row)+col+(IS_PC98_ARCH ? 0 : (real_readw(BIOSMEM_SEG,BIOSMEM_CURRENT_START)/2));
@@ -1550,7 +1568,7 @@ void WriteChar(uint16_t col,uint16_t row,uint8_t page,uint16_t chr,uint8_t attr,
     /* Externally used by the mouse routine */
     PhysPt fontdata;
     uint16_t cols = real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-    uint8_t back, cheight = IS_PC98_ARCH ? 16 : (machine == MCH_CGA || machine == MCH_AMSTRAD) ? 8 : real_readb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT);
+    uint8_t back, cheight = IS_PC98_ARCH ? 16 : (machine == MCH_CGA || machine == MCH_AMSTRAD || machine == MCH_OLIVETTI || machine == MCH_3270PC) ? 8 : real_readb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT);
 
     if (CurMode->type != M_PC98)
         chr &= 0xFF;
@@ -1780,78 +1798,84 @@ void INT10_WriteChar(uint16_t chr,uint8_t attr,uint8_t page,uint16_t count,bool 
     }
 }
 
+unsigned int BeepDuration();
+
 static void INT10_TeletypeOutputAttr(uint8_t chr,uint8_t attr,bool useattr,uint8_t page) {
-    BIOS_NCOLS;BIOS_NROWS;
-    uint8_t cur_row=CURSOR_POS_ROW(page);
-    uint8_t cur_col=CURSOR_POS_COL(page);
-    switch (chr) {
-    case 8:
-        if(cur_col>0) cur_col--;
-        break;
-    case '\r':
-        cur_col=0;
-        break;
-    case '\n':
-//      cur_col=0; //Seems to break an old chess game
-        cur_row++;
-        break;
-    case 7: /* Beep */
-        // Prepare PIT counter 2 for ~900 Hz square wave
-        IO_Write(0x43, 0xb6);
-        IO_Write(0x42, 0x28);
-        IO_Write(0x42, 0x05);
-        // Speaker on
-        IO_Write(0x61, IO_Read(0x61) | 0x3);
-        // Idle for 1/3rd of a second
-        double start;
-        start = PIC_FullIndex();
-        while ((PIC_FullIndex() - start) < 333.0) CALLBACK_Idle();
-        // Speaker off
-        IO_Write(0x61, IO_Read(0x61) & ~0x3);
-        if (CurMode->type==M_TEXT) {
-            uint16_t chat;
-            INT10_ReadCharAttr(&chat,page);
-            if ((uint8_t)(chat>>8)!=7) return;
-        }
-        chr=' ';
-    default:
-		/* Return if the char code is DBCS at the end of the line (for DOS/V) */
-		if (cur_col + 1 == ncols && IS_DOSV && DOSV_CheckCJKVideoMode() && isKanji1(chr) && prevchr == 0) {
-			INT10_TeletypeOutputAttr(' ', attr, useattr, page);
-			cur_row = CURSOR_POS_ROW(page);
-			cur_col = CURSOR_POS_COL(page);
+	BIOS_NCOLS;BIOS_NROWS;
+	uint8_t cur_row=CURSOR_POS_ROW(page);
+	uint8_t cur_col=CURSOR_POS_COL(page);
+	switch (chr) {
+		case 8:
+			if(cur_col>0) cur_col--;
+			break;
+		case '\r':
+			cur_col=0;
+			break;
+		case '\n':
+//			cur_col=0; // Seems to break an old chess game
+//			           // That's absolutely right, \r CR and \n LF, this is why DOS requires \r\n for newline --J.C.
+			cur_row++;
+			break;
+		case 7: /* Beep */
+			{
+				if (IS_PC98_ARCH) LOG(LOG_MISC,LOG_WARN)("BUG: INT 10h beep called in PC-98 mode");
+				// Prepare PIT counter 2 for ~900 Hz square wave
+				IO_Write(0x43, 0xb6);
+				IO_Write(0x42, 0x28);
+				IO_Write(0x42, 0x05);
+				// Speaker on
+				IO_Write(0x61, IO_Read(0x61) | 0x3);
+				// Idle for 1/3rd of a second
+				double start,dur = BeepDuration();
+				start = PIC_FullIndex();
+				while ((PIC_FullIndex() - start) < dur) CALLBACK_Idle();
+				// Speaker off
+				IO_Write(0x61, IO_Read(0x61) & ~0x3);
+				if (CurMode->type==M_TEXT) {
+					uint16_t chat;
+					INT10_ReadCharAttr(&chat,page);
+					if ((uint8_t)(chat>>8)!=7) return;
+				}
+			}
+			return; /* don't do anything else, not even scrollup on last line (fix for Elder Scrolls Arena installer) */
+		default:
+			/* Return if the char code is DBCS at the end of the line (for DOS/V) */
+			if (cur_col + 1 == ncols && IS_DOSV && DOSV_CheckCJKVideoMode() && isKanji1(chr) && prevchr == 0) {
+				INT10_TeletypeOutputAttr(' ', attr, useattr, page);
+				cur_row = CURSOR_POS_ROW(page);
+				cur_col = CURSOR_POS_COL(page);
+			}
+			/* Draw the actual Character */
+			if(IS_DOSV && DOSV_CheckCJKVideoMode()) {
+				WriteCharV(cur_col,cur_row,chr,attr,useattr);
+			} else {
+				WriteChar(cur_col,cur_row,page,chr,attr,useattr);
+			}
+			cur_col++;
+	}
+	if(cur_col==ncols) {
+		cur_col=0;
+		cur_row++;
+	}
+	// Do we need to scroll ?
+	if(cur_row==nrows) {
+		//Fill with black on non-text modes
+		uint8_t fill = 0;
+		if (IS_PC98_ARCH && CurMode->type == M_TEXT) {
+			//Fill with the default ANSI attribute on textmode
+			fill = DefaultANSIAttr();
 		}
-        /* Draw the actual Character */
-        if(IS_DOSV && DOSV_CheckCJKVideoMode()) {
-            WriteCharV(cur_col,cur_row,chr,attr,useattr);
-        } else {
-            WriteChar(cur_col,cur_row,page,chr,attr,useattr);
-        }
-        cur_col++;
-    }
-    if(cur_col==ncols) {
-        cur_col=0;
-        cur_row++;
-    }
-    // Do we need to scroll ?
-    if(cur_row==nrows) {
-        //Fill with black on non-text modes
-        uint8_t fill = 0;
-        if (IS_PC98_ARCH && CurMode->type == M_TEXT) {
-            //Fill with the default ANSI attribute on textmode
-            fill = DefaultANSIAttr();
-        }
-        else if (CurMode->type==M_TEXT || DOSV_CheckCJKVideoMode()) {
-            //Fill with attribute at cursor on textmode
-            uint16_t chat;
-            INT10_ReadCharAttr(&chat,page);
-            fill=(uint8_t)(chat>>8);
-        }
-        INT10_ScrollWindow(0,0,(uint8_t)(nrows-1),(uint8_t)(ncols-1),-1,fill,page);
-        cur_row--;
-    }
-    // Set the cursor for the page
-    INT10_SetCursorPos(cur_row,cur_col,page);
+		else if (CurMode->type==M_TEXT || DOSV_CheckCJKVideoMode()) {
+			//Fill with attribute at cursor on textmode
+			uint16_t chat;
+			INT10_ReadCharAttr(&chat,page);
+			fill=(uint8_t)(chat>>8);
+		}
+		INT10_ScrollWindow(0,0,(uint8_t)(nrows-1),(uint8_t)(ncols-1),-1,fill,page);
+		cur_row--;
+	}
+	// Set the cursor for the page
+	INT10_SetCursorPos(cur_row,cur_col,page);
 }
 
 void INT10_TeletypeOutputAttr(uint8_t chr,uint8_t attr,bool useattr) {
@@ -1870,7 +1894,6 @@ void INT10_TeletypeOutput(uint8_t chr,uint8_t attr) {
 static void DrawExtendAttribute(uint16_t col, uint16_t row, uint8_t attr, uint8_t ex_attr)
 {
 	Bitu off, off_start;
-	volatile uint8_t dummy;
 	Bitu width = real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS);
 	uint8_t height = real_readb(BIOSMEM_SEG, BIOSMEM_CHAR_HEIGHT);
 	uint8_t no, select;
@@ -1889,12 +1912,12 @@ static void DrawExtendAttribute(uint16_t col, uint16_t row, uint8_t attr, uint8_
 		select = StartBankSelect(off);
 		if(height == 24) {
 			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, mask_data[col & 1][0]);
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, 0x07);
 			off++;
 			select = CheckBankSelect(select, off);
 			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, mask_data[col & 1][1]);
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, 0x07);
 		} else {
 			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, 0xff);
@@ -1911,7 +1934,7 @@ static void DrawExtendAttribute(uint16_t col, uint16_t row, uint8_t attr, uint8_
 			IO_Write(0x3cf, 0x08);
 		}
 		for(no = 0 ; no < height ; no++) {
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, 0x07);
 			off += width;
 			select = CheckBankSelect(select, off);
@@ -1922,12 +1945,12 @@ static void DrawExtendAttribute(uint16_t col, uint16_t row, uint8_t attr, uint8_
 		select = StartBankSelect(off);
 		if(height == 24) {
 			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, mask_data[col & 1][0]);
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, attr & 0x0f);
 			off++;
 			select = CheckBankSelect(select, off);
 			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, mask_data[col & 1][1]);
-			dummy = real_readb(0xa000, off);
+			(void)real_readb(0xa000, off);
 			real_writeb(0xa000, off, attr & 0x0f);
 		} else {
 			IO_Write(0x3ce, 0x08); IO_Write(0x3cf, 0xff);

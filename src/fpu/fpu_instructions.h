@@ -18,6 +18,24 @@
 
 #include <math.h> /* for isinf, etc */
 #include "cpu/lazyflags.h"
+
+// Helper functions for 64-bit memory access
+static inline uint64_t mem_readq(PhysPt addr) {
+	uint64_t tmp;
+	tmp  = (uint64_t)mem_readd(addr);
+	tmp |= (uint64_t)mem_readd(addr+4ul) << (uint64_t)32ul;
+	return tmp;
+}
+
+static inline void mem_writeq(PhysPt addr,uint64_t v) {
+	mem_writed(addr,    (uint32_t)v);
+	mem_writed(addr+4ul,(uint32_t)(v >> (uint64_t)32ul));
+}
+
+// Local "shadow" register file to store bit-perfect 64-bit integers.
+// Declared static to keep the change local to this file.
+static FPU_Reg fpu_regs_memcpy[9];
+
 static void FPU_FINIT(void) {
 	unsigned int i;
 
@@ -33,6 +51,10 @@ static void FPU_FINIT(void) {
 	fpu.tags[7] = TAG_Empty;
 	fpu.tags[8] = TAG_Valid; // is only used by us (FIXME: why?)
 	for (i=0;i < 9;i++) fpu.use80[i] = false;
+
+	for (i = 0; i < 9; i++) {
+		fpu_regs_memcpy[i].ll = 0;
+	}
 }
 
 static void FPU_FCLEX(void){
@@ -193,16 +215,11 @@ static void FPU_FLD_I32(PhysPt addr,Bitu store_to) {
 }
 
 static void FPU_FLD_I64(PhysPt addr,Bitu store_to) {
-	FPU_Reg blah;
-	blah.l.lower = mem_readd(addr);
-	blah.l.upper = (int32_t)mem_readd(addr+4);
-	fpu.regs[store_to].d = static_cast<double>(blah.ll);
-	// store the signed 64-bit integer in the 80-bit format mantissa with faked exponent.
-	// this is needed for DOS and Windows games that use the Pentium fast memcpy trick, using FLD/FST to copy 64 bits at a time.
-	// I wonder if that trick is what helped spur Intel to make the MMX extensions :)
-	fpu.regs_80[store_to].raw.l = (uint64_t)blah.ll;
-	fpu.regs_80[store_to].raw.h = ((blah.ll/*sign bit*/ >> (uint64_t)63) ? 0x8000u : 0x0000u) + FPU_Reg_80_exponent_bias + 63u; // FIXME: Verify this is correct!
-	fpu.use80[store_to] = true;
+	const int64_t val = mem_readq(addr);
+
+	fpu.regs[store_to].d = static_cast<double>(val);
+	fpu_regs_memcpy[store_to].ll = val;
+	fpu.use80[store_to] = false;
 }
 
 static void FPU_FBLD(PhysPt addr,Bitu store_to) {
@@ -272,21 +289,16 @@ static void FPU_FST_I32(PhysPt addr) {
 }
 
 static void FPU_FST_I64(PhysPt addr) {
-	FPU_Reg blah;
-	if (fpu.use80[TOP] && (fpu.regs_80[TOP].raw.h & 0x7FFFu) == (0x0000u + FPU_Reg_80_exponent_bias + 63u)) {
-		// FIXME: This works so far for DOS demos that use the "Pentium memcpy trick" to copy 64 bits at a time.
-		//        What this code needs to do is take the exponent into account and then clamp the 64-bit int within range.
-		//        This cheap hack is good enough for now.
-		mem_writed(addr,(uint32_t)(fpu.regs_80[TOP].raw.l));
-		mem_writed(addr+4,(uint32_t)(fpu.regs_80[TOP].raw.l >> (uint64_t)32));
-	}
-	else {
-		double val = FROUND(fpu.regs[TOP].d);
-		blah.ll = (val < 9223372036854775808.0 && val >= -9223372036854775808.0)?static_cast<int64_t>(val):LONGTYPE(0x8000000000000000);
+	auto val_i       = fpu_regs_memcpy[TOP].ll;
+	const auto val_d = fpu.regs[TOP].d;
 
-		mem_writed(addr,(uint32_t)blah.l.lower);
-		mem_writed(addr+4,(uint32_t)blah.l.upper);
+	if (val_d != static_cast<double>(val_i)) {
+		const auto rounded = FROUND(val_d);
+		val_i = (rounded < 9223372036854775808.0 && rounded >= -9223372036854775808.0)
+			? static_cast<int64_t>(rounded)
+			: 0x8000000000000000LL;
 	}
+	mem_writeq(addr, val_i);
 }
 
 // WARNING: UNTESTED. Original contributed code only focused on the x86 FPU case.
@@ -375,35 +387,61 @@ static void FPU_FADD(Bitu op1, Bitu op2){
 }
 
 static void FPU_FSIN(void){
-	fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[TOP].d = sin(fpu.regs[TOP].d);
-	FPU_SET_C2(0);
-	//flags and such :)
+	//fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
+	//fpu.regs[TOP].d = sin(fpu.regs[TOP].d);
+    const double x = fpu.regs[TOP].d;
+
+    if(fabs(x) >= X87_TRIG_ARG_LIMIT) {
+        FPU_SET_C2(1);
+        return;
+    }
+
+    fpu.use80[TOP] = false;
+    fpu.regs[TOP].d = sin(x);
+
+    FPU_SET_C2(0);
 	return;
 }
 
 static void FPU_FSINCOS(void){
 	double temp = fpu.regs[TOP].d;
-	fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[TOP].d = sin(temp);
+	//fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
+
+    if(fabs(temp) >= X87_TRIG_ARG_LIMIT) {
+        FPU_SET_C2(1);
+        return;
+    }
+
+    fpu.use80[TOP] = false;
+    fpu.regs[TOP].d = sin(temp);
 	FPU_PUSH(cos(temp));
-	FPU_SET_C2(0);
-	//flags and such :)
+    FPU_SET_C2(0);
 	return;
 }
 
 static void FPU_FCOS(void){
-	fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[TOP].d = cos(fpu.regs[TOP].d);
-	FPU_SET_C2(0);
-	//flags and such :)
+	//fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
+	//fpu.regs[TOP].d = cos(fpu.regs[TOP].d);
+    const double x = fpu.regs[TOP].d;
+
+    if(fabs(x) >= X87_TRIG_ARG_LIMIT) {
+        FPU_SET_C2(1);
+        return;
+    }
+
+    fpu.use80[TOP] = false;
+    fpu.regs[TOP].d = cos(x);
+
+    FPU_SET_C2(0);
 	return;
 }
 
 static void FPU_FSQRT(void){
-	fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
+    if(fpu.regs[TOP].d < 0.0)
+        FPU_SetException(FPU_EX_INVALID);
+
+    fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
 	fpu.regs[TOP].d = sqrt(fpu.regs[TOP].d);
-	//flags and such :)
 	return;
 }
 static void FPU_FPATAN(void){
@@ -414,31 +452,97 @@ static void FPU_FPATAN(void){
 	return;
 }
 static void FPU_FPTAN(void){
-	fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[TOP].d = tan(fpu.regs[TOP].d);
-	FPU_PUSH(1.0);
+    //fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
+    const double x = fpu.regs[TOP].d;
+    fpu.regs[TOP].d = tan(x);
+    if(fabs(x) >= X87_TRIG_ARG_LIMIT) {
+        FPU_SET_C2(1);
+        return;
+    }
+    fpu.use80[TOP] = false;
+    FPU_PUSH(1.0);
 	FPU_SET_C2(0);
-	//flags and such :)
 	return;
 }
 static void FPU_FDIV(Bitu st, Bitu other){
-	fpu.use80[st] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[st].d= fpu.regs[st].d/fpu.regs[other].d;
-	//flags and such :)
+	//fpu.use80[st] = false; // we used the less precise version, drop the 80-bit precision
+    //fpu.regs[st].d = fpu.regs[st].d / fpu.regs[other].d;
+
+    const double a = fpu.regs[st].d;
+    const double b = fpu.regs[other].d;
+
+    if(b == 0.0) {
+        if(a == 0.0)
+            FPU_SetException(FPU_EX_INVALID);
+        else
+            FPU_SetException(FPU_EX_ZERODIVIDE);
+    }
+
+    fpu.use80[st] = false;
+    fpu.regs[st].d = a / b;
+
+    if(std::isinf(fpu.regs[st].d) &&
+        std::isfinite(a) &&
+        std::isfinite(b) &&
+        b != 0)
+        FPU_SetException(FPU_EX_OVERFLOW);
+
 	return;
 }
 
 static void FPU_FDIVR(Bitu st, Bitu other){
-	fpu.use80[st] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[st].d= fpu.regs[other].d/fpu.regs[st].d;
-	// flags and such :)
-	return;
+	//fpu.use80[st] = false; // we used the less precise version, drop the 80-bit precision
+	//fpu.regs[st].d= fpu.regs[other].d/fpu.regs[st].d;
+
+    const double a = fpu.regs[other].d;
+    const double b = fpu.regs[st].d;
+
+    if(b == 0.0) {
+        if(a == 0.0)
+            FPU_SetException(FPU_EX_INVALID);
+        else
+            FPU_SetException(FPU_EX_ZERODIVIDE);
+    }
+
+    fpu.use80[st] = false;
+    fpu.regs[st].d = a / b;
+
+    if(std::isinf(fpu.regs[st].d) &&
+        std::isfinite(a) &&
+        std::isfinite(b) &&
+        b != 0)
+        FPU_SetException(FPU_EX_OVERFLOW);
+
+    return;
 }
 
 static void FPU_FMUL(Bitu st, Bitu other){
-	fpu.use80[st] = false; // we used the less precise version, drop the 80-bit precision
-	fpu.regs[st].d*=fpu.regs[other].d;
-	//flags and such :)
+	//fpu.use80[st] = false; // we used the less precise version, drop the 80-bit precision
+	//fpu.regs[st].d*=fpu.regs[other].d;
+    const double a = fpu.regs[other].d;
+    const double b = fpu.regs[st].d;
+    if((a == 0.0 && std::isinf(b)) ||
+        (b == 0.0 && std::isinf(a)))
+    {
+        FPU_SetException(FPU_EX_INVALID);
+    }
+    double result = a * b;
+
+    if(std::isinf(result) &&
+        std::isfinite(a) &&
+        std::isfinite(b))
+    {
+        FPU_SetException(FPU_EX_OVERFLOW);
+    }
+    if(result != 0.0 &&
+        std::fpclassify(result) == FP_SUBNORMAL)
+    {
+        FPU_SetException(FPU_EX_UNDERFLOW);
+    }
+
+    fpu.use80[st] = false;
+    fpu.regs[st].d = result;
+
 	return;
 }
 
@@ -460,17 +564,20 @@ static void FPU_FXCH(Bitu st, Bitu other){
 	FPU_Reg_80 reg80 = fpu.regs_80[other];
 	FPU_Tag tag = fpu.tags[other];
 	FPU_Reg reg = fpu.regs[other];
+	auto reg_memcpy = fpu_regs_memcpy[other];
 	bool use80 = fpu.use80[other];
 
 	fpu.regs_80[other] = fpu.regs_80[st];
 	fpu.use80[other] = fpu.use80[st];
 	fpu.tags[other] = fpu.tags[st];
 	fpu.regs[other] = fpu.regs[st];
+	fpu_regs_memcpy[other]  = fpu_regs_memcpy[st];
 
 	fpu.regs_80[st] = reg80;
 	fpu.use80[st] = use80;
 	fpu.tags[st] = tag;
 	fpu.regs[st] = reg;
+	fpu_regs_memcpy[st] = reg_memcpy;
 }
 
 static void FPU_FST(Bitu st, Bitu other){
@@ -478,6 +585,7 @@ static void FPU_FST(Bitu st, Bitu other){
 	fpu.use80[other] = fpu.use80[st];
 	fpu.tags[other] = fpu.tags[st];
 	fpu.regs[other] = fpu.regs[st];
+	fpu_regs_memcpy[other]  = fpu_regs_memcpy[st];
 }
 
 static inline void FPU_FCMOV(Bitu st, Bitu other){
@@ -487,11 +595,22 @@ static inline void FPU_FCMOV(Bitu st, Bitu other){
 	fpu.regs[st] = fpu.regs[other];
 }
 
-static void FPU_FCOM(Bitu st, Bitu other){
-	if(((fpu.tags[st] != TAG_Valid) && (fpu.tags[st] != TAG_Zero)) || 
-		((fpu.tags[other] != TAG_Valid) && (fpu.tags[other] != TAG_Zero))){
-		FPU_SET_C3(1);FPU_SET_C2(1);FPU_SET_C0(1);return;
-	}
+static void FPU_FCOM(Bitu st, Bitu other, bool raise_invalid_for_nan = true){
+    if(fpu.tags[st] == TAG_Empty || fpu.tags[other] == TAG_Empty) {
+        FPU_SetException(FPU_EX_INVALID | FPU_EX_STACKFAULT);
+        FPU_SET_C3(1); FPU_SET_C2(1); FPU_SET_C0(1);
+        return;
+    }
+
+    const double a = fpu.regs[st].d;
+    const double b = fpu.regs[other].d;
+
+    if(std::isnan(a) || std::isnan(b)) {
+        // To-do: Distinguish between signaling NaN and quiet NaN. For now, we just raise the invalid exception for any NaN.
+        if(raise_invalid_for_nan) FPU_SetException(FPU_EX_INVALID);
+        FPU_SET_C3(1); FPU_SET_C2(1); FPU_SET_C0(1);
+        return;
+    }
 
 	/* HACK: If emulating a 286 processor we want the guest to think it's talking to a 287.
 	 *       For more info, read [http://www.intel-assembler.it/portale/5/cpu-identification/asm-source-to-find-intel-cpu.asp]. */
@@ -499,56 +618,100 @@ static void FPU_FCOM(Bitu st, Bitu other){
 	 *       "none" for no FPU, 287 or 387 for cputype=286 and cputype=386, or "auto" to match the CPU (8086 => 8087).
 	 *       If the FPU type is 387 or auto, then skip this hack. Else for 8087 and 287, use this hack. */
 	if (FPU_ArchitectureType<FPU_ARCHTYPE_387) {
-		if ((std::isinf)(fpu.regs[st].d) && (std::isinf)(fpu.regs[other].d)) {
+		if ((std::isinf)(a) && (std::isinf)(b)) {
 			/* 8087/287 consider -inf == +inf and that's what DOS programs test for to detect 287 vs 387 */
 			FPU_SET_C3(1);FPU_SET_C2(0);FPU_SET_C0(0);return;
 		}
 	}
 
-	if(fpu.regs[st].d == fpu.regs[other].d){
+	if(a == b){
 		FPU_SET_C3(1);FPU_SET_C2(0);FPU_SET_C0(0);return;
 	}
-	if(fpu.regs[st].d < fpu.regs[other].d){
+	else if(a < b) {
 		FPU_SET_C3(0);FPU_SET_C2(0);FPU_SET_C0(1);return;
 	}
 	// st > other
-	FPU_SET_C3(0);FPU_SET_C2(0);FPU_SET_C0(0);return;
+    else {
+        FPU_SET_C3(0); FPU_SET_C2(0); FPU_SET_C0(0);return;
+    }
 }
 
 static void FPU_FUCOM(Bitu st, Bitu other){
-	//does atm the same as fcom 
-	FPU_FCOM(st,other);
+    //does atm the same as fcom, but don't raise invalid exception for NaN
+	FPU_FCOM(st,other,false);
 }
 
-static void FPU_FUCOMI(Bitu st, Bitu other){
+static void FPU_FCOMI(Bitu st, Bitu other, bool raise_invalid_for_nan = true){
 	
 	FillFlags();
 	SETFLAGBIT(OF,false);
 
-	if(fpu.regs[st].d == fpu.regs[other].d){
+    if(fpu.tags[st] == TAG_Empty ||
+        fpu.tags[other] == TAG_Empty) {
+        FPU_SetException(FPU_EX_INVALID);
+        SETFLAGBIT(ZF, true);
+        SETFLAGBIT(PF, true);
+        SETFLAGBIT(CF, true);
+        return;
+    }
+
+    const double a = fpu.regs[st].d;
+    const double b = fpu.regs[other].d;
+
+    if((std::isnan)(a) || (std::isnan)(b)) {
+        if(raise_invalid_for_nan) FPU_SetException(FPU_EX_INVALID);
+        SETFLAGBIT(ZF, true);
+        SETFLAGBIT(PF, true);
+        SETFLAGBIT(CF, true);
+        return;
+    }
+
+	if(a == b){
 		SETFLAGBIT(ZF,true);SETFLAGBIT(PF,false);SETFLAGBIT(CF,false);return;
 	}
-	if(fpu.regs[st].d < fpu.regs[other].d){
+	else if(a < b){
 		SETFLAGBIT(ZF,false);SETFLAGBIT(PF,false);SETFLAGBIT(CF,true);return;
 	}
 	// st > other
-	SETFLAGBIT(ZF,false);SETFLAGBIT(PF,false);SETFLAGBIT(CF,false);return;
+	else {
+        SETFLAGBIT(ZF,false);SETFLAGBIT(PF,false);SETFLAGBIT(CF,false);return;
+    }
 }
 
-static inline void FPU_FCOMI(Bitu st, Bitu other){
-	FPU_FUCOMI(st,other);
-
-	if(((fpu.tags[st] != TAG_Valid) && (fpu.tags[st] != TAG_Zero)) || 
-		((fpu.tags[other] != TAG_Valid) && (fpu.tags[other] != TAG_Zero))){
-		SETFLAGBIT(ZF,true);SETFLAGBIT(PF,true);SETFLAGBIT(CF,true);return;
-	}
-
+static inline void FPU_FUCOMI(Bitu st, Bitu other){
+    //does atm the same as fcomi, but raise invalid exception for NaN
+    FPU_FCOMI(st,other,false);
 }
 
 static void FPU_FRNDINT(void){
-	int64_t temp= static_cast<int64_t>(FROUND(fpu.regs[TOP].d));
-	fpu.regs[TOP].d=static_cast<double>(temp);
-	fpu.use80[TOP] = false;
+    const double before = fpu.regs[TOP].d;
+    double after;
+    switch(fpu.cw.RC) {
+    case 0: // Round to nearest
+        after = nearbyint(before);
+        break;
+
+    case 1: // Round down (-infinity)
+        after = floor(before);
+        break;
+
+    case 2: // Round up (+infinity)
+        after = ceil(before);
+        break;
+
+    case 3: // Chop (toward zero)
+        after = trunc(before);
+        break;
+
+    default:
+        after = before;
+        break;
+    }
+    fpu.use80[TOP] = false; // we used the less precise version, drop the 80-bit precision
+    fpu.regs[TOP].d = after;
+    if(std::isfinite(before) && after != before)
+        FPU_SetException(FPU_EX_PRECISION);
+    return;
 }
 
 static void FPU_FPREM(void){

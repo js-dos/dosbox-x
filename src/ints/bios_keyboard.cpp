@@ -377,7 +377,7 @@ bool BIOS_AddKeyToBuffer(uint16_t code) {
         start=0x502;
         end=0x522;
     }
-    else if (machine==MCH_PCJR || machine==MCH_CGA) {
+    else if (machine==MCH_PCJR || machine==MCH_CGA || machine==MCH_OLIVETTI || machine==MCH_3270PC) {
         /* should be done for others as well, to be tested */
         start=0x1e;
         end=0x3e;
@@ -466,7 +466,7 @@ static bool get_key(uint16_t &code) {
         start=0x502;
         end=0x522;
     }
-    else if (machine==MCH_PCJR || machine==MCH_CGA) {
+    else if (machine==MCH_PCJR || machine==MCH_CGA || machine==MCH_OLIVETTI || machine==MCH_3270PC) {
         /* should be done for others as well, to be tested */
         start=0x1e;
         end=0x3e;
@@ -615,7 +615,9 @@ static Bitu IRQ1_Handler(void) {
 #else
     flags2&=~(0x40+0x20);//remove numlock/capslock pressed (hack for sdl only reporting states)
 #endif
+#if !defined(OSFREE)
     if (DOS_LayoutKey(scancode,flags1,flags2,flags3)) return CBRET_NONE;
+#endif
 //LOG_MSG("key input %d %d %d %d",scancode,flags1,flags2,flags3);
     switch (scancode) {
     /* First the hard ones  */

@@ -16,8 +16,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#include <assert.h>
+#include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "dosbox.h"
 #include "callback.h"
@@ -33,7 +39,6 @@
 #include "mem.h"
 #include "dos_inc.h" /* for Drives[] */
 #include "../dos/drives.h"
-#include "mapper.h"
 #include "ide.h"
 #include "cpu.h"
 
@@ -41,11 +46,19 @@
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 #endif
 
+#if defined(__linux__) && !defined(__GLIBC__)
+// musl libc does not need 64 suffix to work with files > 2 GiB
+#define fopen64 fopen
+#define fseeko64 fseeko
+#define ftello64 ftello
+#endif
+
 extern unsigned long freec;
 extern const uint8_t freedos_mbr[];
 extern int bootdrive, tryconvertcp;
 extern bool int13_disk_change_detect_enable, skipintprog, rsize;
 extern bool int13_extensions_enable, bootguest, bootvm, use_quick_reboot;
+extern bool int13_enable_48bitLBA;
 bool isDBCSCP(), isKanji1_gbk(uint8_t chr), shiftjis_lead_byte(int c), CheckDBCSCP(int32_t codepage);
 extern bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/);
 
@@ -298,43 +311,6 @@ typedef struct {
 } FDIHDR;                       // =0x20
 
 typedef struct {
-	char	sig[16];            // +0x000
-	char	comment[0x100];     // +0x010
-	UINT8	headersize[4];      // +0x110
-    uint8_t prot;               // +0x114
-    uint8_t nhead;              // +0x115
-    uint8_t _unknown_[10];      // +0x116
-} NFDHDR;                       // =0x120
-
-typedef struct {
-	char	sig[16];            // +0x000
-	char	comment[0x100];     // +0x010
-	UINT8	headersize[4];      // +0x110
-    uint8_t prot;               // +0x114
-    uint8_t nhead;              // +0x115
-    uint8_t _unknown_[10];      // +0x116
-    uint32_t trackheads[164];   // +0x120
-    uint32_t addinfo;           // +0x3b0
-    uint8_t _unknown2_[12];     // +0x3b4
-} NFDHDRR1;                     // =0x3c0
-
-typedef struct {
-    uint8_t log_cyl;            // +0x0
-    uint8_t log_head;           // +0x1
-    uint8_t log_rec;            // +0x2
-    uint8_t sec_len_pow2;       // +0x3         sz = 128 << len_pow2
-    uint8_t flMFM;              // +0x4
-    uint8_t flDDAM;             // +0x5
-    uint8_t byStatus;           // +0x6
-    uint8_t bySTS0;             // +0x7
-    uint8_t bySTS1;             // +0x8
-    uint8_t bySTS2;             // +0x9
-    uint8_t byRetry;            // +0xA
-    uint8_t byPDA;              // +0xB
-    uint8_t _unknown_[4];       // +0xC
-} NFDHDR_ENTRY;                 // =0x10
-
-typedef struct {
     char        szFileID[15];                 // 識別ID "T98HDDIMAGE.R0"
     char        Reserve1[1];                  // 予約
     char        szComment[0x100];             // イメージコメント(ASCIIz)
@@ -375,6 +351,13 @@ static const uint8_t hdddiskboot[] = {
     0x12,0x3c,0x04,0x35,0x04,0x24,0x01,0x25,0x00,0x00,
 };
 
+/* The packed on-disk structures (direntry, bootstrap) below are only accessed
+ * through var_read()/var_write(), which do byte-wise unaligned-safe host I/O,
+ * so -Waddress-of-packed-member is a false positive here. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+#endif
 struct fatFromDOSDrive
 {
 	DOS_Drive* drive;
@@ -795,7 +778,7 @@ struct fatFromDOSDrive
             STOREINTELDWORD(&pe.ipl_cyl, 1);
             STOREINTELDWORD(&pe.cyl, 1);
             STOREINTELDWORD(&pe.end_cyl, sasi.cylinders);
-            strncpy(pe.name, "MS-DOS          ", 16);
+            memcpy(pe.name, "MS-DOS          ", 16); // fixed-width, space-padded, not NUL-terminated
             memset(&pt, 0, sizeof(pt));
             memcpy(&pt,&pe,sizeof(pe));
         }
@@ -865,8 +848,8 @@ struct fatFromDOSDrive
 		var_write(&bootsec.fatcopies, 2);
 		var_write(&bootsec.totalsectorcount, 0); // 16 bit field is 0, actual value is in totalsecdword
 		var_write(&bootsec.mediadescriptor, 0xF8); //also in FAT[0]
-		var_write(&bootsec.sectorspertrack, IS_PC98_ARCH ? sasi.sectors : SECTORSPERTRACK);
-		var_write(&bootsec.headcount, IS_PC98_ARCH ? sasi.surfaces : HEADCOUNT);
+		var_write(&bootsec.sectorspertrack, IS_PC98_ARCH ? (uint16_t)sasi.sectors : (uint16_t)SECTORSPERTRACK);
+		var_write(&bootsec.headcount, IS_PC98_ARCH ? (uint16_t)sasi.surfaces : (uint16_t)HEADCOUNT);
 		var_write(&bootsec.hiddensectorcount, IS_PC98_ARCH ? sect_boot_pc98 : SECT_BOOT);
 		var_write(&bootsec.totalsecdword, partSize);
 		bootsec.magic1 = 0x55; bootsec.magic2 = 0xaa;
@@ -919,13 +902,13 @@ struct fatFromDOSDrive
 		if (head > 0xFF || sector > 0x3F || cylinder > 0x3FF)
             LOG_MSG("Warning: Invalid CHS data - %X, %X, %X\n", head, sector, cylinder);
 		chs[0] = (uint8_t)(head & 0xFF);
-		chs[1] = (uint8_t)((sector & 0x3F) | ((cylinder >> 8) & 0x3));
+		chs[1] = (uint8_t)((sector & 0x3F) | ((cylinder >> 2) & 0xC0));
 		chs[2] = (uint8_t)(cylinder & 0xFF);
 	}
 
-	uint8_t WriteSector(uint32_t sectnum, const void* data)
+	Int13Status WriteSector(uint32_t sectnum, const void* data)
 	{
-		if (sectnum >= sect_disk_end) return 1;
+		if (sectnum >= sect_disk_end) return Int13Status::SectorNotFound;
 		if (sectnum == SECT_MBR)
 		{
 			// Windows 9x writes the disk timestamp into the booter area on startup.
@@ -933,7 +916,7 @@ struct fatFromDOSDrive
 			memcpy(mbr.booter, data, sizeof(mbr.booter));
 		}
 
-		if (readOnly) return 0; // just return without error to avoid bluescreens in Windows 9x
+		if (readOnly) return Int13Status::NoError; // just return without error to avoid bluescreens in Windows 9x
 
 		if (sectnum >= diffSectors.size()) diffSectors.resize(sectnum + 128);
 		uint32_t *cursor_ptr = &diffSectors[sectnum].cursor, cursor_val = *cursor_ptr;
@@ -970,7 +953,7 @@ struct fatFromDOSDrive
 			*cursor_ptr = NULL_CURSOR;
 			cacheSectorNumber[sectnum % CACHECOUNT] = (uint32_t)-1; // invalidate cache
 		}
-		return 0;
+		return Int13Status::NoError;
 	}
 
 	void* GetUnmodifiedSector(uint32_t sectnum, void* filebuf)
@@ -1048,14 +1031,14 @@ struct fatFromDOSDrive
 		return NULL;
 	}
 
-	uint8_t ReadSector(uint32_t sectnum, void* data)
+	Int13Status ReadSector(uint32_t sectnum, void* data)
 	{
 		uint32_t sectorHash = sectnum % CACHECOUNT;
 		void *cachedata = cacheSectorData[sectorHash];
 		if (cacheSectorNumber[sectorHash] == sectnum)
 		{
 			memcpy(data, cachedata, BYTESPERSECTOR);
-			return 0;
+			return Int13Status::NoError;
 		}
 		cacheSectorNumber[sectorHash] = sectnum;
 
@@ -1069,7 +1052,7 @@ struct fatFromDOSDrive
 		if (src) memcpy(data, src, BYTESPERSECTOR);
 		else memset(data, 0, BYTESPERSECTOR);
 		if (src != cachedata) memcpy(cachedata, data, BYTESPERSECTOR);
-		return 0;
+		return Int13Status::NoError;
 	}
 
     bool SaveImage(const char *name)
@@ -1097,35 +1080,40 @@ struct fatFromDOSDrive
             return false;
     }
 };
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 bool saveDiskImage(imageDisk *image, const char *name) {
     return image && image->ffdd && image->ffdd->SaveImage(name);
 }
 
 diskGeo DiskGeometryList[] = {
-    { 160,  8, 1, 40, 0, 512,  64, 1, 0xFE},      // IBM PC double density 5.25" single-sided 160KB
-    { 180,  9, 1, 40, 0, 512,  64, 1, 0xFC},      // IBM PC double density 5.25" single-sided 180KB
-    { 200, 10, 1, 40, 0, 512,  64, 2, 0xFC},      // DEC Rainbow double density 5.25" single-sided 200KB (I think...)
-    { 320,  8, 2, 40, 1, 512, 112, 2, 0xFF},      // IBM PC double density 5.25" double-sided 320KB
-    { 360,  9, 2, 40, 1, 512, 112, 2, 0xFD},      // IBM PC double density 5.25" double-sided 360KB
-    { 400, 10, 2, 40, 1, 512, 112, 2, 0xFD},      // DEC Rainbow double density 5.25" double-sided 400KB (I think...)
-    { 640,  8, 2, 80, 3, 512, 112, 2, 0xFB},      // IBM PC double density 3.5" double-sided 640KB
-    { 720,  9, 2, 80, 3, 512, 112, 2, 0xF9},      // IBM PC double density 3.5" double-sided 720KB
-    {1200, 15, 2, 80, 2, 512, 224, 1, 0xF9},      // IBM PC double density 5.25" double-sided 1.2MB
-    {1440, 18, 2, 80, 4, 512, 224, 1, 0xF0},      // IBM PC high density 3.5" double-sided 1.44MB
-    {1680, 21, 2, 80, 4, 512,  16, 4, 0xF0},      // IBM PC high density 3.5" double-sided 1.68MB (DMF)
-    {2880, 36, 2, 80, 6, 512, 240, 2, 0xF0},      // IBM PC high density 3.5" double-sided 2.88MB
+    /* KB   S  H  C type SS  root clus ID  fatsz */
+    { 160,  8, 1, 40, 0, 512,  64, 1, 0xFE, 1},      // IBM PC double density 5.25" single-sided 160KB
+    { 180,  9, 1, 40, 0, 512,  64, 1, 0xFC, 2},      // IBM PC double density 5.25" single-sided 180KB
+    { 200, 10, 1, 40, 0, 512,  64, 2, 0xFC, 2},      // DEC Rainbow double density 5.25" single-sided 200KB (I think...)
+    { 320,  8, 2, 40, 1, 512, 112, 2, 0xFF, 1},      // IBM PC double density 5.25" double-sided 320KB
+    { 360,  9, 2, 40, 1, 512, 112, 2, 0xFD, 2},      // IBM PC double density 5.25" double-sided 360KB
+    { 400, 10, 2, 40, 1, 512, 112, 2, 0xFD, 2},      // DEC Rainbow double density 5.25" double-sided 400KB (I think...)
+    { 640,  8, 2, 80, 3, 512, 112, 2, 0xFB, 2},      // IBM PC double density 3.5" double-sided 640KB
+    { 720,  9, 2, 80, 3, 512, 112, 2, 0xF9, 3},      // IBM PC double density 3.5" double-sided 720KB
+    {1200, 15, 2, 80, 2, 512, 224, 1, 0xF9, 7},      // IBM PC double density 5.25" double-sided 1.2MB
+    {1440, 18, 2, 80, 4, 512, 224, 1, 0xF0, 9},      // IBM PC high density 3.5" double-sided 1.44MB
+    {1680, 21, 2, 80, 4, 512,  16, 4, 0xF0, 3},      // IBM PC high density 3.5" double-sided 1.68MB (DMF)
+    {2880, 36, 2, 80, 6, 512, 240, 2, 0xF0, 9},      // IBM PC high density 3.5" double-sided 2.88MB
 
-    {1232,  8, 2, 77, 7, 1024,192, 1, 0xFE},      // NEC PC-98 high density 3.5" double-sided 1.2MB "3-mode"
-    {1520, 19, 2, 80, 2, 512, 224, 1, 0xF9},      // IBM PC high density 5.25" double-sided 1.52MB (XDF)
-    {1840, 23, 2, 80, 4, 512, 224, 1, 0xF0},      // IBM PC high density 3.5" double-sided 1.84MB (XDF)
+    {1232,  8, 2, 77, 7, 1024,192, 1, 0xFE, 2},      // NEC PC-98 high density 3.5" double-sided 1.2MB "3-mode"
+    {1520, 19, 2, 80, 2, 512, 224, 1, 0xF9, 10},      // IBM PC high density 5.25" double-sided 1.52MB (XDF)
+    {1840, 23, 2, 80, 4, 512, 224, 1, 0xF0, 12},      // IBM PC high density 3.5" double-sided 1.84MB (XDF)
 
-    {   0,  0, 0,  0, 0,    0,  0, 0,    0}
+    {   0,  0, 0,  0, 0,    0,  0, 0,    0, 0}
 };
 
 Bitu call_int13 = 0;
 Bitu diskparm0 = 0, diskparm1 = 0;
-static uint8_t last_status;
+PhysPt floppyparm0 = 0;/* this is a physical memory address! */
+static Int13Status last_status;
 static uint8_t last_drive;
 uint16_t imgDTASeg;
 RealPt imgDTAPtr;
@@ -1191,6 +1179,83 @@ void updateDPT(void) {
         phys_writeb(dpphysaddr[i] + 0xb, 0);
         phys_writew(dpphysaddr[i] + 0xc, (uint16_t)tmpcyl);
         phys_writeb(dpphysaddr[i] + 0xe, (uint8_t)tmpsect);
+    }
+}
+
+
+void updateFloppyDPT(void) {
+    if (floppyparm0) {
+        LOG(LOG_MISC,LOG_DEBUG)("Updating floppy DPT");
+        for (unsigned int fi=0;fi < 2;fi++) {
+            PhysPt tp = floppyparm0 + (fi * 11);
+
+            if (imageDiskList[fi]) {
+                uint32_t tmpheads, tmpcyl, tmpsect, tmpsize;
+                imageDiskList[fi]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
+
+                /* taken from a QEMU VM */
+                phys_writeb(tp+0,0xAF);
+                phys_writeb(tp+1,0x02);
+                phys_writeb(tp+2,0x25);
+
+                /* sector size as a power of 2 from 128 onward */
+                if (tmpsize == 128)
+                    phys_writeb(tp+3,0);
+                else if (tmpsize == 256)
+                    phys_writeb(tp+3,1);
+                else if (tmpsize == 512)
+                    phys_writeb(tp+3,2);
+                else if (tmpsize == 1024)
+                    phys_writeb(tp+3,3);
+                else if (tmpsize == 2048)
+                    phys_writeb(tp+3,4);
+                else
+                    phys_writeb(tp+3,2);
+
+                phys_writeb(tp+4,tmpsect);/*last sector on track*/
+                phys_writeb(tp+5,0x1B);/*Gap length*/
+                phys_writeb(tp+6,0xFF);/*Data transfer length max transfer when length not set*/
+                phys_writeb(tp+7,0x6C);/*Gap length for format operation*/
+                phys_writeb(tp+8,0xF6);/*Fill char for format operation*/
+                phys_writeb(tp+9,0x0F);/*Head settle time in millseconds*/
+                phys_writeb(tp+10,0x08);/*Motor on startup time in 1/8 second units*/
+            }
+            else if (fi == 0) {
+                /* Present it as a 1.44MB drive */
+                uint32_t tmpsect = 18, tmpsize = 512;
+
+                /* taken from a QEMU VM */
+                phys_writeb(tp+0,0xAF);
+                phys_writeb(tp+1,0x02);
+                phys_writeb(tp+2,0x25);
+
+                /* sector size as a power of 2 from 128 onward */
+                if (tmpsize == 128)
+                    phys_writeb(tp+3,0);
+                else if (tmpsize == 256)
+                    phys_writeb(tp+3,1);
+                else if (tmpsize == 512)
+                    phys_writeb(tp+3,2);
+                else if (tmpsize == 1024)
+                    phys_writeb(tp+3,3);
+                else if (tmpsize == 2048)
+                    phys_writeb(tp+3,4);
+                else
+                    phys_writeb(tp+3,2);
+
+                phys_writeb(tp+4,tmpsect);/*last sector on track*/
+                phys_writeb(tp+5,0x1B);/*Gap length*/
+                phys_writeb(tp+6,0xFF);/*Data transfer length max transfer when length not set (GUESS)*/
+                phys_writeb(tp+7,0x6C);/*Gap length for format operation*/
+                phys_writeb(tp+8,0xF6);/*Fill char for format operation*/
+                phys_writeb(tp+9,0x0F);/*Head settle time in millseconds*/
+                phys_writeb(tp+10,0x88);/*Motor on startup time in 1/8 second units*/
+            }
+            else {
+                for (unsigned int i=0;i < 11;i++)
+                    phys_writeb(tp+i,0);
+            }
+        }
     }
 }
 
@@ -1281,7 +1346,13 @@ void swapInDrive(int drive, unsigned int position=0) {
     LOG_MSG("Diskcaching reset for drive %c.", drive+'A');
     if (Drives[drive] != NULL) {
         Drives[drive]->EmptyCache();
-        Drives[drive]->MediaChange();
+
+        isoDrive *isodrv = dynamic_cast<isoDrive*>(Drives[drive]);
+
+        if (isodrv && !dos_kernel_disabled)
+            isodrv->MediaChangeImmediate(); // for IDE, without the media change delay
+        else
+            Drives[drive]->MediaChange(); // for IDE
     }
 }
 
@@ -1305,6 +1376,9 @@ void swapInNextDisk(bool pressed) {
     swapping_requested = true;
 }
 
+void IDE_ATAPI_MediaChangeNotify(signed char index, bool slave, bool immediate);
+void IDE_ATAPI_MediaChangeNotifyAll(bool immediate);
+
 void swapInNextCD(bool pressed) {
     if (!pressed)
         return;
@@ -1314,23 +1388,33 @@ void swapInNextCD(bool pressed) {
     for(Bitu i=2;i<DOS_DRIVES;i++) { /* Swap C: D: .... Z: if it is a CD/DVD drive */
         if (Drives[i] != NULL && dynamic_cast<isoDrive*>(Drives[i]) != NULL) {
             Drives[i]->EmptyCache();
-            Drives[i]->MediaChange();
+
+            isoDrive *isodrv = dynamic_cast<isoDrive*>(Drives[i]);
+
+            if (isodrv && !dos_kernel_disabled)
+                isodrv->MediaChangeImmediate(); // for IDE, without the media change delay
+            else
+                Drives[i]->MediaChange(); // for IDE
         }
     }
+
+    if (!dos_kernel_disabled)
+        IDE_ATAPI_MediaChangeNotifyAll(/*immediate*/true);
+    else
+        IDE_ATAPI_MediaChangeNotifyAll(/*immediate*/false);
 }
 
-
-uint8_t imageDisk::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
+Int13Status imageDisk::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
     uint32_t sectnum;
 
     if (req_sector_size == 0)
         req_sector_size = sector_size;
     if (req_sector_size != sector_size)
-        return 0x05;
+        return Int13Status::SectorNotFound;
 
     if (sector == 0) {
         LOG_MSG("Attempted to read invalid sector 0.");
-        return 0x05;
+        return Int13Status::SectorNotFound;
     }
 
     sectnum = ( (cylinder * heads + head) * sectors ) + sector - 1L;
@@ -1338,7 +1422,7 @@ uint8_t imageDisk::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,v
     return Read_AbsoluteSector(sectnum, data);
 }
 
-uint8_t imageDisk::Read_AbsoluteSector(uint32_t sectnum, void * data) {
+Int13Status imageDisk::Read_AbsoluteSector(uint32_t sectnum, void * data) {
 	if (ffdd) return ffdd->ReadSector(sectnum, data);
 
     uint64_t bytenum,res;
@@ -1347,7 +1431,7 @@ uint8_t imageDisk::Read_AbsoluteSector(uint32_t sectnum, void * data) {
     bytenum = (uint64_t)sectnum * (uint64_t)sector_size;
     if ((bytenum + sector_size) > this->image_length) {
         LOG_MSG("Attempt to read invalid sector in Read_AbsoluteSector for sector %lu.\n", (unsigned long)sectnum);
-        return 0x05;
+        return Int13Status::SectorNotFound;
     }
     bytenum += image_base;
 
@@ -1358,26 +1442,26 @@ uint8_t imageDisk::Read_AbsoluteSector(uint32_t sectnum, void * data) {
     if (res != bytenum) {
         LOG_MSG("fseek() failed in Read_AbsoluteSector for sector %lu. Want=%llu Got=%llu\n",
             (unsigned long)sectnum,(unsigned long long)bytenum,(unsigned long long)res);
-        return 0x05;
+        return Int13Status::SeekFailed;
     }
 
     got = (int)fread(data, 1, sector_size, diskimg);
     if ((unsigned int)got != sector_size) {
         LOG_MSG("fread() failed in Read_AbsoluteSector for sector %lu. Want=%u got=%d\n",
             (unsigned long)sectnum,sector_size,(unsigned int)got);
-        return 0x05;
+        return Int13Status::ControllerFailure;
     }
 
-    return 0x00;
+    return Int13Status::NoError;
 }
 
-uint8_t imageDisk::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
+Int13Status imageDisk::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
     uint32_t sectnum;
 
     if (req_sector_size == 0)
         req_sector_size = sector_size;
     if (req_sector_size != sector_size)
-        return 0x05;
+        return Int13Status::SectorNotFound;
 
     sectnum = ( (cylinder * heads + head) * sectors ) + sector - 1L;
 
@@ -1385,7 +1469,7 @@ uint8_t imageDisk::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,
 }
 
 
-uint8_t imageDisk::Write_AbsoluteSector(uint32_t sectnum, const void *data) {
+Int13Status imageDisk::Write_AbsoluteSector(uint32_t sectnum, const void *data) {
 	if (ffdd) return ffdd->WriteSector(sectnum, data);
 
     uint64_t bytenum;
@@ -1393,7 +1477,7 @@ uint8_t imageDisk::Write_AbsoluteSector(uint32_t sectnum, const void *data) {
     bytenum = (uint64_t)sectnum * sector_size;
     if ((bytenum + sector_size) > this->image_length) {
         LOG_MSG("Attempt to read invalid sector in Write_AbsoluteSector for sector %lu.\n", (unsigned long)sectnum);
-        return 0x05;
+        return Int13Status::SectorNotFound;
     }
     bytenum += image_base;
 
@@ -1405,7 +1489,7 @@ uint8_t imageDisk::Write_AbsoluteSector(uint32_t sectnum, const void *data) {
 
     size_t ret=fwrite(data, sector_size, 1, diskimg);
 
-    return ((ret>0)?0x00:0x05);
+    return ((ret>0)?Int13Status::NoError:Int13Status::ControllerFailure);
 
 }
 
@@ -1427,10 +1511,13 @@ imageDisk::imageDisk(FILE* diskimg, const char* diskName, uint32_t cylinders, ui
     this->heads = heads;
     this->sectors = sectors;
     image_base = 0;
-    this->image_length = (uint64_t)cylinders * heads * sectors * sector_size;
+    if (image_length == 0) image_length = (uint64_t)cylinders * heads * sectors * sector_size;
     refcount = 0;
     this->sector_size = sector_size;
     this->diskSizeK = this->image_length / 1024;
+    LBA = image_length / sector_size;
+    if(!int13_enable_48bitLBA && (LBA > 0x0FFFFFFF))
+        LOG_MSG("Warning: Disk size (%lf GiB) exceeds 128GiB limit for 28-bit LBA. You may need to enable 48-bit LBA support.", (double)image_length / (1024.0 * 1024 * 1024));
     reserved_cylinders = 0;
     this->diskimg = diskimg;
     class_id = ID_BASE;
@@ -1453,10 +1540,10 @@ void imageDisk::UpdateFloppyType(void) {
 	}
 }
 
-imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint32_t imgSizeK, bool isHardDisk) : diskSizeK(imgSizeK), diskimg(imgFile), image_length((uint64_t)imgSizeK * 1024) {
+imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint64_t imgSize, bool isHardDisk) : diskSizeK(imgSize/1024), diskimg(imgFile), image_length(imgSize) {
     if (imgName != NULL)
         diskname = imgName;
-
+    uint64_t imgSizeK = diskSizeK;
     active = false;
     hardDrive = isHardDisk;
     if(!isHardDisk) {
@@ -1651,6 +1738,9 @@ imageDisk::imageDisk(FILE* imgFile, const char* imgName, uint32_t imgSizeK, bool
             }
         }
 
+        LBA = imgSize / sector_size;
+        if(!int13_enable_48bitLBA && (LBA > 0x0FFFFFFF))
+            LOG_MSG("Warning: Disk size (%lf GiB) exceeds 128GiB limit for 28-bit LBA. You may need to enable 48-bit LBA support.", (double)image_length / (1024.0 * 1024 * 1024));
         if (sectors == 0 || heads == 0 || cylinders == 0)
             active = false;
     }
@@ -1674,7 +1764,7 @@ imageDisk::imageDisk(class DOS_Drive *useDrive, unsigned int letter, uint32_t fr
 	diskimg = NULL;
 	diskname[0] = '\0';
 	hardDrive = true;
-	Set_GeometryForHardDisk();
+    Set_GeometryForHardDisk();
 }
 
 imageDisk::~imageDisk()
@@ -1687,48 +1777,106 @@ imageDisk::~imageDisk()
         delete ffdd;
 }
 
+/* var_read() on the packed bootstrap fields below is unaligned-safe by design,
+ * so -Waddress-of-packed-member is a false positive here. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+#endif
 void imageDisk::Set_GeometryForHardDisk()
 {
 	sector_size = 512;
 	partTable mbrData;
-	for (int m = (Read_AbsoluteSector(0, &mbrData) ? 0 : 4); m--;)
+	for (int m = ((Read_AbsoluteSector(0, &mbrData) != Int13Status::NoError) ? 0 : 4); m--;)
 	{
 		if(!mbrData.pentry[m].partSize) continue;
 		bootstrap bootbuffer;
-		if (Read_AbsoluteSector(mbrData.pentry[m].absSectStart, &bootbuffer)) continue;
+		if (Read_AbsoluteSector(mbrData.pentry[m].absSectStart, &bootbuffer) != Int13Status::NoError) continue;
 		bootbuffer.sectorspertrack = var_read(&bootbuffer.sectorspertrack);
 		bootbuffer.headcount = var_read(&bootbuffer.headcount);
 		uint32_t setSect = bootbuffer.sectorspertrack;
 		uint32_t setHeads = bootbuffer.headcount;
 		uint32_t setCyl = (mbrData.pentry[m].absSectStart + mbrData.pentry[m].partSize) / (setSect * setHeads);
 		Set_Geometry(setHeads, setCyl, setSect, 512);
-		return;
+        if(image_length == 0) {
+            LBA = (uint64_t)setCyl * setHeads * setSect;
+            image_length = (uint64_t)LBA * sector_size;
+        }
+        return;
 	}
 	if (!diskimg) return;
-	uint32_t diskimgsize;
+    uint32_t diskimgsize;
 	fseek(diskimg,0,SEEK_END);
 	diskimgsize = (uint32_t)ftell(diskimg);
-	fseek(diskimg,current_fpos,SEEK_SET);
-	Set_Geometry(16, diskimgsize / (512 * 63 * 16), 63, 512);
+    fseek(diskimg,current_fpos,SEEK_SET);
+    image_length = diskimgsize;
+    LBA = (uint64_t)diskimgsize / sector_size;
+    Set_Geometry(16, diskimgsize / (512 * 63 * 16), 63, 512);
 }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 void imageDisk::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) {
-    Bitu bigdisk_shift = 0;
+
+    uint64_t total_sectors = (uint64_t)setHeads * (uint64_t)setCyl * (uint64_t)setSect;
+    sectors = 63; // Default to 63 sectors per track.
+    heads = 16;   // Default to 16 heads.
+
+    if(((setSectSize & (setSectSize - 1)) != 0)) {
+        LOG_MSG("bios_disk: Invalid sector size %u, must be a power of 2.", setSectSize);
+        active = false;
+        return;
+    }
+
+    if(total_sectors == 0) {
+        LOG_MSG("bios_disk: Invalid disk geometry C, H, S = %u, %u, %u", setCyl, setHeads, setSect);
+        active = false;
+        return;
+    }
+    else if (total_sectors > 1024ULL * 255ULL * 63ULL) {
+        LOG_MSG("bios_disk: Disk geometry C, H, S = %u, %u, %u exceeds 8.4GB disk size, setting to max limits", setCyl, setHeads, setSect);
+        cylinders = 1024;
+        heads = 255;
+        sectors = 63;
+        sector_size = setSectSize;
+        active = true;
+        return;
+    }
+
+    // Use the provided geometry, if it is valid
+    if(setCyl > 0 && setHeads > 0 && setSect > 0 && (setCyl <= 1024 || IS_PC98_ARCH) && setHeads <= 255 && setSect <= 63) {
+        cylinders = setCyl;
+        heads = setHeads;
+        sectors = setSect;
+        sector_size = setSectSize;
+        active = true;
+        return;
+    }
 
     if (IS_PC98_ARCH) {
-        /* TODO: PC-98 has its own 4096 cylinder limit */
-    }
-    else {
-        if(setCyl > 16384) LOG_MSG("Warning: This disk image is too big.");
-        else if(setCyl > 8192) bigdisk_shift = 4;
-        else if(setCyl > 4096) bigdisk_shift = 3;
-        else if(setCyl > 2048) bigdisk_shift = 2;
-        else if(setCyl > 1024) bigdisk_shift = 1;
+        /* TODO: Some early PC-98 SCSI BIOS has its own 4096 cylinder (12-bit) limit */
     }
 
-    heads = setHeads << bigdisk_shift;
-    cylinders = setCyl >> bigdisk_shift;
-    sectors = setSect;
+    if(total_sectors < 17ULL * 1024 * 16)
+        sectors = 17;
+    else if(total_sectors < 32ULL * 1024 * 16)
+        sectors = 32;
+    else
+        sectors = 63;
+
+    while(heads < 255) {
+        uint64_t test_cyl =
+            total_sectors / ((uint64_t)heads * sectors);
+        if(test_cyl <= 1024)
+            break;
+        heads <<= 1;
+        if(heads > 255) {
+            heads = 255;
+            break;
+        }
+    }
+    cylinders = (uint32_t)(total_sectors / ((uint32_t)heads * sectors));
     sector_size = setSectSize;
     active = true;
 }
@@ -1773,19 +1921,19 @@ static bool driveInactive(uint8_t driveNum) {
     if(driveNum>=MAX_DISK_IMAGES) {
         int driveCalledFor = reg_dl & 0x7f;
         LOG(LOG_BIOS,LOG_ERROR)("Disk %d non-existent", driveCalledFor);
-        last_status = 0x01;
+        last_status = Int13Status::BadCommand;
         CALLBACK_SCF(true);
         return true;
     }
     if(imageDiskList[driveNum] == NULL) {
         LOG(LOG_BIOS,LOG_ERROR)("Disk %d not active", (int)driveNum);
-        last_status = 0x01;
+        last_status = Int13Status::BadCommand;
         CALLBACK_SCF(true);
         return true;
     }
     if(!imageDiskList[driveNum]->active) {
         LOG(LOG_BIOS,LOG_ERROR)("Disk %d not active", (int)driveNum);
-        last_status = 0x01;
+        last_status = Int13Status::BadCommand;
         CALLBACK_SCF(true);
         return true;
     }
@@ -1819,24 +1967,38 @@ static void readDAP(uint16_t seg, uint16_t off) {
 
 void IDE_ResetDiskByBIOS(unsigned char disk);
 void IDE_EmuINT13DiskReadByBIOS(unsigned char disk,unsigned int cyl,unsigned int head,unsigned sect);
-bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32_t &sect,uint32_t &size);
+bool IDE_GetPhysGeometry(unsigned char disk,uint32_t &heads,uint32_t &cyl,uint32_t &sect,uint32_t &size, uint64_t &LBA);
 void IDE_EmuINT13DiskReadByBIOS_LBA(unsigned char disk,uint64_t lba);
 
 void diskio_delay(Bits value/*bytes*/, int type = -1);
 
 /* For El Torito "No emulation" INT 13 services */
 unsigned char INT13_ElTorito_NoEmuDriveNumber = 0;
+CDROM_Interface * INT13_ElTorito_cdrom = NULL;
 signed char INT13_ElTorito_IDEInterface = -1; /* (controller * 2) + (is_slave?1:0) */
 char INT13_ElTorito_NoEmuCDROMDrive = 0;
 
 bool GetMSCDEXDrive(unsigned char drive_letter, CDROM_Interface **_cdrom);
 
+/* Bytes/sector for a floppy transfer as a real BIOS would use it: taken from the disk
+ * base table pointed to by INT 1Eh (offset +3, sector-size code 0=128,1=256,2=512,3=1024,...)
+ * rather than assuming 512. A guest may reprogram INT 1Eh to access non-512 media. */
+static uint32_t floppyDPT_sector_size(void) {
+    RealPt dpt = RealGetVec(0x1E);
+    if (dpt) {
+        uint8_t code = real_readb(RealSeg(dpt), RealOff(dpt) + 3);
+        if (code <= 6) return 128u << code;
+    }
+    return 512;
+}
 
 static Bitu INT13_DiskHandler(void) {
     uint16_t segat, bufptr;
     uint8_t sectbuf[2048/*CD-ROM support*/];
     uint8_t  drivenum;
     Bitu  i,t;
+    uint32_t rd_cyl = 0, rd_sect = 0, secsz = 512;
+    uint64_t LBA = 0;
     last_drive = reg_dl;
     drivenum = GetDosDriveNumber(reg_dl);
     bool any_images = false;
@@ -1868,11 +2030,11 @@ static Bitu INT13_DiskHandler(void) {
              */
             if (any_images && driveInactive(drivenum)) {
                 /* driveInactive sets carry flag if the specified drive is not available */
-                if ((machine==MCH_CGA) || (machine==MCH_AMSTRAD) || (machine==MCH_PCJR)) {
+                if ((machine==MCH_CGA) || (machine==MCH_AMSTRAD) || (machine==MCH_PCJR) || (machine==MCH_OLIVETTI) || (machine==MCH_3270PC)) {
                     /* those bioses call floppy drive reset for invalid drive values */
                     if (((imageDiskList[0]) && (imageDiskList[0]->active)) || ((imageDiskList[1]) && (imageDiskList[1]->active))) {
                         if (machine!=MCH_PCJR && reg_dl<0x80) reg_ip++;
-                        last_status = 0x00;
+                        last_status = Int13Status::NoError;
                         CALLBACK_SCF(false);
                     }
                 }
@@ -1880,14 +2042,14 @@ static Bitu INT13_DiskHandler(void) {
             }
             if (machine!=MCH_PCJR && reg_dl<0x80) reg_ip++;
             if (reg_dl >= 0x80) IDE_ResetDiskByBIOS(reg_dl);
-            last_status = 0x00;
+            last_status = Int13Status::NoError;
             CALLBACK_SCF(false);
         }
         break;
     case 0x1: /* Get status of last operation */
 
-        if(last_status != 0x00) {
-            reg_ah = last_status;
+        if(last_status != Int13Status::NoError) {
+            reg_ah = (uint8_t)last_status;
             CALLBACK_SCF(true);
         } else {
             reg_ah = 0x00;
@@ -1949,27 +2111,40 @@ static Bitu INT13_DiskHandler(void) {
             return CBRET_NONE;
         }
 
+        /* Floppies (DL bit 7 clear) use an 8-bit cylinder in CH and an 8-bit sector in CL.
+         * Hard disks (DL bit 7 set) use a 10-bit cylinder (upper 2 bits in CL bits 6-7)
+         * and a 6-bit sector (CL bits 0-5). */
+        rd_cyl  = (reg_dl & 0x80) ? (uint32_t)(reg_ch | ((reg_cl & 0xc0) << 2)) : (uint32_t)reg_ch;
+        rd_sect = (reg_dl & 0x80) ? (uint32_t)(reg_cl & 63) : (uint32_t)reg_cl;
         segat = SegValue(es);
         bufptr = reg_bx;
+        /* Floppies transfer the bytes/sector given by the INT 1Eh disk base table; hard disks use 512. */
+        secsz = (reg_dl & 0x80) ? 512 : floppyDPT_sector_size();
+        if (secsz > sizeof(sectbuf)) {
+            LOG(LOG_BIOS,LOG_ERROR)("INT 13h: DPT bytes/sector %u exceeds buffer, clamping to %u",(unsigned int)secsz,(unsigned int)sizeof(sectbuf));
+            secsz = sizeof(sectbuf);
+        }
         for(i=0;i<reg_al;i++) {
-            last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)((reg_cl & 63)+i), sectbuf);
+            last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, rd_cyl, rd_sect+i, sectbuf);
 
-            if (drivenum < 2)
+            if (imageDiskList[drivenum]->class_id == imageDisk::ID_EL_TORITO_FLOPPY)
+                diskio_delay(512);
+            else if (drivenum < 2)
                 diskio_delay(512, 0); // Floppy
             else
                 diskio_delay(512);
 
             /* IDE emulation: simulate change of IDE state that would occur on a real machine after INT 13h */
-            IDE_EmuINT13DiskReadByBIOS(reg_dl, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)reg_dh, (uint32_t)((reg_cl & 63)+i));
+            IDE_EmuINT13DiskReadByBIOS(reg_dl, rd_cyl, (uint32_t)reg_dh, rd_sect+i);
 
-            if((last_status != 0x00) || killRead) {
+            if((last_status != Int13Status::NoError) || killRead) {
                 LOG_MSG("Error in disk read");
                 killRead = false;
-                reg_ah = 0x04;
+                reg_ah = (last_status != Int13Status::NoError) ? (uint8_t)last_status : (uint8_t)Int13Status::SectorNotFound;
                 CALLBACK_SCF(true);
                 return CBRET_NONE;
             }
-            for(t=0;t<512;t++) {
+            for(t=0;t<secsz;t++) {
                 real_writeb(segat,bufptr,sectbuf[t]);
                 bufptr++;
             }
@@ -1999,9 +2174,18 @@ static Bitu INT13_DiskHandler(void) {
             return CBRET_NONE;
         }
 
+        /* See INT 13h AH=02h read: floppies use 8-bit cylinder/8-bit sector, hard disks 10-bit/6-bit. */
+        rd_cyl  = (reg_dl & 0x80) ? (uint32_t)(reg_ch | ((reg_cl & 0xc0) << 2)) : (uint32_t)reg_ch;
+        rd_sect = (reg_dl & 0x80) ? (uint32_t)(reg_cl & 63) : (uint32_t)reg_cl;
         bufptr = reg_bx;
+        /* Floppies transfer the bytes/sector given by the INT 1Eh disk base table; hard disks use the image sector size. */
+        secsz = (reg_dl & 0x80) ? imageDiskList[drivenum]->getSectSize() : floppyDPT_sector_size();
+        if (secsz > sizeof(sectbuf)) {
+            LOG(LOG_BIOS,LOG_ERROR)("INT 13h: DPT bytes/sector %u exceeds buffer, clamping to %u",(unsigned int)secsz,(unsigned int)sizeof(sectbuf));
+            secsz = sizeof(sectbuf);
+        }
         for(i=0;i<reg_al;i++) {
-            for(t=0;t<imageDiskList[drivenum]->getSectSize();t++) {
+            for(t=0;t<secsz;t++) {
                 sectbuf[t] = real_readb(SegValue(es),bufptr);
                 bufptr++;
             }
@@ -2011,9 +2195,10 @@ static Bitu INT13_DiskHandler(void) {
             else
                 diskio_delay(512);
 
-            last_status = imageDiskList[drivenum]->Write_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0) << 2)), (uint32_t)((reg_cl & 63) + i), &sectbuf[0]);
-            if(last_status != 0x00) {
-            CALLBACK_SCF(true);
+            last_status = imageDiskList[drivenum]->Write_Sector((uint32_t)reg_dh, rd_cyl, rd_sect + i, &sectbuf[0]);
+            if(last_status != Int13Status::NoError) {
+                reg_ah = (uint8_t)last_status;
+                CALLBACK_SCF(true);
                 return CBRET_NONE;
             }
         }
@@ -2027,7 +2212,7 @@ static Bitu INT13_DiskHandler(void) {
             return CBRET_NONE;
         }
         if(driveInactive(drivenum)) {
-            reg_ah = last_status;
+            reg_ah = (uint8_t)last_status;
             return CBRET_NONE;
         }
 
@@ -2036,7 +2221,7 @@ static Bitu INT13_DiskHandler(void) {
         segat = SegValue(es);
         bufptr = reg_bx;
         for(i=0;i<reg_al;i++) {
-            last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)((reg_cl & 63)+i), sectbuf);
+            last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, rd_cyl, rd_sect+i, sectbuf);
             if(last_status != 0x00) {
                 LOG_MSG("Error in disk read");
                 CALLBACK_SCF(true);
@@ -2089,8 +2274,30 @@ static Bitu INT13_DiskHandler(void) {
         break;
     case 0x08: /* Get drive parameters */
         if(driveInactive(drivenum)) {
-            last_status = 0x07;
-            reg_ah = last_status;
+            if(drivenum == 0) {
+                // if no floppy drive 0 mounted, return fixed values for 1.44MB drive
+                // This fixes a problem in some DOS applications that occurred when booting from the hard disk without a mounted floppy disk.
+                reg_ax = 0x00;
+                reg_bl = 4;
+                reg_ch = 79;
+                reg_cl = 18;
+                reg_dh = 1;
+                reg_dl = 1;
+                last_status = Int13Status::NoError;
+                CALLBACK_SCF(false);
+                {/*fill in ES:DI*/
+                    /* Even though BIOSes document vectors pointed at tables,
+                     * return the address in BIOS because Windows 95 apparently
+                     * likes to replace INT 0x1E with a pointer to whatever else
+                     * it decides, and then complain that the floppy controller
+                     * isn't working without ever touching I/O ports. What a jackass. */
+                    reg_di = floppyparm0 & 0xFu;
+                    CPU_SetSegGeneral(es,floppyparm0 >> 4u);
+                }
+                return CBRET_NONE;
+            }
+            last_status = Int13Status::DriveParamFailed;
+            reg_ah = (uint8_t)last_status;
             CALLBACK_SCF(true);
             return CBRET_NONE;
         }
@@ -2112,15 +2319,34 @@ static Bitu INT13_DiskHandler(void) {
         }
 
         reg_ch = (uint8_t)(tmpcyl & 0xff);
-        reg_cl = (uint8_t)(((tmpcyl >> 2) & 0xc0) | (tmpsect & 0x3f)); 
+        if (reg_dl & 0x80) /* hard disk: 10-bit cylinder, 6-bit sector */
+            reg_cl = (uint8_t)(((tmpcyl >> 2) & 0xc0) | (tmpsect & 0x3f));
+        else /* floppy: 8-bit cylinder in CH, 8-bit sector in CL */
+            reg_cl = (uint8_t)(tmpsect & 0xff);
         reg_dh = (uint8_t)tmpheads;
-        last_status = 0x00;
+        last_status = Int13Status::NoError;
         if (reg_dl&0x80) {  // harddisks
+            /* do NOT fill in ES:DI for hard disks, it causes Windows 95 to crash at startup! */
             reg_dl = 0;
             for (int index = 2; index < MAX_DISK_IMAGES; index++) {
                 if (imageDiskList[index] != NULL) reg_dl++;
             }
         } else {        // floppy disks
+            {/*fill in ES:DI*/
+                /* Even though BIOSes document vectors pointed at tables,
+                 * return the address in BIOS because Windows 95 apparently
+                 * likes to replace INT 0x1E with a pointer to whatever else
+                 * it decides, and then complain that the floppy controller
+                 * isn't working without ever touching I/O ports. What a jackass. */
+                if (reg_dl < 2) {
+                    reg_di = (floppyparm0 & 0xFu) + (reg_dl * 11u);
+                    CPU_SetSegGeneral(es,floppyparm0 >> 4u);
+                }
+                else {
+                    reg_di = 0;
+                    CPU_SetSegGeneral(es,0);
+                }
+            }
             reg_dl = 0;
             if(imageDiskList[0] != NULL) reg_dl++;
             if(imageDiskList[1] != NULL) reg_dl++;
@@ -2136,8 +2362,8 @@ static Bitu INT13_DiskHandler(void) {
         LOG(LOG_BIOS,LOG_WARN)("INT13: Get disktype used!");
         if (any_images) {
             if(driveInactive(drivenum)) {
-                last_status = 0x07;
-                reg_ah = last_status;
+                last_status = Int13Status::DriveParamFailed;
+                reg_ah = (uint8_t)last_status;
                 CALLBACK_SCF(true);
                 return CBRET_NONE;
             }
@@ -2176,26 +2402,26 @@ static Bitu INT13_DiskHandler(void) {
 	if (int13_disk_change_detect_enable) {
 		LOG(LOG_BIOS,LOG_WARN)("INT 13: Detect disk change");
 		if(driveInactive(drivenum)) {
-			last_status = 0x80;
-			reg_ah = last_status;
+			last_status = Int13Status::Timeout;
+			reg_ah = (uint8_t)last_status;
 			CALLBACK_SCF(true);
 		}
 		else if (drivenum < 2) {
 			if (imageDiskChange[drivenum]) {
 				imageDiskChange[drivenum] = false;
-				last_status = 0x06; // change line active
-				reg_ah = last_status;
+				last_status = Int13Status::DiskChanged; // change line active
+				reg_ah = (uint8_t)last_status;
 				CALLBACK_SCF(true);
 			}
 			else {
-				last_status = 0x00; // no change
-				reg_ah = last_status;
+				last_status = Int13Status::NoError; // no change
+				reg_ah = (uint8_t)last_status;
 				CALLBACK_SCF(false);
 			}
 		}
 		else {
-			last_status = 0x06; // not supported (because it's a hard drive)
-			reg_ah = last_status;
+			last_status = Int13Status::DiskChanged; // not supported (because it's a hard drive)
+			reg_ah = (uint8_t)last_status;
 			CALLBACK_SCF(true);
 		}
 	}
@@ -2232,12 +2458,13 @@ static Bitu INT13_DiskHandler(void) {
             return CBRET_NONE;
         }
         if (INT13_ElTorito_NoEmuDriveNumber != 0 && INT13_ElTorito_NoEmuDriveNumber == reg_dl) {
-                CDROM_Interface *src_drive = NULL;
-                if (!GetMSCDEXDrive(INT13_ElTorito_NoEmuCDROMDrive - 'A', &src_drive)) {
+		if (!INT13_ElTorito_cdrom) {
                         reg_ah = 0x01;
                         CALLBACK_SCF(true);
                         return CBRET_NONE;
                 }
+
+                CDROM_Interface *src_drive = INT13_ElTorito_cdrom;
 
                 segat = dap.seg;
                 bufptr = dap.off;
@@ -2250,6 +2477,7 @@ static Bitu INT13_DiskHandler(void) {
                                 killRead = false;
                                 reg_ah = 0x04;
                                 CALLBACK_SCF(true);
+                                src_drive->Release();
                                 return CBRET_NONE;
                         }
 
@@ -2289,11 +2517,11 @@ static Bitu INT13_DiskHandler(void) {
 
             IDE_EmuINT13DiskReadByBIOS_LBA(reg_dl,dap.sector+i);
 
-            if((last_status != 0x00) || killRead) {
+            if((last_status != Int13Status::NoError) || killRead) {
                 real_writew(SegValue(ds),reg_si+2,i); // According to RBIL this should update the number of blocks field to what was successfully transferred
                 LOG_MSG("Error in disk read");
                 killRead = false;
-                reg_ah = 0x04;
+                reg_ah = (last_status != Int13Status::NoError) ? (uint8_t)last_status : (uint8_t)Int13Status::SectorNotFound;
                 CALLBACK_SCF(true);
                 return CBRET_NONE;
             }
@@ -2334,7 +2562,8 @@ static Bitu INT13_DiskHandler(void) {
                 diskio_delay(512);
 
             last_status = imageDiskList[drivenum]->Write_AbsoluteSector(dap.sector+i, &sectbuf[0]);
-            if(last_status != 0x00) {
+            if(last_status != Int13Status::NoError) {
+                reg_ah = (uint8_t)last_status;
                 CALLBACK_SCF(true);
                 return CBRET_NONE;
             }
@@ -2373,16 +2602,17 @@ static Bitu INT13_DiskHandler(void) {
         else bufsz = 0x1A;
 
         tmpheads = tmpcyl = tmpsect = tmpsize = 0;
-        if (!IDE_GetPhysGeometry(drivenum,tmpheads,tmpcyl,tmpsect,tmpsize))
-                imageDiskList[drivenum]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
-
+        if(!IDE_GetPhysGeometry(drivenum, tmpheads, tmpcyl, tmpsect, tmpsize, LBA)) {
+            imageDiskList[drivenum]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
+            LBA = imageDiskList[drivenum]->getLBA();
+        }
         real_writew(segat,bufptr+0x00,bufsz);
         real_writew(segat,bufptr+0x02,0x0003);  /* C/H/S valid, DMA boundary errors handled */
         real_writed(segat,bufptr+0x04,tmpcyl);
         real_writed(segat,bufptr+0x08,tmpheads);
         real_writed(segat,bufptr+0x0C,tmpsect);
-        real_writed(segat,bufptr+0x10,tmpcyl*tmpheads*tmpsect);
-        real_writed(segat,bufptr+0x14,0);
+        real_writed(segat,bufptr+0x10, int13_enable_48bitLBA?(uint32_t)(LBA & 0xFFFFFFFF): (uint32_t)(LBA > 0x0FFFFFFF?0x0FFFFFFF:LBA)); /* LBA lower 32bit */
+        real_writed(segat,bufptr+0x14, int13_enable_48bitLBA?(uint32_t)(LBA >> 32):0); /* LBA upper 32bit */
         real_writew(segat,bufptr+0x18,512);
         if (bufsz >= 0x1E)
             real_writed(segat,bufptr+0x1A,0xFFFFFFFF); /* no EDD information available */
@@ -2490,1078 +2720,14 @@ void BIOS_SetupDisks(void) {
 
     imgDTASeg = 0;
 
+    floppyparm0 = ROMBIOS_GetMemory(11*2/*two tables*/,"BIOS Floppy parameter tables",1,0);
+    RealSetVec(0x1E,RealMake(floppyparm0 >> 4u,floppyparm0 & 0xFu));
+    updateFloppyDPT();
 /* Setup the Bios Area */
     mem_writeb(BIOS_HARDDISK_COUNT,2);
 
     killRead = false;
     swapping_requested = false;
-}
-
-// VFD *.FDD floppy disk format support
-
-uint8_t imageDiskVFD::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
-    const vfdentry *ent;
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-//    LOG_MSG("VFD read sector: CHS %u/%u/%u sz=%u",cylinder,head,sector,req_sector_size);
-
-    ent = findSector(head,cylinder,sector,req_sector_size);
-    if (ent == NULL) return 0x05;
-    if (ent->getSectorSize() != req_sector_size) return 0x05;
-
-    if (ent->hasSectorData()) {
-        fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-        if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-        if (fread(data,req_sector_size,1,diskimg) != 1) return 0x05;
-        return 0;
-    }
-    else if (ent->hasFill()) {
-        memset(data,ent->fillbyte,req_sector_size);
-        return 0x00;
-    }
-
-    return 0x05;
-}
-
-uint8_t imageDiskVFD::Read_AbsoluteSector(uint32_t sectnum, void * data) {
-    unsigned int c,h,s;
-
-    if (sectors == 0 || heads == 0)
-        return 0x05;
-
-    s = (sectnum % sectors) + 1;
-    h = (sectnum / sectors) % heads;
-    c = (sectnum / sectors / heads);
-    return Read_Sector(h,c,s,data);
-}
-
-imageDiskVFD::vfdentry *imageDiskVFD::findSector(uint8_t head,uint8_t track,uint8_t sector/*TODO: physical head?*/,unsigned int req_sector_size) {
-    std::vector<imageDiskVFD::vfdentry>::iterator i = dents.begin();
-    unsigned char szb=0xFF;
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-    if (req_sector_size != ~0U) {
-        unsigned int c = req_sector_size;
-        while (c >= 128U) {
-            c >>= 1U;
-            szb++;
-        }
-
-//        LOG_MSG("req=%u c=%u szb=%u",req_sector_size,c,szb);
-
-        if (szb > 8 || c != 64U)
-            return NULL;
-    }
-
-    while (i != dents.end()) {
-        const imageDiskVFD::vfdentry &ent = *i;
-
-        if (ent.head == head &&
-            ent.track == track &&
-            ent.sector == sector &&
-            (ent.sizebyte == szb || req_sector_size == ~0U))
-            return &(*i);
-
-        ++i;
-    }
-
-    return NULL;
-}
-
-uint8_t imageDiskVFD::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
-    unsigned long new_offset;
-    unsigned char tmp[12];
-    vfdentry *ent;
-
-//    LOG_MSG("VFD write sector: CHS %u/%u/%u",cylinder,head,sector);
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-    ent = findSector(head,cylinder,sector,req_sector_size);
-    if (ent == NULL) return 0x05;
-    if (ent->getSectorSize() != req_sector_size) return 0x05;
-
-    if (ent->hasSectorData()) {
-        fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-        if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-        if (fwrite(data,req_sector_size,1,diskimg) != 1) return 0x05;
-        return 0;
-    }
-    else if (ent->hasFill()) {
-        bool isfill = false;
-
-        /* well, is the data provided one character repeated?
-         * note the format cannot represent a fill byte of 0xFF */
-        if (((unsigned char*)data)[0] != 0xFF) {
-            unsigned int i=1;
-
-            do {
-                if (((unsigned char*)data)[i] == ((unsigned char*)data)[0]) {
-                    if ((++i) == req_sector_size) {
-                        isfill = true;
-                        break; // yes!
-                    }
-                }
-                else {
-                    break; // nope
-                }
-            } while (1);
-        }
-
-        if (ent->entry_offset == 0) return 0x05;
-
-        if (isfill) {
-            fseek(diskimg,(long)ent->entry_offset,SEEK_SET);
-            if ((uint32_t)ftell(diskimg) != ent->entry_offset) return 0x05;
-            if (fread(tmp,12,1,diskimg) != 1) return 0x05;
-
-            tmp[0x04] = ((unsigned char*)data)[0]; // change the fill byte
-
-            LOG_MSG("VFD write: 'fill' sector changing fill byte to 0x%x",tmp[0x04]);
-
-            fseek(diskimg,(long)ent->entry_offset,SEEK_SET);
-            if ((uint32_t)ftell(diskimg) != ent->entry_offset) return 0x05;
-            if (fwrite(tmp,12,1,diskimg) != 1) return 0x05;
-        }
-        else {
-            fseek(diskimg,0,SEEK_END);
-            new_offset = (unsigned long)ftell(diskimg);
-
-            /* we have to change it from a fill sector to an actual sector */
-            LOG_MSG("VFD write: changing 'fill' sector to one with data (data at %lu)",(unsigned long)new_offset);
-
-            fseek(diskimg,(long)ent->entry_offset,SEEK_SET);
-            if ((uint32_t)ftell(diskimg) != ent->entry_offset) return 0x05;
-            if (fread(tmp,12,1,diskimg) != 1) return 0x05;
-
-            tmp[0x00] = ent->track;
-            tmp[0x01] = ent->head;
-            tmp[0x02] = ent->sector;
-            tmp[0x03] = ent->sizebyte;
-            tmp[0x04] = 0xFF; // no longer a fill byte
-            tmp[0x05] = 0x00; // TODO ??
-            tmp[0x06] = 0x00; // TODO ??
-            tmp[0x07] = 0x00; // TODO ??
-            *((uint32_t*)(tmp+8)) = new_offset;
-            ent->fillbyte = 0xFF;
-            ent->data_offset = (uint32_t)new_offset;
-
-            fseek(diskimg,(long)ent->entry_offset,SEEK_SET);
-            if ((uint32_t)ftell(diskimg) != ent->entry_offset) return 0x05;
-            if (fwrite(tmp,12,1,diskimg) != 1) return 0x05;
-
-            fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-            if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-            if (fwrite(data,req_sector_size,1,diskimg) != 1) return 0x05;
-        }
-    }
-
-    return 0x05;
-}
-
-uint8_t imageDiskVFD::Write_AbsoluteSector(uint32_t sectnum,const void *data) {
-    unsigned int c,h,s;
-
-    if (sectors == 0 || heads == 0)
-        return 0x05;
-
-    s = (sectnum % sectors) + 1;
-    h = (sectnum / sectors) % heads;
-    c = (sectnum / sectors / heads);
-    return Write_Sector(h,c,s,data);
-}
-
-imageDiskVFD::imageDiskVFD(FILE *imgFile, const char *imgName, uint32_t imgSizeK, bool isHardDisk) : imageDisk(ID_VFD) {
-    (void)isHardDisk;//UNUSED
-    unsigned char tmp[16];
-
-    heads = 1;
-    cylinders = 0;
-    image_base = 0;
-    sectors = 0;
-    active = false;
-    sector_size = 0;
-    reserved_cylinders = 0;
-    diskSizeK = imgSizeK;
-    diskimg = imgFile;
-
-    if (imgName != NULL)
-        diskname = imgName;
-
-    // NOTES:
-    // 
-    //  +0x000: "VFD1.00"
-    //  +0x0DC: array of 12-byte entries each describing a sector
-    //
-    //  Each entry:
-    //  +0x0: track
-    //  +0x1: head
-    //  +0x2: sector
-    //  +0x3: sector size (128 << this byte)
-    //  +0x4: fill byte, or 0xFF
-    //  +0x5: unknown
-    //  +0x6: unknown
-    //  +0x7: unknown
-    //  +0x8: absolute data offset (32-bit integer) or 0xFFFFFFFF if the entire sector is that fill byte
-    fseek(diskimg,0,SEEK_SET);
-    memset(tmp,0,8);
-    size_t readResult = fread(tmp,1,8,diskimg);
-    if (readResult != 8) {
-            LOG(LOG_IO, LOG_ERROR) ("Reading error in imageDiskVFD constructor\n");
-            return;
-    }
-
-    if (!memcmp(tmp,"VFD1.",5)) {
-        uint32_t stop_at = 0xC3FC;
-        unsigned long entof;
-
-        // load table.
-        // we have to determine as we go where to stop reading.
-        // the source of info I read assumes the whole header (and table)
-        // is 0xC3FC bytes. I'm not inclined to assume that, so we go by
-        // that OR the first sector offset whichever is smaller.
-        // the table seems to trail off into a long series of 0xFF at the end.
-        fseek(diskimg,0xDC,SEEK_SET);
-        while ((entof=((unsigned long)ftell(diskimg)+12ul)) <= stop_at) {
-            memset(tmp,0xFF,12);
-            readResult = fread(tmp,12,1,diskimg);
-            if (readResult != 1) {
-                LOG(LOG_IO, LOG_ERROR) ("Reading error in imageDiskVFD constructor\n");
-                return;
-            }
-
-            if (!memcmp(tmp,"\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF",12))
-                continue;
-            if (!memcmp(tmp,"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",12))
-                continue;
-
-            struct vfdentry v;
-
-            v.track = tmp[0];
-            v.head = tmp[1];
-            v.sector = tmp[2];
-            v.sizebyte = tmp[3];
-            v.fillbyte = tmp[4];
-            v.data_offset = *((uint32_t*)(tmp+8));
-            v.entry_offset = (uint32_t)entof;
-
-            // maybe the table can end sooner than 0xC3FC?
-            // if we see sectors appear at an offset lower than our stop_at point
-            // then adjust the stop_at point. assume the table cannot mix with
-            // sector data.
-            if (v.hasSectorData()) {
-                if (stop_at > v.data_offset)
-                    stop_at = v.data_offset;
-            }
-
-            dents.push_back(v);
-
-            LOG_MSG("VFD entry: track=%u head=%u sector=%u size=%u fill=0x%2X has_data=%u has_fill=%u entoff=%lu dataoff=%lu",
-                v.track,
-                v.head,
-                v.sector,
-                v.getSectorSize(),
-                v.fillbyte,
-                v.hasSectorData(),
-                v.hasFill(),
-                (unsigned long)v.entry_offset,
-                (unsigned long)v.data_offset);
-        }
-
-        if (!dents.empty()) {
-            /* okay, now to figure out what the geometry of the disk is.
-             * we cannot just work from an "absolute" disk image model
-             * because there's no VFD header to just say what the geometry is.
-             * Like the IBM PC BIOS, we have to look at the disk and figure out
-             * which geometry to apply to it, even if the FDD format allows
-             * sectors on other tracks to have wild out of range sector, track,
-             * and head numbers or odd sized sectors.
-             *
-             * First, determine sector size according to the boot sector. */
-            const vfdentry *ent;
-
-            ent = findSector(/*head*/0,/*track*/0,/*sector*/1,~0U);
-            if (ent != NULL) {
-                if (ent->sizebyte <= 3) /* x <= 1024 */
-                    sector_size = ent->getSectorSize();
-            }
-
-            /* oh yeah right, sure.
-             * I suppose you're one of those FDD images where the sector size is 128 bytes/sector
-             * in the boot sector and the rest is 256 bytes/sector elsewhere. I have no idea why
-             * but quite a few FDD images have this arrangement. */
-            if (sector_size != 0 && sector_size < 512) {
-                ent = findSector(/*head*/0,/*track*/1,/*sector*/1,~0U);
-                if (ent != NULL) {
-                    if (ent->sizebyte <= 3) { /* x <= 1024 */
-                        unsigned int nsz = ent->getSectorSize();
-                        if (sector_size != nsz)
-                            LOG_MSG("VFD warning: sector size changes between track 0 and 1");
-                        if (sector_size < nsz)
-                            sector_size = nsz;
-                    }
-                }
-            }
-
-            uint8_t i;
-            if (sector_size != 0) {
-                i=0;
-                while (DiskGeometryList[i].ksize != 0) {
-                    const diskGeo &diskent = DiskGeometryList[i];
-
-                    if (diskent.bytespersect == sector_size) {
-                        ent = findSector(0,0,diskent.secttrack);
-                        if (ent != NULL) {
-                            LOG_MSG("VFD disk probe: %u/%u/%u exists",0,0,diskent.secttrack);
-                            if (sectors < diskent.secttrack)
-                                sectors = diskent.secttrack;
-                        }
-                    }
-
-                    i++;
-                }
-            }
-
-            if (sector_size != 0 && sectors != 0) {
-                i=0;
-                while (DiskGeometryList[i].ksize != 0) {
-                    const diskGeo &diskent = DiskGeometryList[i];
-
-                    if (diskent.bytespersect == sector_size && diskent.secttrack >= sectors) {
-                        ent = findSector(0,diskent.cylcount-1,sectors);
-                        if (ent != NULL) {
-                            LOG_MSG("VFD disk probe: %u/%u/%u exists",0,diskent.cylcount-1,sectors);
-                            if (cylinders < diskent.cylcount)
-                                cylinders = diskent.cylcount;
-                        }
-                    }
-
-                    i++;
-                }
-            }
-
-            if (sector_size != 0 && sectors != 0 && cylinders != 0) {
-                ent = findSector(1,0,sectors);
-                if (ent != NULL) {
-                    LOG_MSG("VFD disk probe: %u/%u/%u exists",1,0,sectors);
-                    heads = 2;
-                }
-            }
-
-            // TODO: drive_fat.cpp should use an extension to this API to allow changing the sectors/track
-            //       according to what it reads from the MS-DOS BIOS parameter block, just like real MS-DOS.
-            //       This would allow better representation of strange disk formats such as the "extended"
-            //       floppy format that Microsoft used to use for Word 95 and Windows 95 install floppies.
-
-            LOG_MSG("VFD geometry detection: C/H/S %u/%u/%u %u bytes/sector",
-                cylinders, heads, sectors, sector_size);
-
-            bool founddisk = false;
-            if (sector_size != 0 && sectors != 0 && cylinders != 0 && heads != 0)
-                founddisk = true;
-
-            if(!founddisk) {
-                active = false;
-            } else {
-                incrementFDD();
-            }
-        }
-    }
-}
-
-imageDiskVFD::~imageDiskVFD() {
-    if(diskimg != NULL) {
-        fclose(diskimg);
-        diskimg=NULL; 
-    }
-}
-
-// D88 *.D88 floppy disk format support
-
-enum {
-    D88_TRACKMAX        = 164,
-    D88_HEADERSIZE      = 0x20 + (D88_TRACKMAX * 4)
-};
-
-#pragma pack(push,1)
-typedef struct D88HEAD {
-    char            fd_name[17];                // +0x00 Disk Name
-    unsigned char   reserved1[9];               // +0x11 Reserved
-    unsigned char   protect;                    // +0x1A Write Protect bit:4
-    unsigned char   fd_type;                    // +0x1B Disk Format
-    uint32_t        fd_size;                    // +0x1C Disk Size
-    uint32_t        trackp[D88_TRACKMAX];       // +0x20 <array of DWORDs>     164 x 4 = 656 = 0x290
-} D88HEAD;                                      // =0x2B0 total
-
-typedef struct D88SEC {
-    unsigned char   c;                          // +0x00
-    unsigned char   h;                          // +0x01
-    unsigned char   r;                          // +0x02
-    unsigned char   n;                          // +0x03
-    uint16_t        sectors;                    // +0x04 Sector Count
-    unsigned char   mfm_flg;                    // +0x06 sides
-    unsigned char   del_flg;                    // +0x07 DELETED DATA
-    unsigned char   stat;                       // +0x08 STATUS (FDC ret)
-    unsigned char   seektime;                   // +0x09 Seek Time
-    unsigned char   reserved[3];                // +0x0A Reserved
-    unsigned char   rpm_flg;                    // +0x0D rpm          0:1.2  1:1.44
-    uint16_t        size;                       // +0x0E Sector Size
-                                                // <sector contents follow>
-} D88SEC;                                       // =0x10 total
-#pragma pack(pop)
-
-uint8_t imageDiskD88::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
-    const vfdentry *ent;
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-//    LOG_MSG("D88 read sector: CHS %u/%u/%u sz=%u",cylinder,head,sector,req_sector_size);
-
-    ent = findSector(head,cylinder,sector,req_sector_size);
-    if (ent == NULL) return 0x05;
-    if (ent->getSectorSize() != req_sector_size) return 0x05;
-
-    fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-    if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-    if (fread(data,req_sector_size,1,diskimg) != 1) return 0x05;
-    return 0;
-}
-
-uint8_t imageDiskD88::Read_AbsoluteSector(uint32_t sectnum, void * data) {
-    unsigned int c,h,s;
-
-    if (sectors == 0 || heads == 0)
-        return 0x05;
-
-    s = (sectnum % sectors) + 1;
-    h = (sectnum / sectors) % heads;
-    c = (sectnum / sectors / heads);
-    return Read_Sector(h,c,s,data);
-}
-
-imageDiskD88::vfdentry *imageDiskD88::findSector(uint8_t head,uint8_t track,uint8_t sector/*TODO: physical head?*/,unsigned int req_sector_size) {
-    if ((size_t)track >= dents.size())
-        return NULL;
-
-    std::vector<imageDiskD88::vfdentry>::iterator i = dents.begin();
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-    while (i != dents.end()) {
-        const imageDiskD88::vfdentry &ent = *i;
-
-        if (ent.head == head &&
-            ent.track == track &&
-            ent.sector == sector &&
-            (ent.sector_size == req_sector_size || req_sector_size == ~0U))
-            return &(*i);
-
-        ++i;
-    }
-
-    return NULL;
-}
-
-uint8_t imageDiskD88::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
-    const vfdentry *ent;
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-//    LOG_MSG("D88 read sector: CHS %u/%u/%u sz=%u",cylinder,head,sector,req_sector_size);
-
-    ent = findSector(head,cylinder,sector,req_sector_size);
-    if (ent == NULL) return 0x05;
-    if (ent->getSectorSize() != req_sector_size) return 0x05;
-
-    fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-    if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-    if (fwrite(data,req_sector_size,1,diskimg) != 1) return 0x05;
-    return 0;
-}
-
-uint8_t imageDiskD88::Write_AbsoluteSector(uint32_t sectnum,const void *data) {
-    unsigned int c,h,s;
-
-    if (sectors == 0 || heads == 0)
-        return 0x05;
-
-    s = (sectnum % sectors) + 1;
-    h = (sectnum / sectors) % heads;
-    c = (sectnum / sectors / heads);
-    return Write_Sector(h,c,s,data);
-}
-
-imageDiskD88::imageDiskD88(FILE *imgFile, const char *imgName, uint32_t imgSizeK, bool isHardDisk) : imageDisk(ID_D88) {
-    (void)isHardDisk;//UNUSED
-    D88HEAD head;
-
-    fd_type_major = DISKTYPE_2D;
-    fd_type_minor = 0;
-
-    assert(sizeof(D88HEAD) == 0x2B0);
-    assert(sizeof(D88SEC) == 0x10);
-
-    heads = 0;
-    cylinders = 0;
-    image_base = 0;
-    sectors = 0;
-    active = false;
-    sector_size = 0;
-    reserved_cylinders = 0;
-    diskSizeK = imgSizeK;
-    diskimg = imgFile;
-
-    if (imgName != NULL)
-        diskname = imgName;
-
-    // NOTES:
-    // 
-    //  +0x000: D88 header
-    //  +0x020: Offset of D88 tracks, per track
-    //  +0x2B0: <begin data>
-    //
-    // Track offsets are sequential, always
-    //
-    // Each track is an array of:
-    //
-    //  ENTRY:
-    //   <D88 sector head>
-    //   <sector contents>
-    //
-    // Array of ENTRY from offset until next track
-    fseek(diskimg,0,SEEK_END);
-    off_t fsz = ftell(diskimg);
-
-    fseek(diskimg,0,SEEK_SET);
-    if (fread(&head,sizeof(head),1,diskimg) != 1) return;
-
-    // validate fd_size
-    if (host_readd((ConstHostPt)(&head.fd_size)) > (uint32_t)fsz) return;
-
-    fd_type_major = head.fd_type >> 4U;
-    fd_type_minor = head.fd_type & 0xFU;
-
-    // validate that none of the track offsets extend past the file
-    {
-        for (unsigned int i=0;i < D88_TRACKMAX;i++) {
-            uint32_t trackoff = host_readd((ConstHostPt)(&head.trackp[i]));
-
-            if (trackoff == 0) continue;
-
-            if ((trackoff + 16U) > (uint32_t)fsz) {
-                LOG_MSG("D88: track starts past end of file");
-                return;
-            }
-        }
-    }
-
-    // read each track
-    for (unsigned int track=0;track < D88_TRACKMAX;track++) {
-        uint32_t trackoff = host_readd((ConstHostPt)(&head.trackp[track]));
-
-        if (trackoff != 0) {
-            fseek(diskimg, (long)trackoff, SEEK_SET);
-            if ((off_t)ftell(diskimg) != (off_t)trackoff) continue;
-
-            D88SEC s;
-            unsigned int count = 0;
-
-            do {
-                if (fread(&s,sizeof(s),1,diskimg) != 1) break;
-
-                uint16_t sector_count = host_readw((ConstHostPt)(&s.sectors));
-                uint16_t sector_size = host_readw((ConstHostPt)(&s.size));
-
-                if (sector_count == 0U || sector_size < 128U) break;
-                if (sector_count > 128U || sector_size > 16384U) break;
-                if (s.n > 8U) s.n = 8U;
-
-                vfdentry vent;
-                vent.sector_size = 128 << s.n;
-                vent.data_offset = (uint32_t)ftell(diskimg);
-                vent.entry_offset = vent.data_offset - (uint32_t)16;
-                vent.track = s.c;
-                vent.head = s.h;
-                vent.sector = s.r;
-
-                LOG_MSG("D88: trackindex=%u C/H/S/sz=%u/%u/%u/%u data-at=0x%lx",
-                    track,vent.track,vent.head,vent.sector,vent.sector_size,(unsigned long)vent.data_offset);
-
-                dents.push_back(vent);
-                if ((++count) >= sector_count) break;
-
-                fseek(diskimg, (long)sector_size, SEEK_CUR);
-            } while (1);
-        }
-    }
-
-    if (!dents.empty()) {
-        /* okay, now to figure out what the geometry of the disk is.
-         * we cannot just work from an "absolute" disk image model
-         * because there's no D88 header to just say what the geometry is.
-         * Like the IBM PC BIOS, we have to look at the disk and figure out
-         * which geometry to apply to it, even if the FDD format allows
-         * sectors on other tracks to have wild out of range sector, track,
-         * and head numbers or odd sized sectors.
-         *
-         * First, determine sector size according to the boot sector. */
-        bool founddisk = false;
-        const vfdentry *ent;
-
-        ent = findSector(/*head*/0,/*track*/0,/*sector*/1,~0U);
-        if (ent != NULL) {
-            if (ent->getSectorSize() <= 1024) /* x <= 1024 */
-                sector_size = ent->getSectorSize();
-        }
-
-        /* oh yeah right, sure.
-         * I suppose you're one of those FDD images where the sector size is 128 bytes/sector
-         * in the boot sector and the rest is 256 bytes/sector elsewhere. I have no idea why
-         * but quite a few FDD images have this arrangement. */
-        if (sector_size != 0 && sector_size < 512) {
-            ent = findSector(/*head*/0,/*track*/1,/*sector*/1,~0U);
-            if (ent != NULL) {
-                if (ent->getSectorSize() <= 1024) { /* x <= 1024 */
-                    unsigned int nsz = ent->getSectorSize();
-                    if (sector_size != nsz)
-                        LOG_MSG("D88 warning: sector size changes between track 0 and 1");
-                    if (sector_size < nsz)
-                        sector_size = nsz;
-                }
-            }
-        }
-
-        if (sector_size != 0) {
-            unsigned int i = 0;
-            while (DiskGeometryList[i].ksize != 0) {
-                const diskGeo &diskent = DiskGeometryList[i];
-
-                if (diskent.bytespersect == sector_size) {
-                    ent = findSector(0,0,diskent.secttrack);
-                    if (ent != NULL) {
-                        LOG_MSG("D88 disk probe: %u/%u/%u exists",0,0,diskent.secttrack);
-                        if (sectors < diskent.secttrack)
-                            sectors = diskent.secttrack;
-                    }
-                }
-
-                i++;
-            }
-        }
-
-        if (sector_size != 0 && sectors != 0) {
-            unsigned int i = 0;
-            while (DiskGeometryList[i].ksize != 0) {
-                const diskGeo &diskent = DiskGeometryList[i];
-
-                if (diskent.bytespersect == sector_size && diskent.secttrack >= sectors) {
-                    ent = findSector(0,diskent.cylcount-1,sectors);
-                    if (ent != NULL) {
-                        LOG_MSG("D88 disk probe: %u/%u/%u exists",0,diskent.cylcount-1,sectors);
-                        if (cylinders < diskent.cylcount)
-                            cylinders = diskent.cylcount;
-                    }
-                }
-
-                i++;
-            }
-        }
-
-        if (sector_size != 0 && sectors != 0 && cylinders != 0) {
-            ent = findSector(1,0,sectors);
-            if (ent != NULL) {
-                LOG_MSG("D88 disk probe: %u/%u/%u exists",1,0,sectors);
-                heads = 2;
-            }
-        }
-
-        // TODO: drive_fat.cpp should use an extension to this API to allow changing the sectors/track
-        //       according to what it reads from the MS-DOS BIOS parameter block, just like real MS-DOS.
-        //       This would allow better representation of strange disk formats such as the "extended"
-        //       floppy format that Microsoft used to use for Word 95 and Windows 95 install floppies.
-
-        LOG_MSG("D88 geometry detection: C/H/S %u/%u/%u %u bytes/sector",
-                cylinders, heads, sectors, sector_size);
-
-        if (sector_size != 0 && sectors != 0 && cylinders != 0 && heads != 0)
-            founddisk = true;
-
-        if(!founddisk) {
-            active = false;
-        } else {
-            incrementFDD();
-        }
-    }
-}
-
-imageDiskD88::~imageDiskD88() {
-    if(diskimg != NULL) {
-        fclose(diskimg);
-        diskimg=NULL; 
-    }
-}
-
-/*--------------------------------*/
-
-uint8_t imageDiskNFD::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
-    const vfdentry *ent;
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-//    LOG_MSG("NFD read sector: CHS %u/%u/%u sz=%u",cylinder,head,sector,req_sector_size);
-
-    ent = findSector(head,cylinder,sector,req_sector_size);
-    if (ent == NULL) return 0x05;
-    if (ent->getSectorSize() != req_sector_size) return 0x05;
-
-    fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-    if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-    if (fread(data,req_sector_size,1,diskimg) != 1) return 0x05;
-    return 0;
-}
-
-uint8_t imageDiskNFD::Read_AbsoluteSector(uint32_t sectnum, void * data) {
-    unsigned int c,h,s;
-
-    if (sectors == 0 || heads == 0)
-        return 0x05;
-
-    s = (sectnum % sectors) + 1;
-    h = (sectnum / sectors) % heads;
-    c = (sectnum / sectors / heads);
-    return Read_Sector(h,c,s,data);
-}
-
-imageDiskNFD::vfdentry *imageDiskNFD::findSector(uint8_t head,uint8_t track,uint8_t sector/*TODO: physical head?*/,unsigned int req_sector_size) {
-    if ((size_t)track >= dents.size())
-        return NULL;
-
-    std::vector<imageDiskNFD::vfdentry>::iterator i = dents.begin();
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-    while (i != dents.end()) {
-        const imageDiskNFD::vfdentry &ent = *i;
-
-        if (ent.head == head &&
-            ent.track == track &&
-            ent.sector == sector &&
-            (ent.sector_size == req_sector_size || req_sector_size == ~0U))
-            return &(*i);
-
-        ++i;
-    }
-
-    return NULL;
-}
-
-uint8_t imageDiskNFD::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
-    const vfdentry *ent;
-
-    if (req_sector_size == 0)
-        req_sector_size = sector_size;
-
-//    LOG_MSG("NFD read sector: CHS %u/%u/%u sz=%u",cylinder,head,sector,req_sector_size);
-
-    ent = findSector(head,cylinder,sector,req_sector_size);
-    if (ent == NULL) return 0x05;
-    if (ent->getSectorSize() != req_sector_size) return 0x05;
-
-    fseek(diskimg,(long)ent->data_offset,SEEK_SET);
-    if ((uint32_t)ftell(diskimg) != ent->data_offset) return 0x05;
-    if (fwrite(data,req_sector_size,1,diskimg) != 1) return 0x05;
-    return 0;
-}
-
-uint8_t imageDiskNFD::Write_AbsoluteSector(uint32_t sectnum,const void *data) {
-    unsigned int c,h,s;
-
-    if (sectors == 0 || heads == 0)
-        return 0x05;
-
-    s = (sectnum % sectors) + 1;
-    h = (sectnum / sectors) % heads;
-    c = (sectnum / sectors / heads);
-    return Write_Sector(h,c,s,data);
-}
-
-imageDiskNFD::imageDiskNFD(FILE *imgFile, const char *imgName, uint32_t imgSizeK, bool isHardDisk, unsigned int revision) : imageDisk(ID_NFD) {
-    (void)isHardDisk;//UNUSED
-    union {
-        NFDHDR head;
-        NFDHDRR1 headr1;
-    }; // these occupy the same location of memory
-
-    assert(sizeof(NFDHDR) == 0x120);
-    assert(sizeof(NFDHDRR1) == 0x3C0);
-    assert(sizeof(NFDHDR_ENTRY) == 0x10);
-
-    heads = 0;
-    cylinders = 0;
-    image_base = 0;
-    sectors = 0;
-    active = false;
-    sector_size = 0;
-    reserved_cylinders = 0;
-    diskSizeK = imgSizeK;
-    diskimg = imgFile;
-
-    if (imgName != NULL)
-        diskname = imgName;
-
-    // NOTES:
-    // 
-    //  +0x000: NFD header
-    //  +0x020: Offset of NFD tracks, per track
-    //  +0x2B0: <begin data>
-    //
-    // Track offsets are sequential, always
-    //
-    // Each track is an array of:
-    //
-    //  ENTRY:
-    //   <NFD sector head>
-    //   <sector contents>
-    //
-    // Array of ENTRY from offset until next track
-    fseek(diskimg,0,SEEK_END);
-    off_t fsz = ftell(diskimg);
-
-    fseek(diskimg,0,SEEK_SET);
-    if (revision == 0) {
-        if (fread(&head,sizeof(head),1,diskimg) != 1) return;
-    }
-    else if (revision == 1) {
-        if (fread(&headr1,sizeof(headr1),1,diskimg) != 1) return;
-    }
-    else {
-        abort();
-    }
-
-    // validate fd_size
-    if (host_readd((ConstHostPt)(&head.headersize)) < sizeof(head)) return;
-    if (host_readd((ConstHostPt)(&head.headersize)) > (uint32_t)fsz) return;
-
-    unsigned int data_offset = host_readd((ConstHostPt)(&head.headersize));
-
-    std::vector< std::pair<uint32_t,NFDHDR_ENTRY> > seclist;
-
-    if (revision == 0) {
-        unsigned int secents = (host_readd((ConstHostPt)(&head.headersize)) - sizeof(head)) / sizeof(NFDHDR_ENTRY);
-        if (secents == 0) return;
-        secents--;
-        if (secents == 0) return;
-
-        for (unsigned int i=0;i < secents;i++) {
-            uint32_t ofs = (uint32_t)ftell(diskimg);
-            NFDHDR_ENTRY e;
-
-            if (fread(&e,sizeof(e),1,diskimg) != 1) return;
-            seclist.push_back( std::pair<uint32_t,NFDHDR_ENTRY>(ofs,e) );
-
-            if (e.log_cyl == 0xFF || e.log_head == 0xFF || e.log_rec == 0xFF || e.sec_len_pow2 > 7)
-                continue;
-
-            LOG_MSG("NFD %u/%u: ofs=%lu data=%lu cyl=%u head=%u sec=%u len=%u",
-                    (unsigned int)i,
-                    (unsigned int)secents,
-                    (unsigned long)ofs,
-                    (unsigned long)data_offset,
-                    e.log_cyl,
-                    e.log_head,
-                    e.log_rec,
-                    128 << e.sec_len_pow2);
-
-            vfdentry vent;
-            vent.sector_size = 128 << e.sec_len_pow2;
-            vent.data_offset = (uint32_t)data_offset;
-            vent.entry_offset = ofs;
-            vent.track = e.log_cyl;
-            vent.head = e.log_head;
-            vent.sector = e.log_rec;
-            dents.push_back(vent);
-
-            data_offset += 128u << e.sec_len_pow2;
-            if (data_offset > (unsigned int)fsz) return;
-        }
-    }
-    else {
-        /* R1 has an array of offsets to where each tracks begins.
-         * The end of the track is an entry like 0x1A 0x00 0x00 0x00 0x00 0x00 0x00 .... */
-        /* The R1 images I have as reference always have offsets in ascending order. */
-        for (unsigned int ti=0;ti < 164;ti++) {
-            uint32_t trkoff = host_readd((ConstHostPt)(&headr1.trackheads[ti]));
-
-            if (trkoff == 0) break;
-
-            fseek(diskimg,(long)trkoff,SEEK_SET);
-            if ((off_t)ftell(diskimg) != (off_t)trkoff) return;
-
-            NFDHDR_ENTRY e;
-
-            // track id
-            if (fread(&e,sizeof(e),1,diskimg) != 1) return;
-            unsigned int sectors = host_readw((ConstHostPt)(&e) + 0);
-            unsigned int diagcount = host_readw((ConstHostPt)(&e) + 2);
-
-            LOG_MSG("NFD R1 track ent %u offset %lu sectors %u diag %u",ti,(unsigned long)trkoff,sectors,diagcount);
-
-            for (unsigned int s=0;s < sectors;s++) {
-                uint32_t ofs = (uint32_t)ftell(diskimg);
-
-                if (fread(&e,sizeof(e),1,diskimg) != 1) return;
-
-                LOG_MSG("NFD %u/%u: ofs=%lu data=%lu cyl=%u head=%u sec=%u len=%u rep=%u",
-                        s,
-                        sectors,
-                        (unsigned long)ofs,
-                        (unsigned long)data_offset,
-                        e.log_cyl,
-                        e.log_head,
-                        e.log_rec,
-                        128 << e.sec_len_pow2,
-                        e.byRetry);
-
-                vfdentry vent;
-                vent.sector_size = 128 << e.sec_len_pow2;
-                vent.data_offset = (uint32_t)data_offset;
-                vent.entry_offset = ofs;
-                vent.track = e.log_cyl;
-                vent.head = e.log_head;
-                vent.sector = e.log_rec;
-                dents.push_back(vent);
-
-                data_offset += 128u << e.sec_len_pow2;
-                if (data_offset > (unsigned int)fsz) return;
-            }
-
-            for (unsigned int d=0;d < diagcount;d++) {
-                if (fread(&e,sizeof(e),1,diskimg) != 1) return;
-
-                unsigned int retry = e.byRetry;
-                unsigned int len = host_readd((ConstHostPt)(&e) + 10);
-
-                LOG_MSG("NFD diag %u/%u: retry=%u len=%u data=%lu",d,diagcount,retry,len,(unsigned long)data_offset);
-
-                data_offset += (1+retry) * len;
-            }
-        }
-    }
-
-    if (!dents.empty()) {
-        /* okay, now to figure out what the geometry of the disk is.
-         * we cannot just work from an "absolute" disk image model
-         * because there's no NFD header to just say what the geometry is.
-         * Like the IBM PC BIOS, we have to look at the disk and figure out
-         * which geometry to apply to it, even if the FDD format allows
-         * sectors on other tracks to have wild out of range sector, track,
-         * and head numbers or odd sized sectors.
-         *
-         * First, determine sector size according to the boot sector. */
-        bool founddisk = false;
-        const vfdentry *ent;
-
-        ent = findSector(/*head*/0,/*track*/0,/*sector*/1,~0U);
-        if (ent != NULL) {
-            if (ent->getSectorSize() <= 1024) /* x <= 1024 */
-                sector_size = ent->getSectorSize();
-        }
-
-        /* oh yeah right, sure.
-         * I suppose you're one of those FDD images where the sector size is 128 bytes/sector
-         * in the boot sector and the rest is 256 bytes/sector elsewhere. I have no idea why
-         * but quite a few FDD images have this arrangement. */
-        if (sector_size != 0 && sector_size < 512) {
-            ent = findSector(/*head*/0,/*track*/1,/*sector*/1,~0U);
-            if (ent != NULL) {
-                if (ent->getSectorSize() <= 1024) { /* x <= 1024 */
-                    unsigned int nsz = ent->getSectorSize();
-                    if (sector_size != nsz)
-                        LOG_MSG("NFD warning: sector size changes between track 0 and 1");
-                    if (sector_size < nsz)
-                        sector_size = nsz;
-                }
-            }
-        }
-
-        if (sector_size != 0) {
-            unsigned int i = 0;
-            while (DiskGeometryList[i].ksize != 0) {
-                const diskGeo &diskent = DiskGeometryList[i];
-
-                if (diskent.bytespersect == sector_size) {
-                    ent = findSector(0,0,diskent.secttrack);
-                    if (ent != NULL) {
-                        LOG_MSG("NFD disk probe: %u/%u/%u exists",0,0,diskent.secttrack);
-                        if (sectors < diskent.secttrack)
-                            sectors = diskent.secttrack;
-                    }
-                }
-
-                i++;
-            }
-        }
-
-        if (sector_size != 0 && sectors != 0) {
-            unsigned int i = 0;
-            while (DiskGeometryList[i].ksize != 0) {
-                const diskGeo &diskent = DiskGeometryList[i];
-
-                if (diskent.bytespersect == sector_size && diskent.secttrack >= sectors) {
-                    ent = findSector(0,diskent.cylcount-1,sectors);
-                    if (ent != NULL) {
-                        LOG_MSG("NFD disk probe: %u/%u/%u exists",0,diskent.cylcount-1,sectors);
-                        if (cylinders < diskent.cylcount)
-                            cylinders = diskent.cylcount;
-                    }
-                }
-
-                i++;
-            }
-        }
-
-        if (sector_size != 0 && sectors != 0 && cylinders != 0) {
-            ent = findSector(1,0,sectors);
-            if (ent != NULL) {
-                LOG_MSG("NFD disk probe: %u/%u/%u exists",1,0,sectors);
-                heads = 2;
-            }
-        }
-
-        // TODO: drive_fat.cpp should use an extension to this API to allow changing the sectors/track
-        //       according to what it reads from the MS-DOS BIOS parameter block, just like real MS-DOS.
-        //       This would allow better representation of strange disk formats such as the "extended"
-        //       floppy format that Microsoft used to use for Word 95 and Windows 95 install floppies.
-
-        LOG_MSG("NFD geometry detection: C/H/S %u/%u/%u %u bytes/sector",
-                cylinders, heads, sectors, sector_size);
-
-        if (sector_size != 0 && sectors != 0 && cylinders != 0 && heads != 0)
-            founddisk = true;
-
-        if(!founddisk) {
-            active = false;
-        } else {
-            incrementFDD();
-        }
-    }
-}
-
-imageDiskNFD::~imageDiskNFD() {
-    if(diskimg != NULL) {
-        fclose(diskimg);
-        diskimg=NULL; 
-    }
 }
 
 bool PartitionLoadMBR(std::vector<partTable::partentry_t> &parts,imageDisk *loadedDisk) {
@@ -3570,7 +2736,7 @@ bool PartitionLoadMBR(std::vector<partTable::partentry_t> &parts,imageDisk *load
 	parts.clear();
 
 	if (loadedDisk->getSectSize() > sizeof(smbr)) return false;
-	if (loadedDisk->Read_Sector(0,0,1,&smbr) != 0x00) return false;
+	if (loadedDisk->Read_Sector(0,0,1,&smbr) != Int13Status::NoError) return false;
 	if (smbr.magic1 != 0x55 || smbr.magic2 != 0xaa) return false; /* Must have signature */
 
 	/* first copy the main partition table entries */
@@ -3653,7 +2819,7 @@ bool PartitionLoadIPL1(std::vector<_PC98RawPartition> &parts,imageDisk *loadedDi
 	if (loadedDisk->getSectSize() > sizeof(ipltable)) return false;
 
 	memset(ipltable,0,sizeof(ipltable));
-	if (loadedDisk->Read_Sector(0,0,2,ipltable) != 0) return false;
+	if (loadedDisk->Read_Sector(0,0,2,ipltable) != Int13Status::NoError) return false;
 
 	const unsigned int max_entries = std::min(16UL,(unsigned long)(loadedDisk->getSectSize() / sizeof(_PC98RawPartition)));
 
@@ -3678,7 +2844,7 @@ std::string PartitionIdentifyType(imageDisk *loadedDisk) {
 	if (loadedDisk->getSectSize() > sizeof(mbrData))
 		return std::string(); /* That would cause a buffer overrun */
 
-	if (loadedDisk->Read_Sector(0,0,1,&mbrData) != 0)
+	if (loadedDisk->Read_Sector(0,0,1,&mbrData) != Int13Status::NoError)
 		return std::string();
 
 	if (!memcmp(mbrData.booter+4,"IPL1",4))
@@ -3712,255 +2878,5 @@ void LogPrintPartitionTable(const std::vector<partTable::partentry_t> &parts) {
 			(unsigned long long)part.absSectStart,
 			(unsigned long long)part.partSize);
 	}
-}
-
-
-uint8_t imageDiskEmptyDrive::Read_Sector(uint32_t /*head*/,uint32_t /*cylinder*/,uint32_t /*sector*/,void * /*data*/,unsigned int /*req_sector_size*/) {
-	return 0x05;
-}
-
-uint8_t imageDiskEmptyDrive::Write_Sector(uint32_t /*head*/,uint32_t /*cylinder*/,uint32_t /*sector*/,const void * /*data*/,unsigned int /*req_sector_size*/) {
-	return 0x05;
-}
-
-uint8_t imageDiskEmptyDrive::Read_AbsoluteSector(uint32_t /*sectnum*/, void * /*data*/) {
-	return 0x05;
-}
-
-uint8_t imageDiskEmptyDrive::Write_AbsoluteSector(uint32_t /*sectnum*/, const void * /*data*/) {
-	return 0x05;
-}
-
-imageDiskEmptyDrive::imageDiskEmptyDrive() : imageDisk(ID_EMPTY_DRIVE) {
-	active = true;
-	sector_size = 512;
-	heads = 2;
-	cylinders = 80;
-	sectors = 18;
-	diskSizeK = 1440;
-}
-
-imageDiskEmptyDrive::~imageDiskEmptyDrive() {
-}
-
-/////
-
-unsigned int INT13Xfer = 0;
-size_t INT13XferSize = 4096;
-
-static void imageDiskCallINT13(void) {
-	unsigned int rv = CALLBACK_RealPointer(call_int13);
-	Bitu oldIF=GETFLAG(IF);
-	SETFLAGBIT(IF,true);
-	uint16_t oldcs=SegValue(cs);
-	uint32_t oldeip=reg_eip;
-	SegSet16(cs,rv>>16);
-	reg_eip=(rv&0xFFFF)+4+5;
-	DOSBOX_RunMachine();
-	reg_eip=oldeip;
-	SegSet16(cs,oldcs);
-	SETFLAGBIT(IF,oldIF);
-}
-
-uint8_t imageDiskINT13Drive::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data,unsigned int req_sector_size) {
-	if (!enable_int13 || busy) return subdisk->Read_Sector(head,cylinder,sector,data,req_sector_size);
-
-	uint8_t ret = 0x05;
-	unsigned int retry = 3;
-
-	if (req_sector_size == 0) req_sector_size = sector_size;
-
-//	LOG_MSG("INT13 read C/H/S %u/%u/%u busy=%u",cylinder,head,sector,busy);
-
-	if (!busy && sector_size == req_sector_size && sector_size <= INT13XferSize) {
-		busy = true;
-
-		if (INT13Xfer == 0) INT13Xfer = DOS_GetMemory(INT13XferSize/16u,"INT 13 transfer buffer");
-
-		unsigned int s_eax = reg_eax;
-		unsigned int s_ebx = reg_ebx;
-		unsigned int s_ecx = reg_ecx;
-		unsigned int s_edx = reg_edx;
-		unsigned int s_esi = reg_esi;
-		unsigned int s_edi = reg_edi;
-		unsigned int s_esp = reg_esp;
-		unsigned int s_ebp = reg_ebp;
-		unsigned int s_es  = SegValue(es);
-		unsigned int s_fl  = reg_flags;
-
-again:
-		reg_eax = 0x200/*read command*/ | 1/*count*/;
-		reg_ebx = 0;
-		reg_ch = cylinder;
-		reg_cl = sector;
-		reg_dh = head;
-		reg_dl = bios_disk;
-		CPU_SetSegGeneral(es,INT13Xfer);
-
-		imageDiskCallINT13();
-
-		if (reg_flags & FLAG_CF) {
-			ret = reg_ah;
-			if (ret == 0) ret = 0x05;
-
-			if (ret == 6/*disk change*/) {
-				diskChangeFlag = true;
-				if (--retry > 0) goto again;
-			}
-		}
-		else {
-			MEM_BlockRead32(INT13Xfer<<4,data,sector_size);
-			data = (void*)((char*)data + sector_size);
-			if ((++sector) >= (sectors + 1)) {
-				assert(sector == (sectors + 1));
-				sector = 1;
-				if ((++head) >= heads) {
-					assert(head == heads);
-					head = 0;
-					cylinder++;
-				}
-			}
-		}
-
-		reg_eax = s_eax;
-		reg_ebx = s_ebx;
-		reg_ecx = s_ecx;
-		reg_edx = s_edx;
-		reg_esi = s_esi;
-		reg_edi = s_edi;
-		reg_esp = s_esp;
-		reg_ebp = s_ebp;
-		reg_flags = s_fl;
-		CPU_SetSegGeneral(es,s_es);
-
-		busy = false;
-	}
-
-	return ret;
-}
-
-uint8_t imageDiskINT13Drive::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,const void * data,unsigned int req_sector_size) {
-	if (INT13Xfer == 0) INT13Xfer = DOS_GetMemory(INT13XferSize/16u,"INT 13 transfer buffer");
-
-	return subdisk->Write_Sector(head,cylinder,sector,data,req_sector_size);
-}
-
-uint8_t imageDiskINT13Drive::Read_AbsoluteSector(uint32_t sectnum, void * data) {
-	unsigned int c,h,s;
-
-	if (sectors == 0 || heads == 0)
-		return 0x05;
-
-	s = (sectnum % sectors) + 1;
-	h = (sectnum / sectors) % heads;
-	c = (sectnum / sectors / heads);
-	return Read_Sector(h,c,s,data);
-}
-
-uint8_t imageDiskINT13Drive::Write_AbsoluteSector(uint32_t sectnum, const void * data) {
-	unsigned int c,h,s;
-
-	if (sectors == 0 || heads == 0)
-		return 0x05;
-
-	s = (sectnum % sectors) + 1;
-	h = (sectnum / sectors) % heads;
-	c = (sectnum / sectors / heads);
-	return Write_Sector(h,c,s,data);
-}
-
-void imageDiskINT13Drive::UpdateFloppyType(void) {
-	subdisk->UpdateFloppyType();
-}
-
-void imageDiskINT13Drive::Set_Reserved_Cylinders(Bitu resCyl) {
-	subdisk->Set_Reserved_Cylinders(resCyl);
-}
-
-uint32_t imageDiskINT13Drive::Get_Reserved_Cylinders() {
-	return subdisk->Get_Reserved_Cylinders();
-}
-
-void imageDiskINT13Drive::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) {
-	heads = setHeads;
-	cylinders = setCyl;
-	sectors = setSect;
-	sector_size = setSectSize;
-	return subdisk->Set_Geometry(setHeads,setCyl,setSect,setSectSize);
-}
-
-void imageDiskINT13Drive::Get_Geometry(uint32_t * getHeads, uint32_t *getCyl, uint32_t *getSect, uint32_t *getSectSize) {
-	return subdisk->Get_Geometry(getHeads,getCyl,getSect,getSectSize);
-}
-
-uint8_t imageDiskINT13Drive::GetBiosType(void) {
-	return subdisk->GetBiosType();
-}
-
-uint32_t imageDiskINT13Drive::getSectSize(void) {
-	return subdisk->getSectSize();
-}
-
-bool imageDiskINT13Drive::detectDiskChange(void) {
-	if (enable_int13 && !busy) {
-		busy = true;
-
-		unsigned int s_eax = reg_eax;
-		unsigned int s_ebx = reg_ebx;
-		unsigned int s_ecx = reg_ecx;
-		unsigned int s_edx = reg_edx;
-		unsigned int s_esi = reg_esi;
-		unsigned int s_edi = reg_edi;
-		unsigned int s_esp = reg_esp;
-		unsigned int s_ebp = reg_ebp;
-		unsigned int s_fl  = reg_flags;
-
-		reg_eax = 0x1600/*disk change detect*/;
-		reg_dl = bios_disk;
-		CPU_SetSegGeneral(es,INT13Xfer);
-
-		imageDiskCallINT13();
-
-		if (reg_flags & FLAG_CF) {
-			if (reg_ah == 0x06) {
-				LOG(LOG_MISC,LOG_DEBUG)("INT13 image disk change flag");
-				diskChangeFlag = true;
-			}
-		}
-
-		reg_eax = s_eax;
-		reg_ebx = s_ebx;
-		reg_ecx = s_ecx;
-		reg_edx = s_edx;
-		reg_esi = s_esi;
-		reg_edi = s_edi;
-		reg_esp = s_esp;
-		reg_ebp = s_ebp;
-		reg_flags = s_fl;
-
-		busy = false;
-	}
-
-	return imageDisk::detectDiskChange();
-}
-
-imageDiskINT13Drive::imageDiskINT13Drive(imageDisk *sdisk) : imageDisk(ID_INT13) {
-	subdisk = sdisk;
-	subdisk->Addref();
-
-	drvnum         = subdisk->drvnum;
-	diskname       = subdisk->diskname;
-	active         = subdisk->active;
-	sector_size    = subdisk->sector_size;
-	heads          = subdisk->heads;
-	cylinders      = subdisk->cylinders;
-	sectors        = subdisk->sectors;
-	hardDrive      = subdisk->hardDrive;
-	diskSizeK      = subdisk->diskSizeK;
-	diskChangeFlag = subdisk->diskChangeFlag;
-}
-
-imageDiskINT13Drive::~imageDiskINT13Drive() {
-	subdisk->Release();
 }
 

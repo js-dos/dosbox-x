@@ -33,13 +33,13 @@
 #include <utime.h>
 #include <sys/file.h>
 #else
-#include <fcntl.h>
 #include <sys/utime.h>
 #include <sys/locking.h>
 #ifdef OS2
 #include <sys/time.h>
 #endif
 #endif
+#include <fcntl.h>
 #include <sys/stat.h>
 
 #include "dosbox.h"
@@ -125,6 +125,63 @@ extern std::map<int, int> lowboxdrawmap, pc98boxdrawmap;
 int tryconvertcp = 0;
 bool cpwarn_once = false, ignorespecial = false, notrycp = false;
 std::string prefix_local = ".DBLOCALFILE";
+
+
+#if __APPLE__ && __MAC_OS_X_VERSION_MIN_REQUIRED < 101300
+// futimens() not available in macOS 10.12 (Sierra) and before
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <time.h>
+#include <fcntl.h>
+#include <errno.h>
+
+// POSIX defined constants（not defined in old macOS)
+#define UTIME_NOW  ((1l << 30) - 1l)
+#define UTIME_OMIT ((1l << 30) - 2l)
+
+int futimens (int fd, const struct timespec times[2]) {
+    if (!times) {
+        return futimes(fd, NULL);  // If NULL, update to current time
+    }
+
+    struct timeval tv[2];
+
+    // Retrieve current file timestamps (used for UTIME_OMIT)
+    struct stat st;
+    if (fstat(fd, &st) == -1) {
+        return -1;
+    }
+
+    // Access time
+    if (times[0].tv_nsec == UTIME_NOW) {
+        struct timeval now;
+        if (gettimeofday(&now, NULL) == -1) return -1;
+        tv[0] = now;
+    } else if (times[0].tv_nsec == UTIME_OMIT) {
+        tv[0].tv_sec  = st.st_atimespec.tv_sec;
+        tv[0].tv_usec = st.st_atimespec.tv_nsec / 1000;
+    } else {
+        tv[0].tv_sec  = times[0].tv_sec;
+        tv[0].tv_usec = times[0].tv_nsec / 1000;
+    }
+
+    // Modified time
+    if (times[1].tv_nsec == UTIME_NOW) {
+        struct timeval now;
+        if (gettimeofday(&now, NULL) == -1) return -1;
+        tv[1] = now;
+    } else if (times[1].tv_nsec == UTIME_OMIT) {
+        tv[1].tv_sec  = st.st_mtimespec.tv_sec;
+        tv[1].tv_usec = st.st_mtimespec.tv_nsec / 1000;
+    } else {
+        tv[1].tv_sec  = times[1].tv_sec;
+        tv[1].tv_usec = times[1].tv_nsec / 1000;
+    }
+
+    return futimes(fd, tv);
+}
+#endif
 
 char* GetCrossedName(const char *basedir, const char *dir) {
 	static char crossname[CROSS_LEN];
@@ -1116,14 +1173,14 @@ void getdrivezpath(std::string &path, std::string const& dirname) {
         }
         if (!path.size() || !ret) {
             path = "";
-            Cross::GetPlatformConfigDir(path);
+            path = Cross::GetPlatformConfigDir();
             path += dirname;
             host_name = CodePageGuestToHost(path.c_str());
             res=host_name == NULL?stat(path.c_str(),&cstat):ht_stat(host_name,&hstat);
             ret=res==-1?false:((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR);
             if (!ret) {
                 path = "";
-                Cross::GetPlatformResDir(path);
+                path = Cross::GetPlatformResDir();
                 path += dirname;
                 host_name = CodePageGuestToHost(path.c_str());
                 res=host_name == NULL?stat(path.c_str(),&cstat):ht_stat(host_name,&hstat);
@@ -1135,7 +1192,8 @@ void getdrivezpath(std::string &path, std::string const& dirname) {
     }
 }
 
-void drivezRegister(std::string const& path, std::string const& dir, bool usecp) {
+//  Change the argument name 'dir' to 'target_dir' to completely prevent shadowing issues
+void drivezRegister(std::string const& path, std::string const& target_dir, bool usecp) {
     int cp = dos.loaded_codepage;
     if (!usecp || !cp) {
         force_conversion = true;
@@ -1196,36 +1254,19 @@ void drivezRegister(std::string const& path, std::string const& dir, bool usecp)
     uint8_t *f_data;
     struct stat temp_stat;
     const struct tm* ltime;
-    const host_cnv_char_t* host_name;
-    for (std::string name: names) {
-        if (!name.size()) continue;
-        if ((!strcasecmp(name.c_str(), "AUTOEXEC.BAT") || !strcasecmp(name.c_str(), "CONFIG.SYS")) && dir=="/") continue;
-        if (name.back()=='/' && dir=="/") {
-            ht_stat_t temp_stat;
-            host_name = CodePageGuestToHost((path+CROSS_FILESPLIT+name).c_str());
-            res = host_name == NULL ? 1 : ht_stat(host_name,&temp_stat);
-            if (res) {
-                host_name = CodePageGuestToHost((GetDOSBoxXPath()+path+CROSS_FILESPLIT+name).c_str());
-                res = ht_stat(host_name,&temp_stat);
-            }
-            if (res==0&&(ltime=
-#if defined(__MINGW32__) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
-            _localtime64
-#else
-            localtime
-#endif
-            (&temp_stat.st_mtime))!=nullptr) {
-                fztime=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
-                fzdate=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
-            }
-            VFILE_Register(name.substr(0, name.size()-1).c_str(), nullptr, 0, dir.c_str());
-            fztime = fzdate = 0;
-            drivezRegister(path+CROSS_FILESPLIT+name.substr(0, name.size()-1), dir+name, usecp);
-            continue;
-        }
-        FILE * f = NULL;
-        host_cnv_char_t *host_name = CodePageGuestToHost((path+CROSS_FILESPLIT+name).c_str());
-        if (host_name != NULL) {
+    const host_cnv_char_t* host_name_ptr;
+
+    // Format target directory string cleanly for VFILE registration context
+    std::string vfile_dir_context = (target_dir == "/") ? "" : target_dir;
+
+    // PHASE 1: Register all regular files in the current directory first
+    for(std::string const& name : names) {
+        if(!name.size() || name.back() == '/') continue;
+        if((!strcasecmp(name.c_str(), "AUTOEXEC.BAT") || !strcasecmp(name.c_str(), "CONFIG.SYS")) && target_dir == "/") continue;
+
+        FILE* f = NULL;
+        host_cnv_char_t* host_name = CodePageGuestToHost((path + CROSS_FILESPLIT + name).c_str());
+        if(host_name != NULL) {
 #ifdef host_cnv_use_wchar
             f = _wfopen(host_name, L"rb");
 #else
@@ -1259,9 +1300,46 @@ void drivezRegister(std::string const& path, std::string const& dir, bool usecp)
             if (f_data) fread(f_data, sizeof(char), f_size, f);
             fclose(f);
         }
-        if (f_data) VFILE_Register(name.c_str(), f_data, f_size, dir=="/"?"":dir.c_str());
+        if(f_data) VFILE_Register(name.c_str(), f_data, f_size, vfile_dir_context.c_str());
         fztime = fzdate = 0;
     }
+
+    // PHASE 2: Process subdirectories and recurse down afterwards
+    for(std::string const& name : names) {
+        if(!name.size() || name.back() != '/') continue;
+
+        ht_stat_t temp_stat;
+        host_name_ptr = CodePageGuestToHost((path + CROSS_FILESPLIT + name).c_str());
+        res = host_name_ptr == NULL ? 1 : ht_stat(host_name_ptr, &temp_stat);
+        if(res) {
+            host_name_ptr = CodePageGuestToHost((GetDOSBoxXPath() + path + CROSS_FILESPLIT + name).c_str());
+            res = ht_stat(host_name_ptr, &temp_stat);
+        }
+        if(res == 0 && (ltime =
+#if defined(__MINGW32__) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
+            _localtime64
+#else
+            localtime
+#endif
+            (&temp_stat.st_mtime)) != nullptr) {
+            fztime = DOS_PackTime((uint16_t)ltime->tm_hour, (uint16_t)ltime->tm_min, (uint16_t)ltime->tm_sec);
+            fzdate = DOS_PackDate((uint16_t)(ltime->tm_year + 1900), (uint16_t)(ltime->tm_mon + 1), (uint16_t)ltime->tm_mday);
+        }
+
+        // Register the subdirectory directory entity under the current tier context safely
+        VFILE_Register(name.substr(0, name.size() - 1).c_str(), nullptr, 0, vfile_dir_context.c_str());
+        fztime = fzdate = 0;
+
+        // Build the next recursion path strings cleanly
+        std::string next_target_dir = target_dir;
+        if(next_target_dir.empty() || next_target_dir.back() != '/') {
+            next_target_dir += "/";
+        }
+        next_target_dir += name.substr(0, name.size() - 1);
+
+        drivezRegister(path + CROSS_FILESPLIT + name.substr(0, name.size() - 1), next_target_dir, usecp);
+    }
+
     dos.loaded_codepage = cp;
 }
 
@@ -1342,10 +1420,16 @@ bool localDrive::FileCreate(DOS_File * * file,const char * name,uint16_t attribu
     FILE * hand;
     if (enable_share_exe && (!existing_file || special_attributes)) {
 #if defined(WIN32)
+        // 🌟 Fix: Safely combine multiple standard DOS attribute bits into a single bitmask 
+        // to prevent attributes from overriding/erasing each other.
         int attribs = FILE_ATTRIBUTE_NORMAL;
-        if (attributes&3) attribs = attributes&3;
-        HANDLE handle = CreateFileW(host_name, GENERIC_READ|GENERIC_WRITE, enable_share_exe?(FILE_SHARE_READ|FILE_SHARE_WRITE):0, NULL, CREATE_ALWAYS, attribs, NULL);
-        if (handle == INVALID_HANDLE_VALUE) return false;
+        if(attributes & 0x01) attribs |= FILE_ATTRIBUTE_READONLY;
+        if(attributes & 0x02) attribs |= FILE_ATTRIBUTE_HIDDEN;
+        if(attributes & 0x04) attribs |= FILE_ATTRIBUTE_SYSTEM;
+        if(attributes & 0x20) attribs |= FILE_ATTRIBUTE_ARCHIVE;
+
+        HANDLE handle = CreateFileW(host_name, GENERIC_READ | GENERIC_WRITE, enable_share_exe ? (FILE_SHARE_READ | FILE_SHARE_WRITE) : 0, NULL, CREATE_ALWAYS, attribs, NULL);
+        if(handle == INVALID_HANDLE_VALUE) return false;
         int nHandle = _open_osfhandle((intptr_t)handle, _O_RDONLY);
         if (nHandle == -1) {CloseHandle(handle);return false;}
         hand = _wfdopen(nHandle, L"wb+");
@@ -1718,7 +1802,7 @@ bool localDrive::FindFirst(const char * _dir,DOS_DTA & dta,bool fcb_findfirst) {
 		else if((IS_PC98_ARCH || isDBCSCP()) && isKanji1(tempDir[i])) lead = true;
 		else tempDir[i]=toupper(tempDir[i]);
 	}
-    if (nocachedir) EmptyCache();
+	if (nocachedir) EmptyCache();
 
 	if (allocation.mediaid==0xF0 ) {
 		EmptyCache(); //rescan floppie-content on each findfirst
@@ -1760,13 +1844,13 @@ bool localDrive::FindFirst(const char * _dir,DOS_DTA & dta,bool fcb_findfirst) {
 				DOS_SetError(DOSERR_NO_MORE_FILES);
 				return false;
 			}
-            dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
+			dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
 			return true;
-		} else if ((sAttr & DOS_ATTR_VOLUME)  && (*_dir == 0) && !fcb_findfirst) { 
-		//should check for a valid leading directory instead of 0
-		//exists==true if the volume label matches the searchmask and the path is valid
+		} else if ((sAttr & DOS_ATTR_VOLUME) && (*_dir == 0) && !fcb_findfirst) { 
+			//should check for a valid leading directory instead of 0
+			//exists==true if the volume label matches the searchmask and the path is valid
 			if (WildFileCmp(dirCache.GetLabel(),tempDir)) {
-                dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
+				dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
 				return true;
 			}
 		}
@@ -1778,19 +1862,19 @@ char * DBCS_upcase(char * str);
 
 bool localDrive::FindNext(DOS_DTA & dta) {
 
-    char * dir_ent, *ldir_ent;
-	ht_stat_t stat_block;
-    char full_name[CROSS_LEN], lfull_name[LFN_NAMELENGTH+1];
-    char dir_entcopy[CROSS_LEN], ldir_entcopy[CROSS_LEN];
+	char * dir_ent, *ldir_ent;
+	ht_stat_t stat_block, special_stat_block;
+	char full_name[CROSS_LEN], lfull_name[LFN_NAMELENGTH+1];
+	char dir_entcopy[CROSS_LEN], ldir_entcopy[CROSS_LEN];
 
-    uint8_t srch_attr;char srch_pattern[LFN_NAMELENGTH+1];
+	uint8_t srch_attr;char srch_pattern[LFN_NAMELENGTH+1];
 	uint8_t find_attr;
 
-    dta.GetSearchParams(srch_attr,srch_pattern,false);
+	dta.GetSearchParams(srch_attr,srch_pattern,false);
 	uint16_t id = lfn_filefind_handle>=LFN_FILEFIND_MAX?dta.GetDirID():ldid[lfn_filefind_handle];
 
 again:
-    if (!dirCache.FindNext(id,dir_ent,ldir_ent)) {
+	if (!dirCache.FindNext(id,dir_ent,ldir_ent)) {
 		if (lfn_filefind_handle<LFN_FILEFIND_MAX) {
 			ldid[lfn_filefind_handle]=0;
 			ldir[lfn_filefind_handle]="";
@@ -1798,28 +1882,28 @@ again:
 		DOS_SetError(DOSERR_NO_MORE_FILES);
 		return false;
 	}
-    if(!WildFileCmp(dir_ent,srch_pattern)&&!LWildFileCmp(ldir_ent,srch_pattern)) goto again;
+	if(!WildFileCmp(dir_ent,srch_pattern)&&!LWildFileCmp(ldir_ent,srch_pattern)) goto again;
 
 	strcpy(full_name,lfn_filefind_handle>=LFN_FILEFIND_MAX?srchInfo[id].srch_dir:(ldir[lfn_filefind_handle]!=""?ldir[lfn_filefind_handle].c_str():"\\"));
 	strcpy(lfull_name,full_name);
 
 	strcat(full_name,dir_ent);
-    strcat(lfull_name,ldir_ent);
+	strcat(lfull_name,ldir_ent);
 
 	//GetExpandName might indirectly destroy dir_ent (by caching in a new directory 
 	//and due to its design dir_ent might be lost.)
 	//Copying dir_ent first
 	strcpy(dir_entcopy,dir_ent);
-    strcpy(ldir_entcopy,ldir_ent);
+	strcpy(ldir_entcopy,ldir_ent);
 
-    char *temp_name = dirCache.GetExpandName(full_name);
+	char *temp_name = dirCache.GetExpandName(full_name);
 
-    // guest to host code page translation
-    const host_cnv_char_t* host_name = CodePageGuestToHost(temp_name);
-    if (host_name == NULL) {
-        LOG_MSG("%s: Filename '%s' from guest is non-representable on the host filesystem through code page conversion",__FUNCTION__,temp_name);
+	// guest to host code page translation
+	const host_cnv_char_t* host_name = CodePageGuestToHost(temp_name);
+	if (host_name == NULL) {
+		LOG_MSG("%s: Filename '%s' from guest is non-representable on the host filesystem through code page conversion",__FUNCTION__,temp_name);
 		goto again;//No symlinks and such
-    }
+	}
 
 	if (ht_stat(host_name,&stat_block)!=0)
 		goto again;//No symlinks and such
@@ -1834,45 +1918,45 @@ again:
 	bool isdir = find_attr & DOS_ATTR_DIRECTORY;
 	if (!isdir) find_attr|=DOS_ATTR_ARCHIVE;
 	if(!(stat_block.st_mode & S_IWUSR)) find_attr|=DOS_ATTR_READ_ONLY;
-    std::string fname = create_filename_of_special_operation(temp_name, "ATR", false);
-    if (ht_stat(fname.c_str(),&stat_block)==0) {
-        unsigned int len = stat_block.st_size;
-        if (len & 1) {
-            if (isdir)
-                find_attr|=DOS_ATTR_ARCHIVE;
-            else
-                find_attr&=~DOS_ATTR_ARCHIVE;
-        }
-        if (len & 2) find_attr|=DOS_ATTR_HIDDEN;
-        if (len & 4) find_attr|=DOS_ATTR_SYSTEM;
-    }
+	std::string fname = create_filename_of_special_operation(temp_name, "ATR", false);
+	if (ht_stat(fname.c_str(), &special_stat_block)==0) {
+		unsigned int len = special_stat_block.st_size;
+		if (len & 1) {
+			if (isdir)
+				find_attr|=DOS_ATTR_ARCHIVE;
+			else
+				find_attr&=~DOS_ATTR_ARCHIVE;
+		}
+		if (len & 2) find_attr|=DOS_ATTR_HIDDEN;
+		if (len & 4) find_attr|=DOS_ATTR_SYSTEM;
+	}
 #endif
- 	if (~srch_attr & find_attr & DOS_ATTR_DIRECTORY) goto again;
+	if (~srch_attr & find_attr & DOS_ATTR_DIRECTORY) goto again;
 
 	/*file is okay, setup everything to be copied in DTA Block */
 	char find_name[DOS_NAMELENGTH_ASCII], lfind_name[LFN_NAMELENGTH+1];
-    uint16_t find_date,find_time;uint32_t find_size,find_hsize;
+	uint16_t find_date,find_time;uint32_t find_size,find_hsize;
 
 	if(strlen(dir_entcopy)<DOS_NAMELENGTH_ASCII){
 		strcpy(find_name,dir_entcopy);
-        if (IS_PC98_ARCH || isDBCSCP())
-            DBCS_upcase(find_name);
-        else
-            upcase(find_name);
-    }
+		if (IS_PC98_ARCH || isDBCSCP())
+			DBCS_upcase(find_name);
+		else
+			upcase(find_name);
+	}
 	strcpy(lfind_name,ldir_entcopy);
-    lfind_name[LFN_NAMELENGTH]=0;
+	lfind_name[LFN_NAMELENGTH]=0;
 
 	find_hsize=(uint32_t) (stat_block.st_size / 0x100000000);
 	find_size=(uint32_t) (stat_block.st_size % 0x100000000);
-    const struct tm* time;
+	const struct tm* time;
 	if((time=
 #if defined(__MINGW32__) && !defined(HX_DOS) && !defined(_WIN32_WINDOWS)
-    _localtime64
+				_localtime64
 #else
-    localtime
+				localtime
 #endif
-    (&stat_block.st_mtime))!=nullptr){
+				(&stat_block.st_mtime))!=nullptr){
 		find_date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 		find_time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 	} else {
@@ -1892,8 +1976,8 @@ void localDrive::remove_special_file_from_disk(const char* dosname, const char* 
 	else
 		unlink(newname.c_str());
 #else
-    (void)dosname;
-    (void)operation;
+	(void)dosname;
+	(void)operation;
 #endif
 }
 
@@ -1929,10 +2013,10 @@ bool localDrive::add_special_file_to_disk(const char* dosname, const char* opera
 	delete[] buf;
 	return true;
 #else
-    (void)dosname;
-    (void)operation;
-    (void)value;
-    (void)isdir;
+	(void)dosname;
+	(void)operation;
+	(void)value;
+	(void)isdir;
 	return false;
 #endif
 }
@@ -1954,10 +2038,10 @@ bool localDrive::SetFileAttr(const char * name,uint16_t attr) {
 
 #if defined (WIN32)
 	if (!SetFileAttributesW(host_name, attr))
-		{
+	{
 		DOS_SetError((uint16_t)GetLastError());
 		return false;
-		}
+	}
 	dirCache.EmptyCache();
 	return true;
 #else
@@ -2291,7 +2375,11 @@ bool localDrive::AllocationInfo64(uint32_t* _bytes_sector, uint32_t* _sectors_cl
         res = GetDiskFreeSpace(diskToQuery, &dwSectPerClust, &dwBytesPerSect, &dwFreeClusters, &dwTotalClusters);
         if(dwSectPerClust * dwBytesPerSect == 0) return false;
         ULARGE_INTEGER FreeBytesAvailableToCaller, TotalNumberOfBytes;
-        GetDiskFreeSpaceEx(diskToQuery, &FreeBytesAvailableToCaller, &TotalNumberOfBytes, NULL);
+        HMODULE __kernel32 = GetModuleHandleW(L"kernel32.dll");
+        auto __GetDiskFreeSpaceExA = (BOOL (WINAPI *)(LPCSTR, PULARGE_INTEGER, PULARGE_INTEGER, PULARGE_INTEGER))GetProcAddress(__kernel32,"GetDiskFreeSpaceExA");
+        if (!__GetDiskFreeSpaceExA)
+            return false;
+        __GetDiskFreeSpaceExA(diskToQuery, &FreeBytesAvailableToCaller, &TotalNumberOfBytes, NULL);
         qwTotalClusters = TotalNumberOfBytes.QuadPart / (dwSectPerClust * dwBytesPerSect);
         qwFreeClusters = FreeBytesAvailableToCaller.QuadPart / (dwSectPerClust * dwBytesPerSect);
 
@@ -2554,10 +2642,10 @@ uint8_t localDrive::GetMediaByte(void) {
 bool localDrive::isRemote(void) {
 	if (remote==1) return true;
 	if (remote==0) return false;
-	char psp_name[9];
+	std::string psp_name;
 	DOS_MCB psp_mcb(dos.psp()-1);
-	psp_mcb.GetFileName(psp_name);
-	if (!strcmp(psp_name, "SCANDISK") || !strcmp(psp_name, "CHKDSK")) {
+	psp_name = psp_mcb.GetFileName();
+	if (psp_name == "SCANDISK" || psp_name == "CHKDSK") {
 		/* Check for SCANDISK.EXE (or CHKDSK.EXE) and return true (Wengier) */
 		return true;
 	}
@@ -2901,6 +2989,7 @@ bool LocalFile::LockFile(uint8_t mode, uint32_t pos, uint16_t size) {
 		case EINTR:
 		case ENOLCK:
 		case EAGAIN:
+		case EACCES:
 			DOS_SetError(0x21);
 			break;
 		case EBADF:
@@ -2916,7 +3005,6 @@ bool LocalFile::LockFile(uint8_t mode, uint32_t pos, uint16_t size) {
 	return bRet;
 }
 
-extern const char* RunningProgram;
 bool LocalFile::Seek(uint32_t * pos,uint32_t type) {
 	int seektype;
 	switch (type) {
@@ -2931,7 +3019,7 @@ bool LocalFile::Seek(uint32_t * pos,uint32_t type) {
     if (file_access_tries>0) {
         HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(fhandle));
         DWORD dwPtr = SetFilePointer(hFile, *pos, NULL, type);
-        if (dwPtr == INVALID_SET_FILE_POINTER && !strcmp(RunningProgram, "BTHORNE"))	// Fix for Black Thorne
+        if (dwPtr == INVALID_SET_FILE_POINTER && RunningProgram == "BTHORNE")	// Fix for Black Thorne
             dwPtr = SetFilePointer(hFile, 0, NULL, DOS_SEEK_END);
         if (dwPtr != INVALID_SET_FILE_POINTER) {										// If success
             *pos = (uint32_t)dwPtr;
@@ -3125,7 +3213,7 @@ void LocalFile::Flush(void) {
 	}
 }
 
-
+#if !defined(OSFREE)
 // ********************************************
 // CDROM DRIVE
 // ********************************************
@@ -3244,3 +3332,4 @@ Bits cdromDrive::UnMount(void) {
 	}
 	return 2;
 }
+#endif

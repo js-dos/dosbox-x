@@ -34,6 +34,139 @@
 #include <limits>
 #include <limits.h>
 
+#if defined(_WIN32)
+#include <direct.h>  // _mkdir
+#include <sys/stat.h>
+#include <sys/types.h>
+#define mkdir(dir, mode) _mkdir(dir)
+#define PATH_SEPARATOR '\\'
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <libgen.h>  // dirname
+#define PATH_SEPARATOR '/'
+#endif
+
+#ifndef PATH_MAX
+    #if defined(WIN32)
+        #define PATH_MAX MAX_PATH
+    #else
+        #define PATH_MAX 4096 /* LINUX sets to 4096, while this varies from 260 to 4096 depending on platforms */
+    #endif
+#endif
+
+static int get_dirname(const char* path, char* dirbuf, size_t size);
+static int dir_exists(const char* path);
+static int mkdir_recursive(const char* path);
+FILE* fopen_with_mkdir(const char* filepath, const char* mode);
+
+// Extract directory part from path (simple implementation)
+static int get_dirname(const char* path, char* dirbuf, size_t size) {
+    // Use '\\' on Windows and '/' on Linux/macOS
+    const char sep = PATH_SEPARATOR;
+    size_t len = strlen(path);
+    if(len == 0) return -1;
+
+    // Remove trailing separators
+    while(len > 0 && (path[len - 1] == sep || path[len - 1] == '/' || path[len - 1] == '\\')) {
+        len--;
+    }
+    if(len == 0) return -1;
+
+    // Find the last separator
+    size_t pos = len;
+    while(pos > 0) {
+        if(path[pos - 1] == sep || path[pos - 1] == '/' || path[pos - 1] == '\\') break;
+        pos--;
+    }
+    if(pos == 0) return -1; // No separator found (only filename)
+
+    size_t copy_len = (pos - 1 < size - 1) ? pos - 1 : size - 1;
+    memcpy(dirbuf, path, copy_len);
+    dirbuf[copy_len] = '\0';
+    return 0;
+}
+
+// Check if directory exists
+static int dir_exists(const char* path) {
+#if defined(_WIN32)
+    struct _stat info;
+    if(_stat(path, &info) != 0) return 0;
+    return (info.st_mode & _S_IFDIR) != 0;
+#else
+    struct stat info;
+    if(stat(path, &info) != 0) return 0;
+    return S_ISDIR(info.st_mode);
+#endif
+}
+
+// Create directories recursively
+int mkdir_recursive(const char* path) {
+    if(!path || *path == '\0') return -1;
+
+    size_t path_len = strlen(path);
+    char* tmp = static_cast<char*>(malloc(path_len + 1));
+    if(!tmp) return -1;
+
+    strcpy(tmp, path);
+
+    // Remove trailing separators
+    size_t len = strlen(tmp);
+    while(len > 0 && (tmp[len - 1] == '/' || tmp[len - 1] == '\\')) {
+        tmp[--len] = '\0';
+    }
+
+    for(size_t i = 1; i < len; ++i) {
+        if(tmp[i] == '/' || tmp[i] == '\\') {
+            char saved = tmp[i];
+            tmp[i] = '\0';
+
+            if(!dir_exists(tmp)) {
+                if(mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+                    free(tmp);
+                    return -1;
+                }
+            }
+
+            tmp[i] = saved;
+        }
+    }
+
+    if(!dir_exists(tmp)) {
+        if(mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+            free(tmp);
+            return -1;
+        }
+    }
+
+    free(tmp);
+    return 0;
+}
+
+// Open file after creating directories if needed
+FILE* fopen_with_mkdir(const char* filepath, const char* mode) {
+    size_t len = strlen(filepath);
+    char* dirbuf = (char*)malloc(len + 1);
+    if(!dirbuf) {
+        LOG_MSG("SETUP: Can't allocate buffer to create directory");
+        return NULL;
+    }
+
+    if(get_dirname(filepath, dirbuf, len + 1) == 0) {
+        if(!dir_exists(dirbuf)) {
+            if(mkdir_recursive(dirbuf) != 0) {
+                LOG_MSG("SETUP: mkdir_recursive failed: %s\n", strerror(errno));
+                free(dirbuf);
+                return NULL;
+            }
+        }
+    }
+
+    free(dirbuf);
+    return fopen(filepath, mode);
+}
+
+
 #if defined(_MSC_VER)
 # pragma warning(disable:4244) /* const fmath::local::uint64_t to double possible loss of data */
 # pragma warning(disable:4267) /* ... possible loss of data */
@@ -706,7 +839,7 @@ const char* Section_prop::Get_string(string const& _propname) const {
 
             if (strcmp(value, "jsdos_pentium_mmx") == 0) {
                 printf("WARN! pentium_mmx is enabled, emulation can be buggy\n");
-                return "penitum_mmx";
+                return "pentium_mmx";
             }
 #endif
             return value;
@@ -809,7 +942,8 @@ string Section_line::GetPropValue(string const& /* _property*/) const {
 bool Config::PrintConfig(char const * const configfilename,int everything,bool norem) const {
     char temp[50];
     char helpline[HELPLINE_SIZE] = { 0 };
-    FILE* outfile = fopen(configfilename,"w+t");
+    //FILE* outfile = fopen(configfilename,"w+t");
+    FILE* outfile = fopen_with_mkdir(configfilename, "w+t");
     if (outfile == NULL) return false;
 
     /* Print start of configfile and add a return to improve readability. */
@@ -1099,8 +1233,14 @@ bool Config::ParseConfigFile(char const * const configfilename) {
     LOG(LOG_MISC,LOG_DEBUG)("CONFIG: Attempting to load config file #%zu from %s",configfiles.size(),configfilename);
 
     //static bool first_configfile = true;
+    if (strlen(configfilename) >= PATH_MAX) {
+        LOG_MSG("Warning: config file path %u characters is too long: %s", (unsigned int)strlen(configfilename), configfilename);
+    }
     ifstream in(configfilename);
-    if (!in) return false;
+    if (!in) {
+        LOG(LOG_MISC,LOG_NORMAL)("CONFIG: Failed Loading %s as a config file", configfilename);
+        return false;
+    }
     const char * settings_type;
     settings_type = (configfiles.size() == 0)? "primary":"additional";
     configfiles.emplace_back(configfilename);
@@ -1221,13 +1361,45 @@ bool CommandLine::FindString(char const * const name,std::string & value,bool re
     return true;
 }
 
-bool CommandLine::FindCommand(unsigned int which,std::string & value) {
+bool CommandLine::FindCommand(unsigned int which,std::string & value,bool remove) {
     if (which<1) return false;
     if (which>cmds.size()) return false;
     cmd_it it=cmds.begin();
     for (;which>1;--which) ++it;
     value=(*it);
+    if (remove) cmds.erase(it);
     return true;
+}
+
+bool CommandLine::EraseCommand(unsigned int which) {
+    if (which<1) return false;
+    if (which>cmds.size()) return false;
+    cmd_it it=cmds.begin();
+    for (;which>1;--which) ++it;
+    cmds.erase(it);
+    return true;
+}
+
+bool CommandLine::ExistsCommand(unsigned int which) {
+    if (which<1) return false;
+    if (which>cmds.size()) return false;
+    return true;
+}
+
+void CommandLine::DebugDump(const int debuglevel) {
+    unsigned int i=1;
+
+    if (debuglevel >= 0)
+        LOG(LOG_MISC,(LOG_SEVERITIES)debuglevel)("CommandLine::DebugDump(this=%p)",(void*)this);
+    else
+        LOG_MSG("CommandLine::DebugDump(this=%p)",(void*)this);
+
+    for (auto it=cmds.begin();it!=cmds.end();it++,i++) {
+        if (debuglevel >= 0)
+            LOG(LOG_MISC,(LOG_SEVERITIES)debuglevel)("  [%u] = \"%s\"",i,(*it).c_str());
+        else
+            LOG_MSG("  [%u] = \"%s\"",i,(*it).c_str());
+    }
 }
 
 bool CommandLine::FindEntry(char const * const name,cmd_it & it,bool neednext) {
@@ -1269,13 +1441,13 @@ bool CommandLine::FindStringFullBegin(char const* const begin,std::string & valu
             if (remove) cmds.erase(it);
             if (q) {
                 std::string str=value;
-                if (str.back()==c)
+                if (str.size() && str.back()==c)
                     value.pop_back();
                 else while (str.size()&&++it!=cmds.end()) {
                     str=(*it);
                     if (remove) cmds.erase(it);
                     value+=" "+str;
-                    if (str.back()==c) {
+                    if (str.size()&&str.back()==c) {
                         value.pop_back();
                         break;
                     }

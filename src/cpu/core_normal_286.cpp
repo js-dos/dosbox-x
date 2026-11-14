@@ -25,6 +25,8 @@
 #include "pic.h"
 #include "fpu.h"
 
+extern bool do_lds_wraparound;
+
 bool CPU_RDMSR();
 bool CPU_WRMSR();
 bool CPU_SYSENTER();
@@ -45,6 +47,8 @@ static inline bool _seg_limit_check(void) {
 
 #define DoString DoString_Normal286
 
+static uint16_t last_ea86_offset;
+
 extern bool ignore_opcode_63;
 
 #if C_DEBUG
@@ -62,6 +66,10 @@ extern bool mustCompleteInstruction;
 #define SaveMw(off,val)	mem_writew_inline(off,val)
 #define SaveMd(off,val)	mem_writed_inline(off,val)
 #define SaveMq(off,val) {mem_writed_inline(off,val&0xffffffff);mem_writed_inline(off+4,(val>>32)&0xffffffff);}
+
+static INLINE uint8_t LockPrefixRead(PhysPt address) {
+	return mem_readb_inline(address);
+}
 
 extern Bitu cycle_count;
 
@@ -179,6 +187,7 @@ Bits CPU_Core286_Normal_Run(void) {
 		LOADIP;
 		core.prefixes=0;
 		core.opcode_index=0;
+		last_ea86_offset=0;
 		core.ea_table=&EATable[0];
 		BaseDS=SegBase(ds);
 		BaseSS=SegBase(ss);
@@ -256,4 +265,3 @@ Bits CPU_Core286_Normal_Trap_Run(void) {
 void CPU_Core286_Normal_Init(void) {
 
 }
-

@@ -28,8 +28,10 @@
 #include "inout.h"
 #include "callback.h"
 
+extern bool do_lds_wraparound;
 extern bool ignore_opcode_63;
 
+#define CPU_OMIT_8086
 #define CPU_CORE CPU_ARCHTYPE_386
 
 typedef PhysPt EAPoint;
@@ -50,7 +52,10 @@ typedef PhysPt EAPoint;
 #define LoadD(reg) reg
 #define SaveD(reg,val)	reg=val
 
-
+#include "lock.h"
+static INLINE uint8_t LockPrefixRead(PhysPt address) {
+	return mem_readb_inline(address);
+}
 
 #include "core_full/loadwrite.h"
 #include "core_full/support.h"

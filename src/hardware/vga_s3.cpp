@@ -409,17 +409,9 @@ void SVGA_S3_WriteCRTC(Bitu reg,Bitu val,Bitu iolen) {
         }
         break;
     case 0x6a:  /* Extended System Control 4 */
-	/* S3 cards think only in 64KB bank granularity.
-	 * An option was added to emulate smaller amounts of granularity, but
-	 * then this 7-bit field causes problems. Since the smaller granularity
-	 * breaks accuracy anyway, go ahead and accept the full 8-bit value
-	 * in that case as a hack. */
-	if (vbe_window_granularity == 0 || vbe_window_granularity >= (64*1024))
-		vga.svga.bank_read=(uint8_t)val & 0x7f;
-	else
-		vga.svga.bank_read=(uint8_t)val & 0xff;
-
-        vga.svga.bank_write = vga.svga.bank_read;
+	/* S3 cards think only in 64KB bank granularity. */
+	vga.svga.bank_read = (uint8_t)val & 0x7f;
+	vga.svga.bank_write = vga.svga.bank_read;
         VGA_SetupHandlers();
         break;
     case 0x6b:  // BIOS scratchpad: LFB address
@@ -679,10 +671,8 @@ bool SVGA_S3_HWCursorActive(void) {
     return (vga.s3.hgc.curmode & 0x1) != 0;
 }
 
-uint32_t GetReportedVideoMemorySize(void);
-
 bool SVGA_S3_AcceptsMode(Bitu mode) {
-    return VideoModeMemSize(mode) < GetReportedVideoMemorySize();
+    return VideoModeMemSize(mode) < vga.mem.vbe_memsize;
 }
 
 extern bool VGA_BIOS_use_rom;
@@ -694,6 +684,9 @@ void SVGA_Setup_S3Trio(void) {
     svga.read_p3c5 = &SVGA_S3_ReadSEQ;
     svga.write_p3c0 = nullptr; /* no S3-specific functionality */
     svga.read_p3c1 = nullptr; /* no S3-specific functionality */
+
+    vga.max_svga_width = 2048;
+    vga.max_svga_height = 2048;
 
     svga.set_video_mode = nullptr; /* implemented in core */
     svga.determine_mode = &VGA_DetermineMode_S3;

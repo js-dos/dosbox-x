@@ -29,6 +29,7 @@
 #include "render.h"
 #include "mapper.h"
 #include "control.h"
+#include "../ints/int10.h"
 
 #include <output/output_ttf.h>
 
@@ -44,9 +45,10 @@ static Bitu read_cga(Bitu /*port*/,Bitu /*iolen*/);
 static void write_cga(Bitu port,Bitu val,Bitu /*iolen*/);
 
 void UpdateCGAFromSaveState(void) {
-	if (machine==MCH_CGA || machine==MCH_MCGA || machine==MCH_AMSTRAD) {
+	if (machine==MCH_CGA || machine==MCH_MCGA || machine==MCH_AMSTRAD || machine==MCH_OLIVETTI || machine==MCH_3270PC) {
         write_cga(0x3D8,vga.tandy.mode_control,1); // restore CGA
         write_cga(0x3D9,vga.tandy.color_select,1); // restore CGA
+        if (machine==MCH_OLIVETTI) write_cga(0x3DE,vga.olivetti_ctrl,1); // restore OGC control
     }
 }
 
@@ -122,7 +124,7 @@ static void write_crtc_data_other(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
 	case 0x0C:	/* Start Address High Register */
 		// Bit 12 (depending on video mode) and 13 are actually masked too,
 		// but so far no need to implement it.
-        if (machine == MCH_MCGA)
+        if (machine == MCH_MCGA || machine == MCH_OLIVETTI || machine == MCH_3270PC) // 32KB framebuffer, needs bits 12-14
             vga.config.display_start=(vga.config.display_start & 0x00FF) | ((val&0xFF) << 8);
         else
             vga.config.display_start=(vga.config.display_start & 0x00FF) | ((val&0x3F) << 8);
@@ -662,6 +664,7 @@ static void write_cga_color_select(Bitu val) {
 		break;
 	}
 	case M_TANDY2:
+	case M_DCGA: // Olivetti M24 / AT&T 6300 640x400 mono: same 2-color foreground selection (0x3D9)
 		VGA_SetCGA2Table(0,val & 0xf);
 		vga.attr.overscan_color = 0;
 		break;
@@ -679,8 +682,17 @@ static void write_cga_color_select(Bitu val) {
 	}
 }
 
+// IBM 3270 PC hardware status register (port 0188h). Software probes this to detect the optional boards.
+//   bit0 = monitor type (1 = 5272 colour, 0 = mono), bit1 = monitor present,
+//   bit2 = All-Points-Addressable board present, bit3 = Programmed Symbols board present.
+// ponytail: reports a colour monitor + APA board so DOS BGI/GEM/etc. drivers enable the 720x350/360x350
+//           APA modes. No Programmed Symbols board (bit3=0). Adjust bit0 to 0 to emulate a mono monitor.
+static Bitu read_3270_status(Bitu /*port*/,Bitu /*iolen*/) {
+    return 0x07; // colour monitor present + APA board present
+}
+
 static Bitu read_cga(Bitu port,Bitu /*iolen*/) {
-    if (machine == MCH_MCGA) { // On MCGA, ports 3D8h and 3D9h are also readable
+    if (machine == MCH_MCGA || machine == MCH_3270PC) { // MCGA and the 3270 PC make 3D8h/3D9h readable
         switch (port) {
             case 0x3d8:
                 return vga.tandy.mode_control;
@@ -714,13 +726,15 @@ static void write_cga(Bitu port,Bitu val,Bitu /*iolen*/) {
 			if (vga.tandy.mode_control & 0x10) {// highres mode
 				if (machine == MCH_AMSTRAD) {
 					VGA_SetMode(M_AMSTRAD);			//Amstrad 640x200x16 video mode.
-				} else if (machine != MCH_MCGA && (cga_comp==1 || (cga_comp==0 && !(val&0x4))) && !mono_cga) {	// composite display
+				} else if (machine == MCH_OLIVETTI && (vga.olivetti_ctrl & 0x01)) {
+					VGA_SetMode(M_DCGA);		// Olivetti M24 / AT&T 6300 640x400 mono (OGC bit0)
+				} else if (machine != MCH_MCGA && machine != MCH_OLIVETTI && (cga_comp==1 || (cga_comp==0 && !(val&0x4))) && !mono_cga) {	// composite display
 					VGA_SetMode(M_CGA16);		// composite ntsc 640x200 16 color mode
 				} else {
-					VGA_SetMode(M_TANDY2);
+					VGA_SetMode(M_TANDY2);		// M24 640x200 mono uses this too (digital RGB, no composite)
 				}
 			} else {							// lowres mode
-				if (machine != MCH_MCGA && cga_comp==1) {				// composite display
+				if (machine != MCH_MCGA && machine != MCH_OLIVETTI && cga_comp==1) {				// composite display
 					VGA_SetMode(M_CGA16);		// composite ntsc 640x200 16 color mode
 				} else {
 					VGA_SetMode(M_TANDY4);
@@ -749,7 +763,16 @@ static void write_cga(Bitu port,Bitu val,Bitu /*iolen*/) {
 		vga.amstrad.write_plane = val & 0x0F;
 		break;
 	case 0x3de:
-		vga.amstrad.read_plane = val & 0x03;
+		if (machine == MCH_OLIVETTI) {
+			// Olivetti M24 / AT&T 6300 OGC control register:
+			//   bit0 = enable 640x400 mono graphics; bit3 = display bank select; bit6 = text underline
+			Bitu changed_ctrl = vga.olivetti_ctrl ^ val;
+			vga.olivetti_ctrl = (uint8_t)val;
+			if (changed_ctrl & 0x01) // 640x400 enable toggled: re-evaluate the graphics mode
+				write_cga(0x3d8,vga.tandy.mode_control,0);
+		} else {
+			vga.amstrad.read_plane = val & 0x03;
+		}
 		break;
 	case 0x3df:
 		vga.amstrad.border_color = val & 0x0F;
@@ -943,6 +966,27 @@ static void write_tandy_reg(uint8_t val) {
 	}
 }
 
+/* You're not SUPPOSED to read Tandy registers 3D8, 3DE, 3DF, they're documented WRITE ONLY! */
+static Bitu read_tandy(Bitu port,Bitu /*iolen*/) {
+	LOG(LOG_VGAMISC,LOG_DEBUG)("DOS applications are NOT SUPPOSED to read Tandy register %x",(unsigned int)port);
+
+	switch (port) {
+		/* "Troubadours" does not switch into Tandy 320x200 16-color by calling INT 10h.
+		 * Instead, it has it's own hand-written code to modify registers directly.
+		 * For whatever reason, it modifies 3DD and 3DF by reading, modifying, and writing
+		 * the registers EVEN THOUGH Tandy documents the registers as write only.
+		 * Returning the last written value doesn't work, because the modified values
+		 * come out incorrect. 3DFh after modification comes out to 0xFF which maps the
+		 * video RAM to B800h as repeating 16KB banks for example. The game works correctly
+		 * if this code provides 0x00, not 0xFF, when it reads these specific registers. */
+		case 0x3DD:
+		case 0x3DF:
+			return 0;
+	}
+
+	return ~0u;
+}
+
 static void write_tandy(Bitu port,Bitu val,Bitu /*iolen*/) {
 	switch (port) {
 	case 0x3d8:
@@ -980,7 +1024,6 @@ static void write_tandy(Bitu port,Bitu val,Bitu /*iolen*/) {
 		// appears to be ORed with CPU A14 (to preserve some sort of
 		// backwards compatibility?), resulting in odd pages being mapped
 		// as 2x16kB. Implemented in vga_memory.cpp Tandy handler.
-
 		vga.tandy.line_mask = (uint8_t)(val >> 6);
 		vga.tandy.draw_bank = val & ((vga.tandy.line_mask&2) ? 0x6 : 0x7);
 		vga.tandy.mem_bank = (val >> 3) & 7;
@@ -1092,6 +1135,8 @@ void Herc_Palette(void) {
 		VGA_DAC_SetEntry(0xf,0x00,0x3f,0x00);
 		break;
 	}
+
+	VGA_DAC_UpdateColorPalette();
 }
 
 void Mono_CGA_Palette(void) {	
@@ -1220,7 +1265,6 @@ Bitu read_herc_status(Bitu /*port*/,Bitu /*iolen*/) {
 }
 
 extern int eurAscii;
-extern uint8_t int10_font_08[256 * 8], int10_font_14[256 * 14], int10_font_16[256 * 16];
 uint8_t euro_08[8] = {
   0x3c, 0x66, 0xfc, 0x60, 0xf8, 0x66, 0x3c, 0x00,
 };
@@ -1234,14 +1278,16 @@ uint8_t euro_16[16] = {
 };
 
 void VGA_SetupOther(void) {
-    if (eurAscii>32 && eurAscii<256) {
-        for (int i=eurAscii*8;i<(eurAscii+1)*8;i++)
-            int10_font_08[i]=euro_08[i%8];
-        for (int i=eurAscii*14;i<(eurAscii+1)*14;i++)
-            int10_font_14[i]=euro_14[i%14];
-        for (int i=eurAscii*16;i<(eurAscii+1)*16;i++)
-            int10_font_16[i]=euro_16[i%16];
-    }
+	if (eurAscii>32 && eurAscii<256) {
+		for (int i=eurAscii*8;i<(eurAscii+1)*8;i++)
+			int10_font_08[i]=euro_08[i%8];
+		for (int i=eurAscii*14;i<(eurAscii+1)*14;i++)
+			int10_font_14[i]=euro_14[i%14];
+		for (int i=eurAscii*16;i<(eurAscii+1)*16;i++)
+			int10_font_16[i]=euro_16[i%16];
+		for (int i=eurAscii*16;i<(eurAscii+1)*16;i++)
+			int10_font_16_mcga[i]=euro_16[i%16];
+	}
 	memset( &vga.tandy, 0, sizeof( vga.tandy ));
 	vga.attr.disabled = 0;
 	vga.config.bytes_skip=0;
@@ -1257,7 +1303,7 @@ void VGA_SetupOther(void) {
 	vga.tandy.line_mask = 3;
 	vga.tandy.line_shift = 13;
 
-	if (machine==MCH_CGA || machine==MCH_AMSTRAD || IS_TANDY_ARCH) {
+	if (machine==MCH_CGA || machine==MCH_AMSTRAD || machine==MCH_OLIVETTI || machine==MCH_3270PC || IS_TANDY_ARCH) {
 		for (Bitu i=0;i<256;i++)	memcpy(&vga.draw.font[i*32],&int10_font_08[i*8],8);
 		vga.draw.font_tables[0]=vga.draw.font_tables[1]=vga.draw.font;
 	}
@@ -1265,7 +1311,7 @@ void VGA_SetupOther(void) {
         for (Bitu i=0;i<256;i++)	memcpy(&vga.draw.font[i*32],&int10_font_16[i*16],16);
         vga.draw.font_tables[0]=vga.draw.font_tables[1]=vga.draw.font;
     }
-	if (machine==MCH_CGA || IS_TANDY_ARCH || machine==MCH_HERC || machine==MCH_MDA) {
+	if (machine==MCH_CGA || machine==MCH_OLIVETTI || IS_TANDY_ARCH || machine==MCH_HERC || machine==MCH_MDA) {
 		IO_RegisterWriteHandler(0x3db,write_lightpen,IO_MB);
 		IO_RegisterWriteHandler(0x3dc,write_lightpen,IO_MB);
 	}
@@ -1273,7 +1319,7 @@ void VGA_SetupOther(void) {
 		for (Bitu i=0;i<256;i++)	memcpy(&vga.draw.font[i*32],&int10_font_14[i*14],14);
 		vga.draw.font_tables[0]=vga.draw.font_tables[1]=vga.draw.font;
 	}
-	if (machine==MCH_CGA || machine==MCH_MCGA || machine==MCH_AMSTRAD) {
+	if (machine==MCH_CGA || machine==MCH_MCGA || machine==MCH_AMSTRAD || machine==MCH_OLIVETTI || machine==MCH_3270PC) {
 		vga.amstrad.mask_plane = 0x07070707;
 		vga.amstrad.write_plane = 0x0F;
 		vga.amstrad.read_plane = 0x00;
@@ -1282,7 +1328,7 @@ void VGA_SetupOther(void) {
 		IO_RegisterWriteHandler(0x3d8,write_cga,IO_MB);
 		IO_RegisterWriteHandler(0x3d9,write_cga,IO_MB);
 
-        if (machine == MCH_MCGA) { /* ports 3D8h-3D9h are readable on MCGA */
+        if (machine == MCH_MCGA || machine == MCH_3270PC) { /* ports 3D8h-3D9h are readable on MCGA and the 3270 PC */
             IO_RegisterReadHandler(0x3d8,read_cga,IO_MB);
             IO_RegisterReadHandler(0x3d9,read_cga,IO_MB);
         }
@@ -1292,9 +1338,29 @@ void VGA_SetupOther(void) {
 			IO_RegisterWriteHandler(0x3de,write_cga,IO_MB);
 			IO_RegisterWriteHandler(0x3df,write_cga,IO_MB);
 		}
+
+		if (machine == MCH_OLIVETTI) { /* OGC control register at 0x3DE */
+			IO_RegisterWriteHandler(0x3de,write_cga,IO_MB);
+		}
+
+		if (machine == MCH_3270PC) { /* APA board status register at port 0188h (board detection) */
+			IO_RegisterReadHandler(0x188,read_3270_status,IO_MB);
+		}
 	}
 	if (machine==MCH_TANDY) {
 		write_tandy( 0x3df, 0x0, 0 );
+
+		// according to Tandy SX documentation a lot of registers are write-only
+		IO_RegisterReadHandler(0x3d4,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3d5,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3d8,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3d9,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3db,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3dc,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3dd,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3de,read_tandy,IO_MB);
+		IO_RegisterReadHandler(0x3df,read_tandy,IO_MB);
+
 		IO_RegisterWriteHandler(0x3d8,write_tandy,IO_MB);
 		IO_RegisterWriteHandler(0x3d9,write_tandy,IO_MB);
 		IO_RegisterWriteHandler(0x3da,write_tandy,IO_MB);
@@ -1335,7 +1401,7 @@ void VGA_SetupOther(void) {
 	if (machine==MCH_MDA) {
         VGA_SetMode(M_HERC_TEXT); // HACK
     }
-	if (machine==MCH_CGA || machine==MCH_PCJR || machine==MCH_TANDY) {
+	if (machine==MCH_CGA || machine==MCH_PCJR || machine==MCH_TANDY || machine==MCH_OLIVETTI || machine==MCH_3270PC) {
 		Bitu base=0x3d0;
 		for (Bitu port_ct=0; port_ct<4; port_ct++) {
 			IO_RegisterWriteHandler(base+port_ct*2,write_crtc_index_other,IO_MB);
